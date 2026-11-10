@@ -4,6 +4,8 @@ import Charts
 struct OverviewView: View {
     @Environment(BudgetStore.self) private var store
     @State private var month: Month?
+    /// The bar under the pointer in "Month by month".
+    @State private var hoveredBar: String?
     @State private var period: ReportPeriod?
     @State private var hoveredAngle: Double?
 
@@ -358,6 +360,8 @@ struct OverviewView: View {
                     // A fixed size: Swift Charts crashes drawing a ring into a sliver, which a card
                     // can briefly be handed while the row beside it is laying itself out.
                     .frame(width: 240, height: 240)
+                    // A click on a slice opens that category's charges for the month, like its row below.
+                    .onTapGesture { if let hovered { store.showCharges(TransactionFilter(category: hovered, month: m)) } }
                     .frame(maxWidth: .infinity)
                     .animation(.snappy, value: hovered)
                     // Swift Charts crashes when it animates a ring from one set of slices into another
@@ -397,13 +401,13 @@ struct OverviewView: View {
 
         return Card {
             VStack(alignment: .leading, spacing: 16) {
-                SectionHeader(title: "Month by month")
+                SectionHeader(title: "Month by month", subtitle: "Click a bar to see what's in it.")
                 Chart(data, id: \.month) { item in
                     BarMark(x: .value("Month", item.month.shortName),
                             y: .value("Spent", max(item.total, 0)),
                             width: .ratio(0.6))
                         .cornerRadius(6)
-                        .foregroundStyle(item.month == m ? Theme.accent.gradient : Theme.accent.opacity(0.3).gradient)
+                        .foregroundStyle(item.month == m || hoveredBar == item.month.shortName ? Theme.accent.gradient : Theme.accent.opacity(0.3).gradient)
                 }
                 .chartYAxis {
                     AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
@@ -413,6 +417,23 @@ struct OverviewView: View {
                         }
                     }
                 }
+                // Anywhere in a bar's column counts, so a short bar is as easy to hit as a tall one.
+                .chartOverlay { proxy in
+                    GeometryReader { geo in
+                        Rectangle().fill(.clear).contentShape(Rectangle())
+                            .onContinuousHover { phase in
+                                guard case .active(let location) = phase, let frame = proxy.plotFrame.map({ geo[$0] }) else { hoveredBar = nil; return }
+                                hoveredBar = proxy.value(atX: location.x - frame.origin.x)
+                            }
+                            .onTapGesture { location in
+                                guard let frame = proxy.plotFrame.map({ geo[$0] }),
+                                      let label: String = proxy.value(atX: location.x - frame.origin.x),
+                                      let picked = data.first(where: { $0.month.shortName == label }) else { return }
+                                store.showSpending(in: picked.month)
+                            }
+                    }
+                }
+                .animation(.easeOut(duration: 0.12), value: hoveredBar)
                 .frame(height: 150)
             }
         }

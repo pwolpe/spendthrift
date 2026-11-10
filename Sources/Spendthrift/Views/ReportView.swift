@@ -418,6 +418,9 @@ private struct MonthlyChartCard: View {
             }
         }
         .animation(.snappy, value: selectedMonth)
+        // The month under the pointer is the one a click opens.
+        .onTapGesture { if let month = selectedMonth { BudgetStore.shared.showSpending(in: month) } }
+        .help("Click a month to see what's in it")
     }
 }
 

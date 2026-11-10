@@ -806,6 +806,11 @@ final class BudgetStore {
     }
 
     /// Opens the page for one place: everything ever spent there.
+    /// Everything that counted as spending in one month: what a bar on a chart stands for.
+    func showSpending(in month: Month) {
+        showCharges(TransactionFilter(ids: Set(spending(in: month).map(\.id)), title: "Spending in \(month.title)"))
+    }
+
     func showPlace(_ name: String) {
         withAnimation(.snappy(duration: 0.25)) { placeFocus = name }
     }
