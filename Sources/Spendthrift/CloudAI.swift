@@ -933,36 +933,48 @@ enum Huncher {
         let count: Int
     }
 
-    static func guess(_ subjects: [Subject], notes: [String]) async -> [String: String] {
+    static func guess(_ subjects: [Subject], notes: [String]) async -> [String: (text: String, category: Category?)] {
         guard !subjects.isEmpty else { return [:] }
+        let categories = Category.pickable.map(\.rawValue)
         let system = """
         A budgeting app has sorted someone's bank and card statements and is unsure about a few payees. For each \
-        one, say what it most likely was, the way the person themselves would describe it to a friend.
+        one, say what it most likely was, the way the person themselves would describe it to a friend, and choose \
+        the category that guess belongs in.
 
         Reason from everything given: the wording of the statement line, the size of the amounts, how regular they \
         are, the days and months, which account, and whether money came in or went out. Round thousands by Zelle \
         every month suggest rent or a regular helper; a one-off wire abroad suggests a property, tuition or family; \
         small monthly deposits suggest interest, rewards or a refund; cash withdrawals before a trip suggest travel money.
 
-        Reply with JSON only: {"guesses": {"<number>": "<guess>"}}
-        Each guess: at most 12 words, plain and specific, no full stop, starting lower case, hedged only by being a \
-        guess (do not write "probably" or "maybe"). Name a likely purpose, not just a restatement of the line. \
+        Reply with JSON only: {"guesses": {"<number>": {"guess": "<guess>", "category": "<category>"}}}
+        guess: at most 12 words, plain and specific, no full stop, starting lower case, hedged only by being a \
+        guess (do not write "probably"). Name a likely purpose, not just a restatement of the line. \
         Never invent a person's relationship as fact; "rent or a contractor, paid by Zelle" is fine. \
         If there is truly nothing to go on, use "".
+        category: exactly one of these, the best fit for your guess (when the guess names two possibilities, \
+        the category of the first): \(categories.joined(separator: "; ")). \
+        The category must agree with the guess: a guess of "a restaurant" is never filed under Shopping. \
+        Money coming in is income, a refund of spending, or a transfer between the person's own accounts; \
+        saving and investing are not spending. A payment to another person (Zelle, Venmo, a check) is spending, \
+        never a transfer: file it under what it was most likely for, or under Other when that is unclear. \
+        Keep the category it is already sorted as when your guess gives \
+        no reason to change it.
         """
         var lines: [String] = []
         for (i, s) in subjects.enumerated() {
             lines.append("\(i + 1). \(s.name) | statement line: \(s.line) | sorted as: \(s.category) | account: \(s.account) | \(s.count) in all | \(s.charges.joined(separator: "; "))")
         }
         let context = notes.isEmpty ? "" : "\n\nNotes the person has written about other things (context only):\n" + notes.joined(separator: "\n")
-        let reply = await Timeout.run(75) {
-            try? await CloudAI.complete(system: system, user: lines.joined(separator: "\n") + context, json: true, maxTokens: 6_000, temperature: 0.2, timeout: 70)
+        let reply = await Timeout.run(90) {
+            try? await CloudAI.complete(system: system, user: lines.joined(separator: "\n") + context, json: true, maxTokens: 8_000, temperature: 0.2, timeout: 85)
         }
         guard let reply, let guesses = CloudAI.object(from: reply)?["guesses"] as? [String: Any] else { return [:] }
-        var out: [String: String] = [:]
+        var out: [String: (text: String, category: Category?)] = [:]
         for (i, s) in subjects.enumerated() {
-            guard let text = guesses[String(i + 1)] as? String else { continue }
-            out[s.key] = String(text.trimmingCharacters(in: CharacterSet(charactersIn: " .\"\n")).prefix(110))
+            guard let one = guesses[String(i + 1)] as? [String: Any], let text = one["guess"] as? String else { continue }
+            let named = ((one["category"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
+            let category = Category.pickable.first { $0.rawValue.caseInsensitiveCompare(named) == .orderedSame || $0.displayName.caseInsensitiveCompare(named) == .orderedSame }
+            out[s.key] = (String(text.trimmingCharacters(in: CharacterSet(charactersIn: " .\"\n")).prefix(110)), category)
         }
         return out
     }

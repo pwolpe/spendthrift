@@ -256,6 +256,8 @@ struct MerchantInfo: Codable, Hashable {
     /// The model's best guess at what this was, in a few plain words ("rent, paid to a landlord by Zelle").
     /// Offered on Double-Check; "" means it was asked and had no idea.
     var hunch: String?
+    /// Set once the category shown on Double-Check has been chosen to match that guess.
+    var hunchSorted: Bool?
 
     init(name: String, category: Category?, source: Source, confirmed: Bool = false, sample: String) {
         self.name = name; self.category = category; self.source = source; self.confirmed = confirmed; self.sample = sample
@@ -273,6 +275,7 @@ struct MerchantInfo: Codable, Hashable {
         note = try? c.decodeIfPresent(String.self, forKey: .note)
         lookedUp = try? c.decodeIfPresent(Bool.self, forKey: .lookedUp)
         hunch = try? c.decodeIfPresent(String.self, forKey: .hunch)
+        hunchSorted = try? c.decodeIfPresent(Bool.self, forKey: .hunchSorted)
     }
 }
 

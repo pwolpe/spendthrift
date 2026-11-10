@@ -500,7 +500,7 @@ final class BudgetStore {
     /// For every place on Double-Check that has no guess yet: ask once what it most likely was.
     func guessWhatTheyWere() async {
         guard CloudAI.isEnabled, !isGuessing, !isImporting else { return }
-        let waiting = reviewItems.filter { $0.info.hunch == nil }
+        let waiting = reviewItems.filter { $0.info.hunch == nil || $0.info.hunchSorted != true }
         guard !waiting.isEmpty else { return }
         isGuessing = true
         defer { isGuessing = false }
@@ -508,18 +508,28 @@ final class BudgetStore {
         let subjects = waiting.prefix(60).map { item -> Huncher.Subject in
             let charges = (byKey[item.key] ?? []).sorted { $0.date > $1.date }
             return Huncher.Subject(key: item.key, name: item.info.name, line: item.info.sample,
-                                   category: item.info.category?.displayName ?? "not sorted",
+                                   category: item.info.category?.rawValue ?? "not sorted",
                                    account: charges.first?.account ?? "",
                                    charges: charges.prefix(8).map { "\(DateParsing.iso.string(from: $0.date)) \(Money.format(abs($0.amount))) \($0.amount < 0 ? "in" : "out")" },
                                    count: charges.count)
         }
         let guesses = await Huncher.guess(Array(subjects), notes: allNotes(limit: 25))
         guard !guesses.isEmpty else { return }
-        for (key, text) in guesses where library.merchants[key] != nil {
-            library.merchants[key]?.hunch = text
-            if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG HUNCH \(library.merchants[key]?.name ?? key): \(text)") }
+        for (key, guess) in guesses {
+            // Still an unconfirmed guess? (The person may have settled it while the model was thinking.)
+            guard let info = library.merchants[key], info.isUnconfirmedGuess else { continue }
+            library.merchants[key]?.hunch = guess.text
+            library.merchants[key]?.hunchSorted = true
+            // The category on the row follows the guess, so "looks right" can be one click. It stays a guess.
+            if let category = guess.category, !guess.text.isEmpty, category != info.category {
+                library.merchants[key]?.category = category
+                if info.source != .ai { library.merchants[key]?.source = .cloudGuess }
+            }
+            if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
+                print("DEBUG HUNCH \(info.name): \(guess.text) | \(info.category?.rawValue ?? "-") → \(guess.category?.rawValue ?? "-")")
+            }
         }
-        changed()
+        withAnimation(.snappy) { changed() }
     }
 
     // MARK: - What the analyst noticed
