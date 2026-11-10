@@ -252,48 +252,74 @@ struct AskView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // The pane's own heading, with a way to put it away.
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Ask").font(.system(size: 20, weight: .bold, design: .serif))
+                Text("ABOUT YOUR MONEY").font(Theme.mono(9.5, .semibold)).tracking(1.2).foregroundStyle(.secondary)
+                Spacer()
+                if !answers.isEmpty {
+                    Button("Start Over") { withAnimation(.snappy) { answers = []; turns = [] } }
+                        .buttonStyle(.borderless).font(.callout)
+                }
+                Button { withAnimation(.snappy(duration: 0.25)) { store.showsAsk = false } } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .help("Close (⌘K)")
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+            ReceiptRule().padding(.horizontal, 18)
+
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 24) {
                         if answers.isEmpty { intro }
                         ForEach(answers) { answer in
                             AnswerBubble(answer: answer).id(answer.id)
                         }
                         if thinking {
                             HStack(spacing: 10) {
-                                TonyAvatar(size: 32)
                                 ProgressView().controlSize(.small)
-                                Text("Crunching the numbers…").foregroundStyle(.secondary)
+                                Text("Adding it up…").font(Theme.mono(12)).foregroundStyle(.secondary)
                             }
                             .id("thinking")
                         }
                     }
-                    .padding(16)
+                    .padding(18)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .onChange(of: answers.count) {
                     withAnimation { proxy.scrollTo(answers.last?.id, anchor: .bottom) }
                 }
+                .onChange(of: thinking) {
+                    if thinking { withAnimation { proxy.scrollTo("thinking", anchor: .bottom) } }
+                }
             }
 
+            // A line to write on: a sheet of paper with a hairline edge, like every card in the app.
             HStack(spacing: 10) {
-                TextField("Ask about your spending…", text: $question)
+                TextField("Ask about your spending…", text: $question, axis: .vertical)
+                    .lineLimit(1...4)
                     .textFieldStyle(.plain)
                     .font(.body)
                     .focused($focused)
                     .onSubmit(ask)
                 Button(action: ask) {
-                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 28))
+                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 26))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(question.isEmpty ? Color.secondary : Theme.accent)
+                .foregroundStyle(question.trimmingCharacters(in: .whitespaces).isEmpty ? Color.secondary.opacity(0.5) : Theme.accent)
                 .disabled(question.trimmingCharacters(in: .whitespaces).isEmpty || thinking)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .glassEffect(.regular, in: .capsule)
-            .padding(.horizontal, 12)
+            .padding(.leading, 14)
+            .padding(.trailing, 8)
+            .padding(.vertical, 8)
+            .background(Theme.sheet, in: .rect(cornerRadius: 14, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(focused ? Theme.accent.opacity(0.55) : Theme.hairline) }
+            .padding(.horizontal, 14)
             .padding(.bottom, 14)
+            .padding(.top, 6)
         }
         .onAppear {
             if answers.isEmpty, let q = DebugHooks.askQuestion { store.showsAsk = true; question = q; ask() }
@@ -302,28 +328,35 @@ struct AskView: View {
     }
 
     private var intro: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SpotArt(name: "ask", height: 170)
+        VStack(alignment: .leading, spacing: 16) {
+            SpotArt(name: "ask", height: 150)
                 .frame(maxWidth: .infinity)
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Ask")
-                        .font(.system(size: 24, weight: .bold, design: .serif))
-                    Text(CloudAI.isEnabled ? "Anything about your money. Then keep going: “and last year?”, “why?”"
-                                           : "Answered right here on your Mac. Nothing is sent anywhere.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            Text(CloudAI.isEnabled ? "Ask anything about where the money went. Then keep going: “and last year?”, “why?”"
+                                   : "Answered right here on your Mac. Nothing is sent anywhere.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            // Things to try, as one sheet with a line each.
+            VStack(alignment: .leading, spacing: 0) {
+                Text("TRY ONE").font(Theme.mono(9.5, .semibold)).tracking(1.2).foregroundStyle(.secondary)
+                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
+                ForEach(Array(examples.enumerated()), id: \.element) { index, example in
+                    if index > 0 { Divider().padding(.leading, 14) }
+                    Button { question = example; ask() } label: {
+                        HStack(spacing: 8) {
+                            Text(example).multilineTextAlignment(.leading)
+                            Spacer(minLength: 8)
+                            Image(systemName: "arrow.up.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(examples, id: \.self) { example in
-                    Button(example) { question = example; ask() }
-                        .buttonStyle(.glass)
-                }
-            }
+            .background(Theme.sheet, in: .rect(cornerRadius: 14, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline) }
         }
-        .padding(.top, 8)
     }
 
     private func ask() {
@@ -450,66 +483,69 @@ enum Drill {
     }
 }
 
-private struct AnswerBubble: View {
+/// One exchange: the question as it was asked, then the answer printed on a slip of receipt paper.
+struct AnswerBubble: View {
     let answer: Answer
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            // The question: quiet, in the person's own words, set to the right like a note in the margin.
             HStack {
-                Spacer()
+                Spacer(minLength: 40)
                 Text(answer.question)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .background(Theme.accent, in: .rect(cornerRadius: 16, style: .continuous))
-                    .foregroundStyle(.white)
+                    .padding(.horizontal, 13).padding(.vertical, 8)
+                    .background(Theme.accent.opacity(0.10), in: .rect(cornerRadius: 13, style: .continuous))
+                    .overlay { RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Theme.accent.opacity(0.18)) }
+                    .textSelection(.enabled)
             }
-            HStack(alignment: .top, spacing: 12) {
-                TonyAvatar(size: 32)
-                Card(padding: 16) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        // Any place named in the answer is a link to everything spent there.
-                        Text(PlaceLinker.link(answer.headline)).font(.title3.weight(.semibold))
-                            .tint(Theme.accent)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                            .environment(\.openURL, OpenURLAction { url in
-                                guard let name = PlaceLinker.name(from: url) else { return .systemAction }
-                                BudgetStore.shared.showPlace(name)
-                                return .handled
-                            })
-                        if answer.chart.count >= 2 {
-                            AnswerChart(bars: answer.chart, isLine: answer.chartIsLine) { Drill.open($0, in: answer) }
-                            if answer.chart.contains(where: { Drill.target($0.label, in: answer) != nil }) {
-                                Text("Click a bar to see the charges behind it.").font(.caption).foregroundStyle(.tertiary)
-                            }
+            ReceiptPaper(padding: 16) {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Any place named in the answer is a link to everything spent there.
+                    Text(PlaceLinker.link(answer.headline))
+                        .font(.system(size: 16, weight: .semibold, design: .serif))
+                        .lineSpacing(2)
+                        .tint(Theme.accent)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .environment(\.openURL, OpenURLAction { url in
+                            guard let name = PlaceLinker.name(from: url) else { return .systemAction }
+                            BudgetStore.shared.showPlace(name)
+                            return .handled
+                        })
+                    if answer.chart.count >= 2 {
+                        AnswerChart(bars: answer.chart, isLine: answer.chartIsLine) { Drill.open($0, in: answer) }
+                        if answer.chart.contains(where: { Drill.target($0.label, in: answer) != nil }) {
+                            Text("Click a bar to see the charges behind it.").font(.caption).foregroundStyle(.tertiary)
                         }
-                        if !answer.rows.isEmpty {
-                            VStack(spacing: 8) {
-                                ForEach(Array(answer.rows.enumerated()), id: \.offset) { _, row in
-                                    HStack(spacing: 10) {
-                                        if let c = row.category { CategoryIcon(category: c, size: 24) }
+                    }
+                    if !answer.rows.isEmpty {
+                        ReceiptRule()
+                        VStack(spacing: 9) {
+                            ForEach(Array(answer.rows.enumerated()), id: \.offset) { _, row in
+                                ReceiptLine(value: row.value) {
+                                    HStack(spacing: 8) {
+                                        if let c = row.category { CategoryIcon(category: c, size: 20) }
                                         VStack(alignment: .leading, spacing: 0) {
                                             if Drill.target(row.label, in: answer) != nil {
                                                 Button(row.label) { Drill.open(row.label, in: answer) }
                                                     .buttonStyle(.plain)
                                                     .foregroundStyle(Theme.accent)
-                                                    .underline()
                                                     .lineLimit(1)
                                                     .help("See the charges behind \(row.label)")
                                             } else {
                                                 Text(row.label).lineLimit(1)
                                             }
                                             if !row.detail.isEmpty {
-                                                Text(row.detail).font(.caption).foregroundStyle(.secondary)
+                                                Text(row.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                             }
                                         }
-                                        Spacer()
-                                        Text(row.value).monospacedDigit()
                                     }
                                 }
                             }
                         }
-                        interpretation
                     }
+                    ReceiptRule()
+                    interpretation
                 }
             }
         }
@@ -520,11 +556,12 @@ private struct AnswerBubble: View {
         let q = answer.query
         let parts = [q.category?.displayName, q.place?.capitalized,
                      q.from == q.to ? q.from.title : "\(q.from.title) – \(q.to.title)"].compactMap { $0 }
-        return Label(answer.understood.map { "Looked up: \($0)" } ?? parts.joined(separator: " · "),
-                     systemImage: "line.3.horizontal.decrease.circle")
-            .font(.caption)
+        return Text((answer.understood.map { "Looked up: \($0)" } ?? parts.joined(separator: " · ")).uppercased())
+            .font(Theme.mono(9.5))
+            .tracking(0.6)
             .foregroundStyle(.secondary)
-            .lineLimit(2)
+            .lineLimit(3)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

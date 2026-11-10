@@ -144,6 +144,26 @@ enum DebugHooks {
             let t = txns[0]
             print("DEBUG SUGGEST \(t.description) → \(t.merchant) | \(t.category.rawValue) | \(t.source.rawValue)\(t.needsCheck ? " ?" : "") [\(key)] x\(txns.count)")
         }
+        // SPENDTHRIFT_PIECES=1: pictures of the small parts (masthead, a chat answer, a charge's receipt), then quit.
+        if env["SPENDTHRIFT_PIECES"] != nil {
+            await snap("30-masthead", outDir, width: 230) { Masthead().padding(16) }
+            let q = "Where did most of my money go in October?"
+            let query = await QueryParser.parse(q, months: store.months)
+            var answer = AnswerEngine.answer(q, query: query, store: store)
+            if let m = store.months.dropLast().last {
+                answer.chart = store.categoryTotals(in: m).prefix(6).map { ChatAnalyst.ChartBar(label: $0.category.displayName, value: $0.total, category: $0.category) }
+            }
+            answer.understood = "October by category · October's largest charges"
+            await snap("31-answer", outDir, width: 380) { AnswerBubble(answer: answer).padding(18) }
+            if let t = store.transactions.last(where: { $0.countsAsSpending && $0.amount > 40 }) {
+                await snap("32-receipt", outDir, width: 300) { TransactionInspector(transaction: t, scrolls: false) }
+            }
+            if let m = store.months.dropLast().last ?? store.months.last {
+                await snap("33-itemized", outDir) { CeremonyCard(month: m).padding(28) }
+            }
+            await snap("34-banner", outDir) { BannerCard().padding(28) }
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_PICTURES=tony,paul,both: draw one banner picture for each, then quit.
         if let casts = env["SPENDTHRIFT_PICTURES"] {
             for who in casts.split(separator: ",").map(String.init) {
@@ -394,16 +414,16 @@ enum DebugHooks {
 
     /// Renders a screen's content to a PNG. (ImageRenderer can't draw scroll views, tables or
     /// AppKit-backed controls such as menus and text fields; those show as blank or yellow boxes.)
-    private static func snap(_ name: String, _ dir: URL, @ViewBuilder _ view: () -> some View) async {
+    private static func snap(_ name: String, _ dir: URL, width fixed: CGFloat? = nil, @ViewBuilder _ view: () -> some View) async {
         // SPENDTHRIFT_WIDTH: the width a page really gets (about 870 beside the question pane).
         // SPENDTHRIFT_DARK: the same pages in Dark Mode.
-        let width = env["SPENDTHRIFT_WIDTH"].flatMap(Double.init).map { CGFloat($0) } ?? 1000
+        let width = fixed ?? env["SPENDTHRIFT_WIDTH"].flatMap(Double.init).map { CGFloat($0) } ?? 1000
         let dark = env["SPENDTHRIFT_DARK"] != nil
         let content = view()
             .environment(BudgetStore.shared)
             .tint(Theme.accent)
             .frame(width: width)
-            .frame(minHeight: 500)
+            .frame(minHeight: fixed == nil ? 500 : 40)
             .background(Theme.paper)
             .environment(\.colorScheme, dark ? .dark : .light)
         let renderer = ImageRenderer(content: content)

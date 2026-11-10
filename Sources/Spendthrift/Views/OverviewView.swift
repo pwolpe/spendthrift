@@ -61,7 +61,7 @@ struct OverviewView: View {
                     if !DebugHooks.off("stories") { storiesThisMonth(m) }
                     if !DebugHooks.off("ceremony") { CeremonyCard(month: m) }
                 } else {
-                    TonySays(title: "Nothing here yet", message: "Drop a statement into this window and the show begins.", art: "welcome")
+                    TonySays(title: "Nothing here yet", message: "Drop a statement into this window and it all gets added up.", art: "welcome")
                 }
             }
             .padding(28)
@@ -298,7 +298,7 @@ struct OverviewView: View {
                     .font(.title3)
                     .foregroundStyle(.white)
                     .frame(width: 36, height: 36)
-                    .background(Circle().fill(Theme.gold))
+                    .background(Circle().fill(Theme.accent))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Everything is sorted. \(n) \(n == 1 ? "guess is" : "guesses are") worth a glance.")
                         .font(.headline)

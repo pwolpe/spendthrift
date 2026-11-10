@@ -35,7 +35,7 @@ struct ImportSheet: View {
                     .font(.system(size: 26))
                     .foregroundStyle(.white)
                     .frame(width: 54, height: 54)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.gold))
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.accent))
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Help me read this one")
                         .font(.title2.weight(.bold))

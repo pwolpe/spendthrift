@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Ask the Academy as a conversation (needs the cloud model).
+/// Ask, as a conversation (needs the cloud model).
 ///
 /// Three steps, so the model never does arithmetic:
 ///   1. it reads the question (and the conversation so far) and says which figures it needs,

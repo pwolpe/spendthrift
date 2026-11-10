@@ -133,7 +133,7 @@ struct StoryCard: View {
                         .font(.system(size: compact ? 15 : 18, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: compact ? 34 : 42, height: compact ? 34 : 42)
-                        .background(Circle().fill(Theme.gold))
+                        .background(Circle().fill(Theme.accent))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(story.name)
                             .font(.system(compact ? .headline : .title3, design: .serif).weight(.bold))

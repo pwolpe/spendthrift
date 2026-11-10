@@ -148,7 +148,7 @@ enum InsightEngine {
     }
 }
 
-// MARK: - The awards (computed from real data)
+// MARK: - The month's superlatives (computed from real data)
 
 struct Award: Identifiable, Hashable {
     var id: String { title }
@@ -173,12 +173,12 @@ enum AwardEngine {
             .filter { $0.total > 0 }
             .sorted { $0.total > $1.total }
         if let lead = byCategory.first {
-            awards.append(Award(title: "Best Leading Category", winner: lead.cat.displayName,
+            awards.append(Award(title: "Biggest category", winner: lead.cat.displayName,
                                 value: Money.format(lead.total, cents: false), category: lead.cat, symbol: "star.fill"))
         }
         if byCategory.count > 1 {
             let support = byCategory[1]
-            awards.append(Award(title: "Best Supporting Category", winner: support.cat.displayName,
+            awards.append(Award(title: "Runner-up", winner: support.cat.displayName,
                                 value: Money.format(support.total, cents: false), category: support.cat, symbol: "star.leadinghalf.filled"))
         }
 
@@ -188,12 +188,12 @@ enum AwardEngine {
             places.append((name, txns.reduce(0.0) { $0 + $1.amount }, txns.count, txns[0].category))
         }
         if let venue = places.max(by: { $0.total < $1.total }), venue.total > 0 {
-            awards.append(Award(title: "Best Venue", winner: venue.name, value: Money.format(venue.total, cents: false),
+            awards.append(Award(title: "Biggest single place", winner: venue.name, value: Money.format(venue.total, cents: false),
                                 category: venue.cat, symbol: "building.2.fill"))
             usedWinners.insert(venue.name)
         }
         if let regular = places.filter({ $0.count >= 3 && !usedWinners.contains($0.name) }).max(by: { $0.count < $1.count }) {
-            awards.append(Award(title: "Most Curtain Calls", winner: regular.name, value: "\(regular.count) visits",
+            awards.append(Award(title: "Most visits", winner: regular.name, value: "\(regular.count) visits",
                                 category: regular.cat, symbol: "arrow.clockwise.circle.fill"))
             usedWinners.insert(regular.name)
         }
@@ -204,7 +204,7 @@ enum AwardEngine {
             let seenBefore = Set(spending.filter { Month(date: $0.date) < month }.map(\.merchantDisplay))
             if let newcomer = places.filter({ !seenBefore.contains($0.name) && !usedWinners.contains($0.name) && $0.total >= 10 })
                 .max(by: { $0.total < $1.total }) {
-                awards.append(Award(title: "Surprise Newcomer", winner: newcomer.name, value: Money.format(newcomer.total),
+                awards.append(Award(title: "New this month", winner: newcomer.name, value: Money.format(newcomer.total),
                                     category: newcomer.cat, symbol: "sparkles"))
                 usedWinners.insert(newcomer.name)
             }
@@ -221,7 +221,7 @@ enum AwardEngine {
                 return drop >= 25 ? (cat, drop) : nil
             }
             if let best = drops.max(by: { $0.1 < $1.1 }) {
-                awards.append(Award(title: "Most Improved", winner: best.0.displayName,
+                awards.append(Award(title: "Biggest cut", winner: best.0.displayName,
                                     value: "↓ \(Money.format(best.1, cents: false))", category: best.0, symbol: "chart.line.downtrend.xyaxis"))
             }
         }
@@ -233,14 +233,14 @@ enum AwardEngine {
             return (sub, months)
         }.filter { !usedWinners.contains($0.0.merchant) }.max { $0.1 < $1.1 }
         if let (sub, months) = lifetime, months >= 3 {
-            awards.append(Award(title: "Lifetime Achievement", winner: sub.merchant, value: "\(months) months running",
+            awards.append(Award(title: "Longest running", winner: sub.merchant, value: "\(months) months running",
                                 category: sub.category, symbol: "medal.fill"))
         }
         return awards
     }
 }
 
-// MARK: - The host's opening remarks
+// MARK: - The bookkeeper's note
 
 enum RecapWriter {
     private static var cache: [String: String] = [:]
@@ -264,9 +264,9 @@ enum RecapWriter {
             return !text.isEmpty && text.components(separatedBy: digits).filter { $0.count >= 2 }.allSatisfy(allowed.contains)
         }
         if let written = await CloudWriter.line(system: """
-            You host the monthly awards ceremony in Spendthrift, a playful app that honors a person's monthly spending. Speak to them as \"you\"; never name them or guess their job.
-            Write a 2-sentence opening for this month's ceremony using ONLY the facts given. Copy dollar amounts exactly as written.
-            Use theater and awards-show language. Be warm, witty and specific, never judgmental. No lists, no quotes, no stage directions.
+            You are the voice of Spendthrift, a personal spending app with the manner of a dry, fond bookkeeper who is quietly amused by where the money goes. Speak to the person as \"you\"; never name them or guess their job.
+            Write a 2-sentence note on this month using ONLY the facts given. Copy dollar amounts exactly as written.
+            Deadpan and warm, a little wry, specific, never scolding and never gushing. No awards or theater language. No lists, no quotes, no exclamation marks.
             """, facts: facts.joined(separator: "\n"), maxTokens: 3_000, temperature: 0.8), numbersAreReal(written) {
             cache[key] = written
             return written
@@ -274,9 +274,9 @@ enum RecapWriter {
         guard SystemLanguageModel.default.isAvailable else { return fallback }
 
         let session = LanguageModelSession(instructions: """
-        You host the monthly awards ceremony in Spendthrift, a playful app that honors a person's monthly spending. Speak to them as \"you\"; never name them or guess their job.
-        Write a 2-sentence opening for this month's ceremony using ONLY the facts given. Copy dollar amounts exactly as written.
-        Use theater and awards-show language. Be warm and funny, never judgmental. No lists, no quotes, no stage directions.
+        You are the voice of Spendthrift, a personal spending app with the manner of a dry, fond bookkeeper who is quietly amused by where the money goes. Speak to the person as \"you\"; never name them or guess their job.
+        Write a 2-sentence note on this month using ONLY the facts given. Copy dollar amounts exactly as written.
+        Deadpan and warm, a little wry, specific, never scolding and never gushing. No awards or theater language. No lists, no quotes, no exclamation marks.
         """)
         do {
             let prompt = facts.joined(separator: "\n")
@@ -296,59 +296,74 @@ enum RecapWriter {
     }
 
     static func fallbackText(month: Month, total: Double, previous: Double?, awards: [Award]) -> String {
-        var s = "Welcome to the \(month.name) ceremony, where \(Money.format(total, cents: false)) took the stage"
+        var s = "\(month.name) came to \(Money.format(total, cents: false))"
         if let previous, previous > 0 {
             let diff = total - previous
-            s += diff <= 0 ? ", \(Money.format(-diff, cents: false)) less than last month" : ", \(Money.format(diff, cents: false)) more than last month"
+            s += diff <= 0 ? ", \(Money.format(-diff, cents: false)) less than the month before" : ", \(Money.format(diff, cents: false)) more than the month before"
         }
         s += "."
-        if let lead = awards.first { s += " Let's hear it for \(lead.winner)!" }
+        if let lead = awards.first { s += " Most of it went to \(lead.winner)." }
         return s
     }
 }
 
-// MARK: - The ceremony card
+// MARK: - The month, itemized
 
+/// The month written up the way a till would: a short note, then the superlatives as printed lines.
 struct CeremonyCard: View {
     @Environment(BudgetStore.self) private var store
     let month: Month
     @State private var text = ""
 
-    private let gold = Theme.gold
-
     var body: some View {
         let insights = store.insights(for: month)
         let awards = AwardEngine.awards(for: month, in: store.transactions)
         Card {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 10) {
-                    Image(systemName: "trophy.fill").font(.title2).foregroundStyle(gold)
-                    Text("The \(month.name) Ceremony")
-                        .font(.system(.title2, design: .serif).weight(.bold))
-                }
-                Text(text.isEmpty ? " " : text)
-                    .font(.title3)
-                    .italic()
-                    .fixedSize(horizontal: false, vertical: true)
-                    .redacted(reason: text.isEmpty ? .placeholder : [])
-                    .contentTransition(.opacity)
-
-                if !awards.isEmpty {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 12)], spacing: 12) {
-                        ForEach(awards) { AwardTile(award: $0) }
-                    }
-                    .padding(.top, 2)
-                }
-
-                if !insights.isEmpty {
-                    Divider().padding(.vertical, 2)
-                    Text("Notes from the Academy")
-                        .font(.headline)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 20, alignment: .topLeading)], alignment: .leading, spacing: 12) {
-                        ForEach(insights) { insight in
-                            InsightRow(insight: insight) { store.dismissInsight(insight) }
-                                .transition(.opacity)
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("\(month.name), itemized")
+                            .font(.system(.title2, design: .serif).weight(.bold))
+                        Text(text.isEmpty ? " " : text)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .redacted(reason: text.isEmpty ? .placeholder : [])
+                            .contentTransition(.opacity)
+                        if !insights.isEmpty {
+                            Divider().padding(.vertical, 4)
+                            Text("Also worth knowing")
+                                .font(.headline)
+                            VStack(alignment: .leading, spacing: 12) {
+                                ForEach(insights) { insight in
+                                    InsightRow(insight: insight) { store.dismissInsight(insight) }
+                                        .transition(.opacity)
+                                }
+                            }
                         }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if !awards.isEmpty {
+                        ReceiptPaper(padding: 16) {
+                            VStack(alignment: .leading, spacing: 9) {
+                                Text(month.title.uppercased()).font(Theme.mono(11, .bold)).tracking(1.5)
+                                    .frame(maxWidth: .infinity)
+                                ReceiptRule()
+                                ForEach(awards) { award in
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(award.title.uppercased()).font(Theme.mono(9.5, .semibold)).tracking(0.8).foregroundStyle(.secondary)
+                                        ReceiptLine(value: award.value) {
+                                            Text(award.winner).font(.callout.weight(.medium)).lineLimit(1)
+                                        }
+                                    }
+                                }
+                                ReceiptRule()
+                                ReceiptLine(value: Money.format(store.totalSpent(in: month), cents: false), bold: true) {
+                                    Text("TOTAL").font(Theme.mono(13, .bold))
+                                }
+                            }
+                        }
+                        .frame(width: 320)
                     }
                 }
             }
@@ -361,33 +376,6 @@ struct CeremonyCard: View {
                                                   awards: awards, insights: insights)
             withAnimation { text = written }
         }
-    }
-}
-
-private struct AwardTile: View {
-    let award: Award
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: award.symbol)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
-                .background(Circle().fill(Theme.gold))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(award.title.uppercased())
-                    .font(.caption2.weight(.bold))
-                    .tracking(1.1)
-                    .foregroundStyle(Theme.accent)
-                    .lineLimit(1)
-                Text(award.winner).font(.body.weight(.semibold)).lineLimit(1)
-                Text(award.value).font(.callout).monospacedDigit().foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .background(Theme.goldLight.opacity(0.13), in: .rect(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.goldDeep.opacity(0.25)))
     }
 }
 

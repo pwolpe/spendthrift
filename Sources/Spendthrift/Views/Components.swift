@@ -3,9 +3,10 @@ import AppKit
 
 // MARK: - Look & feel
 
-/// One accent for the whole app: awards gold. Category colors do the rest.
-/// The look, in one place. The sensibility is Japanese: paper and ink, one warm accent, colors
-/// taken from traditional dyes, space left empty on purpose (ma), and nothing that shouts.
+/// The look, in one place: paper and ink. The app is named for someone who spends freely, and its
+/// emblem is the till receipt: slips of paper with a torn edge, dashed rules, dotted leaders and
+/// typewriter totals. One accent, the blue-black of receipt ink; colors from traditional dyes do the
+/// rest; space is left empty on purpose and nothing shouts.
 enum Theme {
     private static func adaptive(_ light: (CGFloat, CGFloat, CGFloat), _ dark: (CGFloat, CGFloat, CGFloat)) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
@@ -17,13 +18,12 @@ enum Theme {
     static let paper = adaptive((0.969, 0.957, 0.929), (0.098, 0.094, 0.090))
     /// A sheet laid on the paper: a shade lighter than what it rests on.
     static let sheet = adaptive((1.0, 0.995, 0.982), (0.145, 0.139, 0.133))
-    /// Yamabuki gold: deep enough for white text on prominent buttons, in light and dark mode.
-    static let accent = Color(red: 0.74, green: 0.49, blue: 0.06)
+    /// Receipt ink: the blue-black a till prints in. The one accent, for buttons, links and emphasis.
+    static let accent = adaptive((0.17, 0.26, 0.49), (0.50, 0.61, 0.93))
+    /// Brass, kept for one meaning only: money invested, which is still yours.
     static let goldLight = Color(red: 0.98, green: 0.82, blue: 0.36)
     static let goldDeep = Color(red: 0.78, green: 0.56, blue: 0.13)
     static let gold = LinearGradient(colors: [goldLight, goldDeep], startPoint: .top, endPoint: .bottom)
-    static let curtain = LinearGradient(colors: [Color(red: 0.62, green: 0.08, blue: 0.14), Color(red: 0.36, green: 0.03, blue: 0.08)],
-                                        startPoint: .top, endPoint: .bottom)
     /// Tokiwa, the green of pines: money in, things that went well.
     static let good = adaptive((0.20, 0.50, 0.37), (0.42, 0.72, 0.57))
     /// Kaki, persimmon: worth a look, never an alarm.
@@ -31,6 +31,123 @@ enum Theme {
     /// Akane, madder red: money consumed, and the rare real warning.
     static let spent = Color(red: 0.78, green: 0.33, blue: 0.34)
     static let hairline = Color.primary.opacity(0.09)
+    /// Typewriter figures, for anything printed on a receipt.
+    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight, design: .monospaced) }
+}
+
+// MARK: - The receipt
+
+/// A slip of till paper: square at the top, torn in a zigzag along the bottom.
+struct ReceiptShape: InsettableShape {
+    var tooth: CGFloat = 7
+    var inset: CGFloat = 0
+
+    func inset(by amount: CGFloat) -> ReceiptShape { ReceiptShape(tooth: tooth, inset: inset + amount) }
+
+    func path(in rect: CGRect) -> Path {
+        let r = rect.insetBy(dx: inset, dy: inset)
+        var path = Path()
+        let corner: CGFloat = 3
+        path.move(to: CGPoint(x: r.minX, y: r.minY + corner))
+        path.addQuadCurve(to: CGPoint(x: r.minX + corner, y: r.minY), control: CGPoint(x: r.minX, y: r.minY))
+        path.addLine(to: CGPoint(x: r.maxX - corner, y: r.minY))
+        path.addQuadCurve(to: CGPoint(x: r.maxX, y: r.minY + corner), control: CGPoint(x: r.maxX, y: r.minY))
+        path.addLine(to: CGPoint(x: r.maxX, y: r.maxY - tooth))
+        // Whole teeth only, so the tear starts and ends at the same height.
+        let count = max(4, Int((r.width / (tooth * 1.6)).rounded()))
+        let step = r.width / CGFloat(count)
+        for i in 0..<count {
+            let x = r.maxX - CGFloat(i) * step
+            path.addLine(to: CGPoint(x: x - step / 2, y: r.maxY))
+            path.addLine(to: CGPoint(x: x - step, y: r.maxY - tooth))
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Anything printed on a slip of receipt paper.
+struct ReceiptPaper<Content: View>: View {
+    var padding: CGFloat = 18
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .padding(padding)
+            .padding(.bottom, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.sheet, in: ReceiptShape())
+            .overlay { ReceiptShape().strokeBorder(Theme.hairline) }
+            .shadow(color: .black.opacity(0.06), radius: 7, y: 3)
+    }
+}
+
+/// The dashed rule a till prints between sections.
+struct ReceiptRule: View {
+    var body: some View {
+        Line().stroke(Color.primary.opacity(0.28), style: StrokeStyle(lineWidth: 1, dash: [4, 3])).frame(height: 1)
+    }
+    private struct Line: Shape {
+        func path(in rect: CGRect) -> Path { Path { $0.move(to: CGPoint(x: rect.minX, y: rect.midY)); $0.addLine(to: CGPoint(x: rect.maxX, y: rect.midY)) } }
+    }
+}
+
+/// One printed line: what it is on the left, dots, the figure on the right.
+struct ReceiptLine<Label: View>: View {
+    var value: String
+    var valueColor: Color = .primary
+    var bold = false
+    @ViewBuilder var label: Label
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            label.layoutPriority(1)
+            Dots().stroke(Color.primary.opacity(0.25), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [0.1, 4.5]))
+                .frame(height: 1).frame(minWidth: 12)
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 1 }
+            Text(value).font(Theme.mono(13, bold ? .bold : .medium)).foregroundStyle(valueColor).lineLimit(1).layoutPriority(2)
+        }
+    }
+    private struct Dots: Shape {
+        func path(in rect: CGRect) -> Path { Path { $0.move(to: CGPoint(x: rect.minX, y: rect.midY)); $0.addLine(to: CGPoint(x: rect.maxX, y: rect.midY)) } }
+    }
+}
+
+extension ReceiptLine where Label == Text {
+    init(_ title: String, value: String, valueColor: Color = .primary, bold: Bool = false) {
+        self.init(value: value, valueColor: valueColor, bold: bold) { Text(title) }
+    }
+}
+
+/// The app's mark: a little receipt, slightly askew, with a few printed lines and a total.
+struct ReceiptMark: View {
+    var size: CGFloat = 30
+
+    var body: some View {
+        let w = size * 0.72
+        ReceiptShape(tooth: size * 0.11)
+            .fill(Theme.sheet)
+            .overlay { ReceiptShape(tooth: size * 0.11).strokeBorder(Theme.accent.opacity(0.55), lineWidth: max(1, size / 26)) }
+            .overlay(alignment: .top) {
+                VStack(alignment: .leading, spacing: size * 0.085) {
+                    bar(w * 0.50, 0.9)
+                    bar(w * 0.62, 0.35)
+                    bar(w * 0.42, 0.35)
+                    HStack(spacing: 0) { Spacer(minLength: 0); bar(w * 0.36, 0.9) }
+                }
+                .padding(.horizontal, w * 0.17)
+                .padding(.top, size * 0.17)
+            }
+            .frame(width: w, height: size)
+            .rotationEffect(.degrees(-7))
+            .shadow(color: .black.opacity(0.10), radius: size / 14, y: size / 22)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+
+    private func bar(_ width: CGFloat, _ strength: Double) -> some View {
+        Capsule().fill(Theme.accent.opacity(strength)).frame(width: width, height: max(1.5, size * 0.065))
+    }
 }
 
 struct Card<Content: View>: View {
@@ -81,8 +198,15 @@ struct TonyAvatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .overlay(Circle().strokeBorder(Theme.gold, lineWidth: max(1.5, size / 22)))
-        .shadow(color: .black.opacity(0.15), radius: size / 12, y: size / 30)
+        .faceRing(size)
+    }
+}
+
+extension View {
+    /// The same quiet edge on every face: a rim of paper, then a hairline.
+    func faceRing(_ size: CGFloat) -> some View {
+        self.overlay(Circle().strokeBorder(Theme.sheet, lineWidth: max(1.5, size / 16)))
+            .overlay(Circle().strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.75))
     }
 }
 
@@ -118,14 +242,13 @@ struct CastAvatars: View {
     var size: CGFloat = 38
 
     var body: some View {
-        HStack(spacing: -size * 0.28) {
+        HStack(spacing: -size * 0.24) {
             TonyAvatar(size: size)
             if let paul = DailyPicture.shared.paulAvatar {
                 Image(nsImage: paul).resizable().aspectRatio(contentMode: .fill)
                     .frame(width: size, height: size)
                     .clipShape(Circle())
-                    .overlay(Circle().strokeBorder(Theme.gold, lineWidth: max(1.5, size / 22)))
-                    .shadow(color: .black.opacity(0.15), radius: size / 12, y: size / 30)
+                    .faceRing(size)
             }
         }
     }

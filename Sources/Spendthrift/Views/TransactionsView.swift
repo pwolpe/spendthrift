@@ -51,6 +51,12 @@ struct TransactionsView: View {
                 table(rows)
             }
         }
+        // Clicking a charge means "show me this one": its receipt takes the right-hand pane, and the
+        // question pane steps aside (the Ask button brings it back).
+        .onChange(of: selection) {
+            if !selection.isEmpty, store.showsAsk { withAnimation(.snappy(duration: 0.25)) { store.showsAsk = false } }
+            if !selection.isEmpty { showInspector = true }
+        }
         .searchable(text: $search, prompt: "Search places or categories")
         .navigationTitle("Transactions")
         .navigationSubtitle(rows.count == 1 ? "1 transaction" : "\(rows.count) transactions")
@@ -61,9 +67,9 @@ struct TransactionsView: View {
                 if let selected {
                     TransactionInspector(transaction: selected)
                 } else {
-                    ContentUnavailableView(selection.isEmpty ? "No Selection" : "\(selection.count) Selected",
-                                           systemImage: "cursorarrow.click",
-                                           description: Text(selection.isEmpty ? "Click a transaction to see the details and change its category."
+                    ContentUnavailableView(selection.isEmpty ? "No Charge Chosen" : "\(selection.count) Selected",
+                                           systemImage: "receipt",
+                                           description: Text(selection.isEmpty ? "Click a charge to see its receipt, change its category or find it in the statement."
                                                                                : "Right-click to change the category for all of them."))
                 }
             }
@@ -237,9 +243,11 @@ private struct FilterBar: View {
 
 // MARK: - Inspector
 
-private struct TransactionInspector: View {
+struct TransactionInspector: View {
     @Environment(BudgetStore.self) private var store
     let transaction: Transaction
+    /// False when rendered for a test snapshot.
+    var scrolls = true
     @State private var name = ""
     @State private var note = ""
 
@@ -249,7 +257,7 @@ private struct TransactionInspector: View {
         if transaction.isOverride { return ("You chose this for just this charge.", "hand.point.up.left.fill") }
         switch transaction.source {
         case .user: return ("You chose this.", "person.fill.checkmark")
-        case .known: return ("A business the Academy knows well.", "building.2.fill")
+        case .known: return ("A well-known business.", "building.2.fill")
         case .bank: return ("Your bank's own category.", "building.columns.fill")
         case .generic: return ("Guessed from the name.", "text.magnifyingglass")
         case .ai: return (transaction.isUnknown ? "Not sorted yet." : "Sorted by Apple Intelligence, on this Mac.", "apple.intelligence")
@@ -261,23 +269,48 @@ private struct TransactionInspector: View {
     var body: some View {
         let t = transaction
         let place = sameplace
-        ScrollView {
+        MaybeScroll(scrolls: scrolls) {
             VStack(alignment: .leading, spacing: 18) {
-                VStack(spacing: 10) {
-                    MerchantIcon(name: t.merchant, category: t.category, size: 56)
-                    TextField("Name", text: $name)
-                        .textFieldStyle(.plain)
-                        .font(.title2.weight(.bold))
-                        .multilineTextAlignment(.center)
-                        .onSubmit { store.renamePlace(t.merchantKey, to: name) }
-                        .help("Click to rename this place")
-                    AmountText(transaction: t)
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                    Text("\(t.date.formatted(date: .complete, time: .omitted))")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                // The charge, printed as the receipt it once was.
+                ReceiptPaper(padding: 16) {
+                    VStack(spacing: 10) {
+                        MerchantIcon(name: t.merchant, category: t.category, size: 44)
+                        TextField("Name", text: $name)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 19, weight: .bold, design: .serif))
+                            .multilineTextAlignment(.center)
+                            .onSubmit { store.renamePlace(t.merchantKey, to: name) }
+                            .help("Click to rename this place")
+                        Text(t.date.formatted(date: .complete, time: .omitted))
+                            .font(Theme.mono(11))
+                            .foregroundStyle(.secondary)
+                        ReceiptRule()
+                        Text(t.description)
+                            .font(Theme.mono(11))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity)
+                            .help("The line exactly as your statement prints it")
+                        VStack(spacing: 6) {
+                            ReceiptLine(value: t.account) { Text("Paid with").font(.callout) }
+                            ReceiptLine(value: t.isUnknown ? "Not sorted" : t.category.displayName) { Text("Filed under").font(.callout) }
+                        }
+                        ReceiptRule()
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(t.amount < 0 ? "RECEIVED" : "TOTAL").font(Theme.mono(13, .bold))
+                            Spacer()
+                            Text(Money.format(abs(t.amount)))
+                                .font(Theme.mono(24, .bold))
+                                .foregroundStyle(t.amount < 0 ? Theme.good : .primary)
+                        }
+                        Button { store.showOriginal(of: t.id) } label: {
+                            Label("Show in Statement", systemImage: "doc.text.magnifyingglass").frame(maxWidth: .infinity)
+                        }
+                        .controlSize(.large)
+                        .help("Open the original statement at this line (or press Space)")
+                    }
                 }
-                .frame(maxWidth: .infinity)
 
                 group("Category") {
                     HStack {
@@ -335,15 +368,6 @@ private struct TransactionInspector: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                }
-
-                group("From your statement") {
-                    Text(t.description)
-                        .font(.callout.monospaced())
-                        .textSelection(.enabled)
-                    Label(t.account, systemImage: "creditcard").font(.callout).foregroundStyle(.secondary)
-                    Button("Show in Statement", systemImage: "doc.text.magnifyingglass") { store.showOriginal(of: t.id) }
-                        .help("Open the original statement at this line (or press Space)")
                 }
 
                 if place.count > 1 {

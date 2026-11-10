@@ -6,7 +6,7 @@ import Observation
 ///
 ///  - places the built-in rules don't know are sorted by the cloud model (merchant text and amounts only);
 ///  - statements the app can't read are read by it, after name, address and account numbers are blanked;
-///  - it understands questions in Ask the Academy and writes the recap and nomination lines.
+///  - it understands questions in Ask and writes the monthly note and the picture captions.
 ///
 /// Totals are always computed in code. If the cloud can't be reached, everything falls back to
 /// the on-device paths, so the app never depends on it.
@@ -740,7 +740,7 @@ enum CloudImage {
         }
     }
 
-    /// One sentence saying what Tony is doing, and the nomination line that goes with it.
+    /// One sentence saying what is going on in the picture, and the dry line printed under it.
     static func scene(merchant: String, category: String, amount: Double, cast: [String] = ["Tony"]) async -> Scene? {
         let system = """
         You design the picture at the top of Spendthrift, a playful personal budgeting app starring two friends, \
@@ -771,9 +771,9 @@ enum CloudImage {
         what: what this business sells, in one to three plain words, as a receipt would list it ("Coffee & donuts", \
         "Groceries", "Car ride", "Electricity", "Dinner for two"). Do not invent specific items or brands.
 
-        caption: one witty awards-show nomination, at most 14 words, starting with "Nominated for Best", about \
-        this purchase and this daydream. Light accounting humor is welcome; never negative about spending. \
-        Do not mention the amount.
+        caption: one dry, fond line to print under the picture, at most 12 words, in the voice of a deadpan \
+        bookkeeper who is quietly amused by this purchase and this daydream. Wry, specific, never scolding. \
+        No awards-show language, no "Nominated", no exclamation marks. Do not mention the amount.
         """
         // A different flavor of daydream each time, so the pictures don't settle into one joke.
         let flavor = ["a blockbuster action movie", "a space adventure", "a medieval legend", "a spy thriller", "a nature documentary",
@@ -781,7 +781,7 @@ enum CloudImage {
                       "a western", "a monster movie", "an old Hollywood musical", "a polar expedition", "a magic show",
                       "a samurai epic", "a circus", "a pirate adventure", "a deep sea voyage"].randomElement()!
         let who = cast.count > 1
-            ? " This picture stars two friends, \(cast.joined(separator: " and ")), together: start the scene with \"they are\" and give each of them something to do. Say by name which of them holds the receipt. In the caption, say \"a Duo\" or name them both."
+            ? " This picture stars two friends, \(cast.joined(separator: " and ")), together: start the scene with \"they are\" and give each of them something to do. Say by name which of them holds the receipt. The caption may name them both."
             : " This picture stars \(cast[0]) alone: \"he\" is \(cast[0]), the only one of the two friends in the picture, and he is the one holding the receipt. Do not mention or include \(cast[0] == "Tony" ? "Paul" : "Tony"), and do not use either name in the scene or the receipt sentence: write \"he\"."
         let user = "Purchase: \(merchant) (\(category)), \(Money.format(amount)). This time, make the daydream \(flavor).\(who) Hats, helmets and masks stay off his head so the whole face shows."
         let reply = await Timeout.run(40) {
@@ -792,7 +792,7 @@ enum CloudImage {
         let what = String(((o["what"] as? String) ?? category).prefix(26))
         var caption = ((o["caption"] as? String) ?? "").replacingOccurrences(of: "*", with: "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "\" \n"))
-        if !caption.hasPrefix("Nominated") || caption.count > 140 { caption = "Nominated for Best Supporting Role at \(merchant)." }
+        if caption.isEmpty || caption.count > 120 || caption.hasPrefix("Nominated") { caption = "Filed under: worth it. \(merchant)." }
         return Scene(scene: scene, caption: caption, what: what.isEmpty ? category : what)
     }
 
@@ -1237,7 +1237,7 @@ enum CloudColumnMapper {
 // MARK: - Job 4 and 5: questions and short lines of writing
 
 enum CloudWriter {
-    /// A short piece of text (the monthly recap, today's nomination). Nil if the cloud isn't on or fails.
+    /// A short piece of text (the monthly recap, today's caption). Nil if the cloud isn't on or fails.
     static func line(system: String, facts: String, maxTokens: Int, temperature: Double) async -> String? {
         guard CloudAI.isEnabled else { return nil }
         return await Timeout.run(40) {

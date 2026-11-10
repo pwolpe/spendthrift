@@ -227,7 +227,7 @@ struct PremiereCard: View {
     }
 
     private func eyebrow(_ text: String) -> some View {
-        Text(text.uppercased()).font(.callout.weight(.bold)).tracking(1.4).foregroundStyle(Theme.goldDeep)
+        Text(text.uppercased()).font(.callout.weight(.bold)).tracking(1.4).foregroundStyle(Theme.accent)
     }
     private func headline(_ text: String) -> some View {
         Text(text).font(.system(size: 40, weight: .bold, design: .serif)).multilineTextAlignment(.center)
@@ -335,7 +335,7 @@ struct PremiereCard: View {
                     HStack(spacing: 14) {
                         Image(systemName: item.story.kind == .trip ? "airplane.departure" : "party.popper.fill")
                             .font(.title2).foregroundStyle(.white)
-                            .frame(width: 46, height: 46).background(Circle().fill(Theme.gold))
+                            .frame(width: 46, height: 46).background(Circle().fill(Theme.accent))
                         VStack(alignment: .leading, spacing: 1) {
                             Text(item.story.name).font(.title2.weight(.semibold)).lineLimit(1)
                             Text(StoryCard.dates(item.story)).font(.callout).foregroundStyle(.secondary)
@@ -400,7 +400,7 @@ struct PremiereCard: View {
                 .clipShape(.rect(cornerRadius: 20, style: .continuous))
                 .shadow(color: .black.opacity(0.2), radius: 18, y: 8)
         }
-        headline(CloudAI.isEnabled ? "Every time you open the app, a new picture about something you really bought" : "The show is ready")
+        headline(CloudAI.isEnabled ? "Every time you open the app, a new picture about something you really bought" : "Everything is added up")
         Button(action: done) {
             Text("Take Me In").font(.title3.weight(.semibold)).padding(.horizontal, 22).padding(.vertical, 6)
         }

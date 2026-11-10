@@ -204,7 +204,7 @@ struct PlaceView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(t.account).font(.callout).foregroundStyle(.secondary).lineLimit(1)
                             if let trip = store.story(containing: t.id) {
-                                Label(trip.name, systemImage: "airplane.departure").font(.caption).foregroundStyle(Theme.gold)
+                                Label(trip.name, systemImage: "airplane.departure").font(.caption).foregroundStyle(Theme.accent)
                             }
                         }
                         Spacer()

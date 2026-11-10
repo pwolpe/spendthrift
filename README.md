@@ -48,7 +48,7 @@ With a key:
   model, after name, address, email and account numbers are blanked. Its reading is accepted when it
   matches the statement's printed summary or agrees with the app's own reading.
 - **Odd spreadsheets**: it works out the columns before Tony is ever asked.
-- **Questions and writing**: Ask the Academy, the monthly recap, the daily nomination line. Totals
+- **Questions and writing**: Ask, the monthly note, the line under the daily picture. Totals
   are always computed in code.
 
 Measured in Nov 2026 on a year of real statements (48 files, 2,213 transactions, 645 places): read
@@ -78,7 +78,7 @@ credit, or there's no internet, everything falls back to the on-device paths.
   visit (or one of twelve starters in `Resources/Starters`), then quietly asks OpenRouter which image
   model is best today and draws the next one from his photo for next time. **Another One** shows a
   different picture at once. Below it, a **Month / Year** switch. *Month*: the total, where it went,
-  the trend, top places, what's coming up, and **The Monthly Ceremony** (awards plus notes on new
+  the trend, top places, what's coming up, and **the month, itemized** (a receipt of the month's superlatives plus notes on new
   subscriptions, price increases, possible double charges and unusual purchases). *Year*:
   month-by-month stacked spending, category trends, top places, biggest purchases, repeating
   charges and their yearly cost, money in, tax-time totals. **Save as PDF** to share.
@@ -93,7 +93,7 @@ credit, or there's no internet, everything falls back to the on-device paths.
   added up in code. A charge in the wrong trip can be moved: right-click it in Transactions and
   choose **Trip or Event**, or use the same menu in the inspector. The move is remembered even
   when the model looks again and words the trip's name differently.
-- **Ask the Academy**: plain-English questions. The model reads the intent; dates and totals are
+- **Ask**: plain-English questions. The model reads the intent; dates and totals are
   computed exactly in code.
 - **Categories**: every category with its all-time total. **New Category** makes your own (name,
   icon, color); it also appears at the bottom of every category menu. Apple Intelligence is told
@@ -123,6 +123,12 @@ starter pictures that ship with the app have no receipts.
 
 ## The look
 
+Paper and ink, and one emblem: the till receipt. `ReceiptPaper`, `ReceiptRule`, `ReceiptLine` and
+`ReceiptMark` (in `Components.swift`) are used for the sidebar masthead, a charge's details, the
+month's summary and every chat answer. One accent, receipt-ink blue (`Theme.accent`); brass is kept
+for one meaning only, money invested. The voice is a dry, fond bookkeeper: never awards-show, never scolding.
+
+
 Japanese in sensibility: paper and ink (an unbleached-paper background by day, sumi by night), cards
 as sheets with a hairline edge, one warm accent, category colors taken from traditional dyes, and
 space left empty on purpose. It is all in `Theme` (Components.swift) and the category table
@@ -147,7 +153,7 @@ scripts/build.sh
 ```
 
 Output: `build/Spendthrift.app` and `build/Spendthrift.zip`. The build briefly opens a small
-window to draw the icon (Tony in a gold medallion on stage).
+window to draw the icon (a fallback; the finished icon in Resources is used when present).
 
 ## Sending it to Tony, and sending updates
 
@@ -174,14 +180,14 @@ import of about 130 statements costs roughly $3 on the key.
 2. Run `scripts/release.sh "What's new, in a sentence. Tony sees this."`
 
 That builds, signs and publishes the zip to the public repository
-[pwolpe/appauled-releases](https://github.com/pwolpe/appauled-releases). Tony's app checks it
+[pwolpe/spendthrift-releases](https://github.com/pwolpe/spendthrift-releases). Tony's app checks it
 once a day (or from **Spendthrift → Check for Updates…**), shows a "Version 1.1 is ready" button,
 and on one click downloads it, checks the signature, replaces itself and reopens. The check sends
 nothing about Tony; it only asks GitHub for the latest version number.
 
 How it works without an Apple Developer account:
 
-- Every build is signed with a self-made certificate, **Appauled Signing**, in this Mac's login
+- Every build is signed with a self-made certificate, **Spendthrift Signing**, in this Mac's login
   keychain (created Nov 2026, valid ten years). Same certificate means same app identity, so macOS
   keeps Tony's Downloads permission across updates.
 - Before installing, the app requires the download to be signed by that same certificate and to be a
@@ -191,7 +197,7 @@ How it works without an Apple Developer account:
 
 **Back up the certificate.** If it is lost (a new Mac without migrating the keychain), Tony's app will
 refuse every future update and he'll need one manual reinstall (his data is unaffected). To back it
-up: Keychain Access → login → My Certificates → right-click **Appauled Signing** → Export, and keep
+up: Keychain Access → login → My Certificates → right-click **Spendthrift Signing** → Export, and keep
 the .p12 somewhere safe. To build on another Mac, import that file there.
 
 His data is not inside the app, so replacing the app never touches it. The data file is read
@@ -224,7 +230,7 @@ To back up or move Tony to a new Mac, copy that folder.
 | `Library.swift` | The saved file, and `MerchantResolver` (which place is this? instant category) |
 | `Importing.swift`, `CSV.swift`, `PDFStatement.swift` | Reading CSV, OFX/QFX and PDF statements |
 | `Suggestions.swift`, `AISchemas.swift` | Name cleanup, known businesses, bank categories, Apple Intelligence |
-| `Insights.swift`, `Ask.swift`, `DailyPicture.swift`, `Compositor.swift` | Awards and notes, questions, the daily picture |
+| `Insights.swift`, `Ask.swift`, `DailyPicture.swift`, `Compositor.swift` | The month's superlatives and notes, questions, the daily picture |
 | `Views/` | The screens |
 
 ## Testing (for Paul)
@@ -238,7 +244,7 @@ open -W -n "build/Spendthrift.app" --stdout run.log \
   --env "SPENDTHRIFT_IMPORT=a.csv:b.pdf:c.qfx"
 ```
 
-It imports the files, logs how every place was sorted, the awards, notes and sample Ask answers,
+It imports the files, logs how every place was sorted, the month's superlatives, notes and sample Ask answers,
 and saves pictures of the main screens. Add `--env SPENDTHRIFT_SELFTEST=1` to exercise category
 changes, re-import, undo-style removal and saving (prints PASS/FAIL lines). `SPENDTHRIFT_HOME`
 alone runs the app against a scratch folder. To preview how a statement will be read:

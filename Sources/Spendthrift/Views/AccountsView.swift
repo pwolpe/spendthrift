@@ -49,7 +49,7 @@ private struct AccountCard: View {
                         .font(.system(size: 20))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
-                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.gold))
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.accent))
                     TextField("Account name", text: $name)
                         .textFieldStyle(.plain)
                         .font(.title3.weight(.semibold))

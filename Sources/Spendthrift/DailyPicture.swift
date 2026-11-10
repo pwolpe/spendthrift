@@ -304,10 +304,10 @@ struct BannerCard: View {
 
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Today's Nominee · \(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))".uppercased())
-                        .font(.caption.weight(.bold))
+                    Text("\(daily.source == nil ? "From the daydream file" : "Today's receipt") · \(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))".uppercased())
+                        .font(Theme.mono(11, .bold))
                         .tracking(1.2)
-                        .foregroundStyle(Theme.goldDeep)
+                        .foregroundStyle(Theme.accent)
                     Text(daily.caption.isEmpty ? "Today's daydream" : daily.caption)
                         .font(.system(size: 24, weight: .bold, design: .serif))
                         .fixedSize(horizontal: false, vertical: true)

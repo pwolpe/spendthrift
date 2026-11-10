@@ -102,7 +102,7 @@ private struct Step: View {
                 .font(.callout.weight(.bold))
                 .foregroundStyle(.white)
                 .frame(width: 24, height: 24)
-                .background(Circle().fill(Theme.gold))
+                .background(Circle().fill(Theme.accent))
             Text(text).font(.body)
         }
     }

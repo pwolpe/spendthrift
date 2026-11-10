@@ -1,62 +1,62 @@
 [
  {
   "id": "astronaut",
-  "caption": "Nominated for Best Out-of-This-World Expense Report",
+  "caption": "Expense report filed from orbit. Mileage pending.",
   "who": "tony"
  },
  {
   "id": "sheriff",
-  "caption": "Nominated for Best Showdown With a Dinner Check",
+  "caption": "The check arrived at high noon. He did not blink.",
   "who": "tony"
  },
  {
   "id": "conductor",
-  "caption": "Nominated for Best Original Score, Cash Register Section",
+  "caption": "Every cash register in town, finally in tune.",
   "who": "tony"
  },
  {
   "id": "chef",
-  "caption": "Nominated for Best Dining Performance, With Extra Parmesan",
+  "caption": "Extra parmesan is not a line item. It is a lifestyle.",
   "who": "tony"
  },
  {
   "id": "kong",
-  "caption": "Nominated for Best Delivery Order, Skyscraper Division",
+  "caption": "Delivery fee waived. Skyscraper surcharge applied.",
   "who": "tony"
  },
  {
   "id": "cart",
-  "caption": "Nominated for Best Grocery Run at Unsafe Speeds",
+  "caption": "A grocery run, at speeds the store does not recommend.",
   "who": "paul"
  },
  {
   "id": "diver",
-  "caption": "Nominated for Best Deep Dive Into the Receipts",
+  "caption": "A deep dive into the receipts. Some were waterlogged.",
   "who": "paul"
  },
  {
   "id": "gondola",
-  "caption": "Nominated for Best Travel Splurge, Foreign Language Category",
+  "caption": "Travel, miscellaneous. Very miscellaneous.",
   "who": "paul"
  },
  {
   "id": "summit",
-  "caption": "Nominated for Best Ascent of Mount Online Shopping",
+  "caption": "The summit of Mount Online Shopping. Free returns.",
   "who": "paul"
  },
  {
   "id": "racers",
-  "caption": "Nominated for Best Pit Stop by a Duo in a Leading Role",
+  "caption": "Pit stop: four tires, two coffees, one receipt.",
   "who": "both"
  },
  {
   "id": "pirates",
-  "caption": "Nominated for Best Plunder of a Farmers Market, Ensemble Cast",
+  "caption": "They came for treasure and left with heirloom tomatoes.",
   "who": "both"
  },
  {
   "id": "gameshow",
-  "caption": "Nominated for Best Reaction to a Fully Reconciled Month",
+  "caption": "A fully reconciled month. Nobody saw it coming.",
   "who": "both"
  }
 ]

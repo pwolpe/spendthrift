@@ -37,7 +37,7 @@ struct ContentView: View {
                         Divider()
                         AskView()
                             .frame(width: 380)
-                            .background(.background.secondary)
+                            .background(Theme.paper)
                     }
                     .frame(width: store.showsAsk ? 381 : 0, alignment: .leading)
                     .clipped()
@@ -151,7 +151,7 @@ struct SidebarView: View {
             }
         }, set: { store.selection = $0 })) {
             Section {
-                Label("Overview", systemImage: "sparkles.rectangle.stack.fill")
+                Label("Overview", systemImage: "chart.pie.fill")
                     .tag(SidebarItem.overview)
                 Label("Cash Flow", systemImage: "arrow.left.arrow.right.circle.fill")
                     .tag(SidebarItem.cashflow)
@@ -180,16 +180,10 @@ struct SidebarView: View {
         }
         .disabled(store.accounts.isEmpty)
         .safeAreaInset(edge: .top) {
-            HStack(spacing: 10) {
-                CastAvatars(size: 36)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Spendthrift").font(.system(.headline, design: .serif))
-                    Text("Excellence in spending").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            Masthead()
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 10)
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 10) {
@@ -220,6 +214,33 @@ struct SidebarView: View {
             }
             .padding(14)
             .animation(.default, value: status)
+        }
+    }
+}
+
+/// The app's name at the top of the sidebar, set like the head of a receipt: the mark, the name,
+/// a dashed rule, and the two people it's about.
+struct Masthead: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 9) {
+                ReceiptMark(size: 30)
+                Text("Spendthrift")
+                    .font(.system(size: 21, weight: .bold, design: .serif))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 0)
+            }
+            ReceiptRule()
+            HStack(spacing: 8) {
+                Text("WHERE IT ALL WENT")
+                    .font(Theme.mono(9.5, .semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                CastAvatars(size: 22)
+            }
         }
     }
 }
