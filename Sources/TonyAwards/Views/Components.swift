@@ -1,0 +1,274 @@
+import SwiftUI
+import AppKit
+
+// MARK: - Look & feel
+
+/// One accent for the whole app: awards gold. Category colors do the rest.
+enum Theme {
+    /// Deep enough for white text on prominent buttons, in light and dark mode.
+    static let accent = Color(red: 0.74, green: 0.49, blue: 0.06)
+    static let goldLight = Color(red: 0.98, green: 0.82, blue: 0.36)
+    static let goldDeep = Color(red: 0.78, green: 0.56, blue: 0.13)
+    static let gold = LinearGradient(colors: [goldLight, goldDeep], startPoint: .top, endPoint: .bottom)
+    static let curtain = LinearGradient(colors: [Color(red: 0.62, green: 0.08, blue: 0.14), Color(red: 0.36, green: 0.03, blue: 0.08)],
+                                        startPoint: .top, endPoint: .bottom)
+    static let good = Color.green
+    static let caution = Color.orange
+}
+
+struct Card<Content: View>: View {
+    var padding: CGFloat = 20
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor), in: .rect(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06))
+            }
+            .shadow(color: .black.opacity(0.05), radius: 10, y: 3)
+    }
+}
+
+struct SectionHeader: View {
+    let title: String
+    var subtitle: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.title3.weight(.semibold))
+            if let subtitle {
+                Text(subtitle).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+// MARK: - Tony
+
+/// Tony's face in a circle.
+struct TonyAvatar: View {
+    var size: CGFloat = 32
+
+    var body: some View {
+        Group {
+            if let photo = DailyTony.shared.avatar {
+                Image(nsImage: photo).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: "person.crop.circle.fill").resizable().foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(Theme.gold, lineWidth: max(1.5, size / 22)))
+        .shadow(color: .black.opacity(0.15), radius: size / 12, y: size / 30)
+    }
+}
+
+/// The whole caricature, cut out from its background so it can stand on any screen.
+@MainActor @Observable
+final class TonyArt {
+    static let shared = TonyArt()
+    private(set) var figure: NSImage?
+    @ObservationIgnored private var started = false
+
+    func prepare() {
+        guard !started, let cartoon = DailyTony.shared.cartoon,
+              let cg = cartoon.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        started = true
+        Task.detached(priority: .userInitiated) {
+            guard let cut = Compositor.cutout(cg, cropToSubject: true) else { return }
+            let image = NSImage(cgImage: cut, size: NSSize(width: cut.width, height: cut.height))
+            await MainActor.run { withAnimation(.easeOut(duration: 0.3)) { self.figure = image } }
+        }
+    }
+}
+
+struct TonyFigure: View {
+    var height: CGFloat = 180
+    @State private var art = TonyArt.shared
+
+    var body: some View {
+        Group {
+            if let figure = art.figure {
+                Image(nsImage: figure).resizable().aspectRatio(contentMode: .fit)
+                    .shadow(color: .black.opacity(0.18), radius: 10, y: 6)
+            } else {
+                TonyAvatar(size: height * 0.6)
+            }
+        }
+        .frame(height: height)
+        .onAppear { art.prepare() }
+        .accessibilityLabel("Tony")
+    }
+}
+
+/// Tony with something to say: used for every empty screen.
+struct TonySays<Actions: View>: View {
+    let title: String
+    let message: String
+    var figureHeight: CGFloat = 190
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        VStack(spacing: 14) {
+            TonyFigure(height: figureHeight)
+            Text(title).font(.system(size: 26, weight: .bold, design: .rounded))
+            Text(message)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 440)
+            actions.controlSize(.large).padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+}
+
+extension TonySays where Actions == EmptyView {
+    init(title: String, message: String, figureHeight: CGFloat = 190) {
+        self.init(title: title, message: message, figureHeight: figureHeight) { EmptyView() }
+    }
+}
+
+// MARK: - Categories
+
+struct CategoryIcon: View {
+    let category: Category
+    var size: CGFloat = 32
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(category.color.gradient)
+            Image(systemName: category.symbol)
+                .font(.system(size: size * 0.46, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+/// The list of categories, for any menu.
+struct CategoryChoices: View {
+    @Environment(BudgetStore.self) private var store
+    let choose: (Category) -> Void
+
+    var body: some View {
+        Section("Spending") {
+            ForEach(Category.spendingCases) { c in
+                Button { choose(c) } label: { Label(c.displayName, systemImage: c.symbol) }
+            }
+        }
+        Section("Not spending") {
+            ForEach([Category.transfer, .income]) { c in
+                Button { choose(c) } label: { Label(c.displayName, systemImage: c.symbol) }
+            }
+        }
+        Section("Investments & taxes") {
+            ForEach(Category.investmentCases + [.taxes]) { c in
+                Button { choose(c) } label: { Label(c.displayName, systemImage: c.symbol) }
+            }
+        }
+        Section {
+            Button { store.newCategory(then: choose) } label: { Label("New Category…", systemImage: "plus") }
+        }
+    }
+}
+
+/// A tappable pill showing a category; tapping picks another.
+struct CategoryPill: View {
+    let category: Category?
+    var sparkle = false
+    let choose: (Category) -> Void
+
+    var body: some View {
+        Menu {
+            CategoryChoices(choose: choose)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: (category ?? .unsorted).symbol)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle((category ?? .unsorted).color)
+                Text(category?.displayName ?? "Choose…")
+                if sparkle {
+                    Image(systemName: "sparkles").font(.caption2).foregroundStyle(Theme.accent)
+                }
+            }
+        }
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .fixedSize()
+    }
+}
+
+// MARK: - Downloads
+
+/// "We found a statement in your Downloads" — so Tony never needs Finder.
+struct DownloadsBanner: View {
+    @Environment(BudgetStore.self) private var store
+
+    var body: some View {
+        if !store.downloadCandidates.isEmpty {
+            Card(padding: 16) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Label("New in your Downloads", systemImage: "arrow.down.circle.fill")
+                            .font(.headline)
+                            .foregroundStyle(.tint)
+                        Spacer()
+                        if store.downloadCandidates.count > 1 {
+                            Button("Add All") { store.importAllDownloads() }
+                                .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    ForEach(store.downloadCandidates, id: \.self) { url in
+                        DownloadRow(url: url, prominent: store.downloadCandidates.count == 1)
+                        if url != store.downloadCandidates.last { Divider() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct DownloadRow: View {
+    @Environment(BudgetStore.self) private var store
+    let url: URL
+    let prominent: Bool
+
+    private var modified: Date? {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: url.pathExtension.lowercased() == "pdf" ? "doc.richtext.fill" : "tablecells.fill")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(url.lastPathComponent).font(.body.weight(.medium)).lineLimit(1)
+                if let modified {
+                    Text("Downloaded \(modified.formatted(.relative(presentation: .named)))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Button("Not Now") { store.dismissDownload(url) }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+            if prominent {
+                Button("Add") { store.importFiles([url]) }.buttonStyle(.borderedProminent)
+            } else {
+                Button("Add") { store.importFiles([url]) }.buttonStyle(.bordered)
+            }
+        }
+    }
+}

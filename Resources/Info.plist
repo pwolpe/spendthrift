@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>The Tony Awards</string>
+    <key>CFBundleDisplayName</key>
+    <string>The Tony Awards</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.pwolpe.tonyawards</string>
+    <key>CFBundleExecutable</key>
+    <string>TonyAwards</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>26.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.finance</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>The Tony Awards looks in your Downloads folder for new bank statements so you can add them with one click.</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Bank Statement</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.comma-separated-values-text</string>
+                <string>public.delimited-values-text</string>
+                <string>public.plain-text</string>
+                <string>com.adobe.pdf</string>
+                <string>public.image</string>
+                <string>org.openxmlformats.spreadsheetml.sheet</string>
+                <string>public.folder</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Quicken Statement</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>ofx</string>
+                <string>qfx</string>
+                <string>qbo</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
