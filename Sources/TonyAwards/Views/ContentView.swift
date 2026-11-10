@@ -192,7 +192,7 @@ struct DropOverlay: View {
 }
 
 struct ToastView: View {
-    @Environment(BudgetStore.self) private var store
+    private var store: BudgetStore { .shared }   // not from the environment: menus and sheets don't always pass it down
     let toast: Toast
 
     var body: some View {
@@ -219,7 +219,7 @@ struct ToastView: View {
 
 /// One clear list of what couldn't be added and what to do about it.
 struct ImportIssuesSheet: View {
-    @Environment(BudgetStore.self) private var store
+    private var store: BudgetStore { .shared }   // not from the environment: menus and sheets don't always pass it down
     let issues: [ImportIssue]
 
     var body: some View {

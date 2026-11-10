@@ -700,7 +700,7 @@ enum Gold {
 /// The figures an accountant asks for, gathered in one place. Not tax advice: just the totals,
 /// with what each one is made of, so nothing has to be dug out of statements in April.
 private struct TaxTimeCard: View {
-    @Environment(BudgetStore.self) private var store
+    private var store: BudgetStore { .shared }   // not from the environment: menus and sheets don't always pass it down
     let months: Set<Month>
 
     private struct Line: Identifiable {

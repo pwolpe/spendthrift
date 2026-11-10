@@ -48,7 +48,9 @@ final class LogoStore {
 
 /// A place's logo when one is known, otherwise its category's icon.
 struct MerchantIcon: View {
-    @Environment(BudgetStore.self) private var store
+    /// Read directly rather than from the environment: this icon is drawn in tables, menus,
+    /// exported pages and pictures of screens, and not all of those pass the environment down.
+    private var store: BudgetStore { .shared }
     let name: String
     let category: Category
     var size: CGFloat = 32

@@ -276,7 +276,7 @@ struct OverviewView: View {
                                     Text(hovered?.displayName ?? "Total")
                                         .font(.callout)
                                         .foregroundStyle(.secondary)
-                                    Text(Money.format(hovered.flatMap { h in totals.first { $0.category == h }?.total } ?? sum, cents: false))
+                                    Text(Money.format(hovered.flatMap { h in totals.first { $0.category == h }?.total } ?? store.totalSpent(in: m), cents: false))
                                         .font(.title2.weight(.bold))
                                         .monospacedDigit()
                                 }

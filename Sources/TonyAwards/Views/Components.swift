@@ -155,7 +155,7 @@ struct CategoryIcon: View {
 
 /// The list of categories, for any menu.
 struct CategoryChoices: View {
-    @Environment(BudgetStore.self) private var store
+    private var store: BudgetStore { .shared }   // not from the environment: menus and sheets don't always pass it down
     let choose: (Category) -> Void
 
     var body: some View {
