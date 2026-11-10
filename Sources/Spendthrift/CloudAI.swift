@@ -917,6 +917,57 @@ extension CloudImage {
     }
 }
 
+// MARK: - A best guess at what each unconfirmed place was
+
+/// For the places on Double-Check: reads the statement line, the amounts, the days and the account,
+/// and says in a few words what each one most likely was. One request for all of them.
+enum Huncher {
+    struct Subject: Sendable {
+        let key: String
+        let name: String
+        let line: String
+        let category: String
+        let account: String
+        /// "2026-02-03 $3,800.00 out", newest first.
+        let charges: [String]
+        let count: Int
+    }
+
+    static func guess(_ subjects: [Subject], notes: [String]) async -> [String: String] {
+        guard !subjects.isEmpty else { return [:] }
+        let system = """
+        A budgeting app has sorted someone's bank and card statements and is unsure about a few payees. For each \
+        one, say what it most likely was, the way the person themselves would describe it to a friend.
+
+        Reason from everything given: the wording of the statement line, the size of the amounts, how regular they \
+        are, the days and months, which account, and whether money came in or went out. Round thousands by Zelle \
+        every month suggest rent or a regular helper; a one-off wire abroad suggests a property, tuition or family; \
+        small monthly deposits suggest interest, rewards or a refund; cash withdrawals before a trip suggest travel money.
+
+        Reply with JSON only: {"guesses": {"<number>": "<guess>"}}
+        Each guess: at most 12 words, plain and specific, no full stop, starting lower case, hedged only by being a \
+        guess (do not write "probably" or "maybe"). Name a likely purpose, not just a restatement of the line. \
+        Never invent a person's relationship as fact; "rent or a contractor, paid by Zelle" is fine. \
+        If there is truly nothing to go on, use "".
+        """
+        var lines: [String] = []
+        for (i, s) in subjects.enumerated() {
+            lines.append("\(i + 1). \(s.name) | statement line: \(s.line) | sorted as: \(s.category) | account: \(s.account) | \(s.count) in all | \(s.charges.joined(separator: "; "))")
+        }
+        let context = notes.isEmpty ? "" : "\n\nNotes the person has written about other things (context only):\n" + notes.joined(separator: "\n")
+        let reply = await Timeout.run(75) {
+            try? await CloudAI.complete(system: system, user: lines.joined(separator: "\n") + context, json: true, maxTokens: 6_000, temperature: 0.2, timeout: 70)
+        }
+        guard let reply, let guesses = CloudAI.object(from: reply)?["guesses"] as? [String: Any] else { return [:] }
+        var out: [String: String] = [:]
+        for (i, s) in subjects.enumerated() {
+            guard let text = guesses[String(i + 1)] as? String else { continue }
+            out[s.key] = String(text.trimmingCharacters(in: CharacterSet(charactersIn: " .\"\n")).prefix(110))
+        }
+        return out
+    }
+}
+
 // MARK: - "It was my accountant"
 
 /// The person says in their own words what a payee was. The model turns that into a tidy name and

@@ -144,6 +144,12 @@ enum DebugHooks {
             let t = txns[0]
             print("DEBUG SUGGEST \(t.description) → \(t.merchant) | \(t.category.rawValue) | \(t.source.rawValue)\(t.needsCheck ? " ?" : "") [\(key)] x\(txns.count)")
         }
+        // SPENDTHRIFT_HUNCH=1: ask for a best guess at every place on Double-Check, print them, then quit.
+        if env["SPENDTHRIFT_HUNCH"] != nil {
+            await store.guessWhatTheyWere()
+            for item in store.reviewItems { print("HUNCH \(item.info.name) [\(item.info.sample.prefix(40))] \(item.count)x \(Int(item.total)) → \(item.info.hunch ?? "(none)")") }
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_PIECES=1: pictures of the small parts (masthead, a chat answer, a charge's receipt), then quit.
         if env["SPENDTHRIFT_PIECES"] != nil {
             await snap("30-masthead", outDir, width: 230) { Masthead().padding(16) }

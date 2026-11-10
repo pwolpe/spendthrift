@@ -12,6 +12,8 @@ struct ReviewView: View {
     var body: some View {
         if scrolls {
             ScrollView { content }.navigationTitle("Double-Check")
+                // Any row still without a best guess gets one while the page is open.
+                .task(id: store.reviewItems.count) { await store.guessWhatTheyWere() }
         } else {
             content
         }
@@ -98,6 +100,7 @@ private struct ReviewRow: View {
         }
     }
 
+    private var hunch: String { item.info.hunch ?? "" }
     /// How many charges a row lists before "See all".
     private let shown = 3
     private var charges: [Transaction] { store.transactions.filter { $0.merchantKey == item.key }.sorted { $0.date > $1.date } }
@@ -181,7 +184,8 @@ private struct ReviewRow: View {
             // The fast way: say what it was, in your own words. No menu, no new-category sheet.
             HStack(spacing: 8) {
                 Image(systemName: "text.bubble").foregroundStyle(.secondary)
-                TextField("Or just tell me what this was: “my accountant, for tax prep”", text: $said)
+                // The prompt is the app's own best guess at this one, when it has one.
+                TextField(hunch.isEmpty ? "Tell me what this was, in your own words" : "My guess: \(hunch). Right? Or tell me what it was", text: $said)
                     .textFieldStyle(.plain)
                     .focused($typing)
                     .onSubmit(submit)
@@ -190,6 +194,10 @@ private struct ReviewRow: View {
                     ProgressView().controlSize(.small)
                 } else if !said.isEmpty {
                     Button("File It", action: submit).buttonStyle(.bordered).controlSize(.small)
+                } else if !hunch.isEmpty {
+                    Button("Use My Guess") { said = hunch; typing = true }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .help("Puts the guess in the box so you can change it or file it")
                 }
             }
             .padding(.horizontal, 10)

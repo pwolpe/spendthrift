@@ -447,6 +447,7 @@ final class BudgetStore {
     func catchUp() async {
         guard CloudAI.isEnabled, !isImporting, !isSuggesting, !accounts.isEmpty else { return }
         await lookUpGuesses()
+        await guessWhatTheyWere()
         await findStoriesIfNeeded()
         await findDiscoveriesIfNeeded()
     }
@@ -490,6 +491,35 @@ final class BudgetStore {
                 withAnimation(.snappy) { changed() }
             }
         }
+    }
+
+    // MARK: - A best guess at each unconfirmed place
+
+    @ObservationIgnored private var isGuessing = false
+
+    /// For every place on Double-Check that has no guess yet: ask once what it most likely was.
+    func guessWhatTheyWere() async {
+        guard CloudAI.isEnabled, !isGuessing, !isImporting else { return }
+        let waiting = reviewItems.filter { $0.info.hunch == nil }
+        guard !waiting.isEmpty else { return }
+        isGuessing = true
+        defer { isGuessing = false }
+        let byKey = Dictionary(grouping: transactions, by: \.merchantKey)
+        let subjects = waiting.prefix(60).map { item -> Huncher.Subject in
+            let charges = (byKey[item.key] ?? []).sorted { $0.date > $1.date }
+            return Huncher.Subject(key: item.key, name: item.info.name, line: item.info.sample,
+                                   category: item.info.category?.displayName ?? "not sorted",
+                                   account: charges.first?.account ?? "",
+                                   charges: charges.prefix(8).map { "\(DateParsing.iso.string(from: $0.date)) \(Money.format(abs($0.amount))) \($0.amount < 0 ? "in" : "out")" },
+                                   count: charges.count)
+        }
+        let guesses = await Huncher.guess(Array(subjects), notes: allNotes(limit: 25))
+        guard !guesses.isEmpty else { return }
+        for (key, text) in guesses where library.merchants[key] != nil {
+            library.merchants[key]?.hunch = text
+            if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG HUNCH \(library.merchants[key]?.name ?? key): \(text)") }
+        }
+        changed()
     }
 
     // MARK: - What the analyst noticed

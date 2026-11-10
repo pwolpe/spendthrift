@@ -253,6 +253,9 @@ struct MerchantInfo: Codable, Hashable {
     var note: String?
     /// True once this place has been looked up on the web, found or not: it is only ever paid for once.
     var lookedUp: Bool?
+    /// The model's best guess at what this was, in a few plain words ("rent, paid to a landlord by Zelle").
+    /// Offered on Double-Check; "" means it was asked and had no idea.
+    var hunch: String?
 
     init(name: String, category: Category?, source: Source, confirmed: Bool = false, sample: String) {
         self.name = name; self.category = category; self.source = source; self.confirmed = confirmed; self.sample = sample
@@ -269,6 +272,7 @@ struct MerchantInfo: Codable, Hashable {
         domain = try? c.decodeIfPresent(String.self, forKey: .domain)
         note = try? c.decodeIfPresent(String.self, forKey: .note)
         lookedUp = try? c.decodeIfPresent(Bool.self, forKey: .lookedUp)
+        hunch = try? c.decodeIfPresent(String.self, forKey: .hunch)
     }
 }
 
