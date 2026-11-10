@@ -734,19 +734,35 @@ enum CloudImage {
     }
 
     /// Draws the scene as a wide cartoon, with Tony's photo as the model for his face. Nil if it couldn't be drawn.
-    static func draw(scene: String, photo: Data, model: String) async -> Data? {
+    /// Every picture is drawn in a different manner, so opening the app is a small surprise each time.
+    /// (Each was tried with Tony's photo: he stays recognizable in all of them.)
+    static let styles: [(id: String, look: String)] = [
+        ("3d", "a modern 3D animated feature film: soft rounded shapes, rich lighting, expressive faces"),
+        ("strip", "a classic mid-century newspaper comic strip: simple figures with big round heads, a slightly wobbly hand-inked black line, flat muted colors, very little shading, gentle deadpan humor"),
+        ("print", "a bold Scandinavian textile print: big flat shapes, a few strong saturated colors, oversized flowers and stripes as pattern, no outlines, no shading, graphic and joyful"),
+        ("clay", "stop-motion claymation: everything sculpted from modelling clay with visible thumbprints, miniature handmade sets, warm studio lighting"),
+        ("anime", "a hand-painted Japanese animated film: lush painted backgrounds, soft clean line work, gentle colors, a sense of wonder"),
+        ("popart", "a 1960s pop-art comic book panel: thick black ink outlines, halftone dots, flat primary colors, dramatic action lines"),
+        ("poster", "a vintage 1930s travel poster: flat screen-printed color blocks, strong geometric composition, a limited warm palette, subtle paper grain"),
+        ("papercut", "a layered cut-paper collage: shapes cut from colored and textured paper, visible soft shadows between the layers, handmade and cheerful"),
+        ("watercolor", "a loose ink-and-watercolor magazine cartoon: quick confident pen lines, soft washes of color, plenty of white paper, dry wit"),
+        ("pixel", "detailed 16-bit pixel art from a classic video game: crisp pixels, a bright limited palette, a side-on scene full of tiny details"),
+        ("saturday", "a 1960s Saturday-morning television cartoon: flat cel colors, thick clean outlines, stylized angular backgrounds, big goofy energy"),
+        ("woodblock", "a Japanese woodblock print: flowing outlines, flat areas of indigo, vermilion and cream, stylized waves and clouds, visible wood grain"),
+    ]
+
+    static func draw(scene: String, photo: Data, model: String, style: String) async -> Data? {
         guard let key = CloudKey.load() else { return nil }
         let prompt = """
-        The attached photo is Tony. Draw a fun, vibrant, richly detailed cartoon illustration starring him, in the \
-        style of a modern animated feature film with a touch of caricature.
-        It must be unmistakably the man in the photo: the same face shape, the same short dark hair and hairline, \
-        the same dark eyebrows, the same short dark beard and the same big warm smile. Anyone who knows him \
-        should recognize him at once.
+        The attached photo is Tony. Draw a fun, richly detailed picture starring him, drawn entirely in this \
+        style: \(style).
+        Whatever the style, it must be unmistakably the man in the photo, translated into that style: the same \
+        face shape, the same short dark hair and hairline, the same dark eyebrows, the same short dark beard and \
+        the same big warm smile. Anyone who knows him should recognize him at once.
         The scene, a Walter Mitty daydream: \(scene)
         Very wide cinematic landscape picture (21:9). Tony is the star: large in the frame, his face clearly \
-        visible and well lit, full of joy and swagger. Keep the bottom edge of the picture free of anything \
-        important. Playful, colorful, full of funny details. No words, letters, numbers, logos, captions or \
-        watermarks anywhere.
+        visible, full of joy and swagger. Keep the bottom edge of the picture free of anything important. \
+        Playful, full of funny details. No words, letters, numbers, logos, captions or watermarks anywhere.
         """
         let body: [String: Any] = [
             "model": model,

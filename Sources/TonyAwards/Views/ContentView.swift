@@ -9,25 +9,51 @@ struct ContentView: View {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 300)
         } detail: {
-            Group {
-                if store.accounts.isEmpty {
-                    WelcomeView(isDropTargeted: isDropTargeted)
-                } else {
-                    switch store.selection ?? .overview {
-                    case .overview: OverviewView()
-                    case .cashflow: CashFlowView()
-                    case .stories: StoriesView()
-                    case .transactions: TransactionsView()
-                    case .report: OverviewView()
-                    case .ask: AskView()
-                    case .review: ReviewView()
-                    case .categories: CategoriesView()
-                    case .accounts: AccountsView()
+            HStack(spacing: 0) {
+                Group {
+                    if store.accounts.isEmpty {
+                        WelcomeView(isDropTargeted: isDropTargeted)
+                    } else if let place = store.placeFocus {
+                        PlaceView(name: place)
+                    } else {
+                        switch store.selection ?? .overview {
+                        case .overview, .report, .ask: OverviewView()
+                        case .cashflow: CashFlowView()
+                        case .stories: StoriesView()
+                        case .transactions: TransactionsView()
+                        case .review: ReviewView()
+                        case .categories, .accounts: SetupView()
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The question pane stays in place when hidden, so a conversation is still there on return.
+                if !store.accounts.isEmpty {
+                    HStack(spacing: 0) {
+                        Divider()
+                        AskView()
+                            .frame(width: 380)
+                            .background(.background.secondary)
+                    }
+                    .frame(width: store.showsAsk ? 381 : 0, alignment: .leading)
+                    .clipped()
+                    .opacity(store.showsAsk ? 1 : 0)
+                    .allowsHitTesting(store.showsAsk)
+                }
+            }
+            .background(Color(nsColor: .windowBackgroundColor))
+            .toolbar {
+                if !store.accounts.isEmpty {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            withAnimation(.snappy(duration: 0.25)) { store.showsAsk.toggle() }
+                        } label: {
+                            Label("Ask", systemImage: store.showsAsk ? "bubble.left.and.text.bubble.right.fill" : "bubble.left.and.text.bubble.right")
+                        }
+                        .help("Ask a question about your spending (⌘K)")
                     }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
         }
         .tint(Theme.accent)
         .overlay {
@@ -98,8 +124,14 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        @Bindable var store = store
-        List(selection: $store.selection) {
+        // Four pages answer four questions; everything else is a detail of one of them.
+        List(selection: Binding(get: {
+            switch store.selection ?? .overview {
+            case .report, .ask: return SidebarItem.overview
+            case .categories: return .accounts
+            case let other: return other
+            }
+        }, set: { store.selection = $0 })) {
             Section {
                 Label("Overview", systemImage: "sparkles.rectangle.stack.fill")
                     .tag(SidebarItem.overview)
@@ -110,17 +142,15 @@ struct SidebarView: View {
                     .tag(SidebarItem.stories)
                 Label("Transactions", systemImage: "list.bullet.rectangle.portrait.fill")
                     .tag(SidebarItem.transactions)
-                Label("Ask the Academy", systemImage: "bubble.left.and.text.bubble.right.fill")
-                    .tag(SidebarItem.ask)
             }
-            Section("Housekeeping") {
-                Label("Double-Check", systemImage: "checkmark.seal.fill")
-                    .badge(store.reviewItems.count)
-                    .tag(SidebarItem.review)
-                Label("Categories", systemImage: "square.grid.2x2.fill")
-                    .tag(SidebarItem.categories)
-                Label("Accounts", systemImage: "creditcard.fill")
-                    .badge(Text("\(store.accounts.count)").foregroundStyle(.tertiary))
+            Section("Fine-Tune") {
+                // Only there when there is something to look at.
+                if !store.reviewItems.isEmpty || store.selection == .review {
+                    Label("Double-Check", systemImage: "checkmark.seal.fill")
+                        .badge(store.reviewItems.count)
+                        .tag(SidebarItem.review)
+                }
+                Label("Setup", systemImage: "slider.horizontal.3")
                     .tag(SidebarItem.accounts)
             }
         }

@@ -404,6 +404,8 @@ struct TransactionFilter: Equatable {
     var month: Month?
     var accountID: UUID?
     var merchantKey: String?
+    /// A place by its tidy name, however many ways it is spelled on statements.
+    var merchant: String?
     var needsCheck = false
     /// Only the charges that belong to one trip or event.
     var storyID: UUID?

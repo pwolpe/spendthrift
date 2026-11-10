@@ -24,7 +24,11 @@ final class BudgetStore {
     @ObservationIgnored private var dateCache: [String: Date] = [:]
 
     // UI state
-    var selection: SidebarItem? = .overview
+    var selection: SidebarItem? = .overview { didSet { if placeFocus != nil { placeFocus = nil } } }
+    /// Non-nil while one place's page is open over whatever page was showing.
+    var placeFocus: String?
+    /// The question pane on the right, available from every page.
+    var showsAsk = false
     var transactionFilter = TransactionFilter()
     /// The Overview looks at one month or at a whole year; the same page either way.
     var overviewShowsYear = ProcessInfo.processInfo.environment["TONY_AWARDS_YEAR"] != nil
@@ -281,13 +285,15 @@ final class BudgetStore {
                 .map { MerchantRule(name: $0.name, category: $0.category!) }
             // Several batches at once, biggest places first. A batch that fails is retried in halves;
             // only if nothing at all gets through do we assume the cloud is unreachable and stop.
-            var batches = waiting.map(\.item).chunked(into: 30)
+            var batches = waiting.map(\.item).chunked(into: 15)
             cloudAttempted.formUnion(waiting.map(\.item.key))
             var anySucceeded = false
             await withTaskGroup(of: ([CloudItem], [String: CloudVerdict]?).self) { group in
                 var running = 0
                 func start() {
-                    while running < 5, !batches.isEmpty {
+                    // Measured on 567 real places: forty small batches in flight finish in under ten
+                    // seconds; five at a time took a minute. The answers are the same.
+                    while running < 40, !batches.isEmpty {
                         let batch = batches.removeFirst()
                         running += 1
                         group.addTask { (batch, await CloudSorter.sort(batch, examples: examples)) }
@@ -506,6 +512,28 @@ final class BudgetStore {
     }
 
     func place(_ key: String) -> MerchantInfo? { library.merchants[key] }
+
+    /// Opens the page for one place: everything ever spent there.
+    func showPlace(_ name: String) {
+        withAnimation(.snappy(duration: 0.25)) { placeFocus = name }
+    }
+
+    /// Two names for one business: everything filed under `other` becomes part of `name` from now on.
+    func combinePlaces(_ other: String, into name: String) {
+        let target = library.merchants.values.first { $0.name == name }
+        var moved = 0
+        for (key, info) in library.merchants where info.name == other {
+            library.merchants[key]?.name = name
+            if let category = target?.category { library.merchants[key]?.category = category }
+            library.merchants[key]?.domain = target?.domain ?? info.domain
+            library.merchants[key]?.source = .user
+            library.merchants[key]?.confirmed = true
+            moved += 1
+        }
+        guard moved > 0 else { return }
+        withAnimation(.snappy) { changed() }
+        showToast("“\(other)” is now part of \(name).", symbol: "checkmark.circle.fill")
+    }
 
     // MARK: - Tony's own categories
 

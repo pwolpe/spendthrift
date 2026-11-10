@@ -542,6 +542,7 @@ private struct PlacesCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(title: "Top Places")
                 ForEach(Array(places.enumerated()), id: \.element.id) { i, place in
+                    Button { BudgetStore.shared.showPlace(place.name) } label: {
                     HStack(spacing: 12) {
                         Text("\(i + 1)")
                             .font(.callout.weight(.bold))
@@ -557,6 +558,9 @@ private struct PlacesCard: View {
                         Spacer()
                         Text(Money.format(place.total, cents: false)).monospacedDigit()
                     }
+                    .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                     if i < places.count - 1 { Divider().padding(.leading, 72) }
                 }
                 if places.isEmpty { Text("Nothing yet.").foregroundStyle(.secondary) }

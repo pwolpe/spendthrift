@@ -15,6 +15,7 @@ struct TransactionsView: View {
         if let m = f.month { list = list.filter { $0.month == m } }
         if let a = f.accountID { list = list.filter { $0.accountID == a } }
         if let k = f.merchantKey { list = list.filter { $0.merchantKey == k } }
+        if let name = f.merchant { list = list.filter { $0.merchant == name } }
         if let s = f.storyID, let story = store.stories.first(where: { $0.id == s }) {
             let ids = Set(story.entryIDs)
             list = list.filter { ids.contains($0.id) }
@@ -128,11 +129,12 @@ struct TransactionsView: View {
                 }
                 if places.count == 1 {
                     Divider()
-                    Button("Show All from \(first.merchant)") {
-                        store.transactionFilter = TransactionFilter(merchantKey: first.merchantKey)
-                    }
+                    Button("Everything at \(first.merchant)") { store.showPlace(first.merchant) }
                 }
             }
+        } primaryAction: { ids in
+            // Double-click a charge: everything ever spent at that place.
+            if let t = store.transactions.first(where: { ids.contains($0.id) }) { store.showPlace(t.merchant) }
         }
     }
 }
@@ -177,6 +179,9 @@ private struct FilterBar: View {
             }
             if let key = store.transactionFilter.merchantKey {
                 chip(store.place(key)?.name ?? "One place", symbol: "mappin.circle.fill") { store.transactionFilter.merchantKey = nil }
+            }
+            if let name = store.transactionFilter.merchant {
+                chip(name, symbol: "mappin.circle.fill") { store.transactionFilter.merchant = nil }
             }
             if store.transactionFilter.needsCheck {
                 chip("AI guesses", symbol: "sparkles") { store.transactionFilter.needsCheck = false }
@@ -305,9 +310,7 @@ private struct TransactionInspector: View {
                 if place.count > 1 {
                     group("All visits to \(t.merchant)") {
                         PlaceHistory(transactions: place)
-                        Button("Show All \(place.count) Charges") {
-                            store.transactionFilter = TransactionFilter(merchantKey: t.merchantKey)
-                        }
+                        Button("Everything at \(t.merchant)") { store.showPlace(t.merchant) }
                     }
                 }
             }

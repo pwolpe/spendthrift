@@ -400,8 +400,7 @@ struct OverviewView: View {
                 SectionHeader(title: "Top places")
                 ForEach(Array(top.enumerated()), id: \.offset) { _, item in
                     Button {
-                        store.transactionFilter = TransactionFilter(month: m, merchantKey: item.key)
-                        store.selection = .transactions
+                        store.showPlace(item.name)
                     } label: {
                     HStack(spacing: 12) {
                         MerchantIcon(name: item.name, category: item.category, size: 30)

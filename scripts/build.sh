@@ -35,7 +35,7 @@ codesign --force --sign "$SIGN" --timestamp=none "$APP"
 echo "→ Drawing icon (cartoon Tony via Image Playground)"
 # Image Playground only runs in a foreground app, so launch the bundle normally.
 rm -f "$BUILD/icon-1024.png"
-open -W -n "$APP" --args --make-icon "$BUILD/icon-1024.png" --cartoon "$CARTOON" || true
+open -W -n "$APP" --args --make-icon "$BUILD/icon-1024.png" --cartoon "$ROOT/Resources/tony-avatar.png" || true
 if [ -f "$BUILD/icon-1024.png" ]; then
   ICONSET="$BUILD/AppIcon.iconset"
   rm -rf "$ICONSET"; mkdir -p "$ICONSET"
@@ -49,6 +49,7 @@ fi
 if [ -f "$CARTOON" ]; then cp "$CARTOON" "$APP/Contents/Resources/tony-cartoon.png"; fi
 # The banner pictures: a dozen starters, and Tony's photo, which every new drawing is made from.
 cp "$ROOT/Resources/tony.jpg" "$APP/Contents/Resources/tony.jpg"
+cp "$ROOT/Resources/tony-avatar.png" "$APP/Contents/Resources/tony-avatar.png"
 mkdir -p "$APP/Contents/Resources/Starters" && cp "$ROOT/Resources/Starters/"* "$APP/Contents/Resources/Starters/"
 
 # 4. Re-sign after adding resources. First drop "downloaded from the internet" marks and other

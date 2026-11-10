@@ -268,9 +268,8 @@ struct AskView: View {
                             .id("thinking")
                         }
                     }
-                    .padding(28)
-                    .frame(maxWidth: 820, alignment: .leading)
-                    .frame(maxWidth: .infinity)
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .onChange(of: answers.count) {
                     withAnimation { proxy.scrollTo(answers.last?.id, anchor: .bottom) }
@@ -280,7 +279,7 @@ struct AskView: View {
             HStack(spacing: 10) {
                 TextField("Ask about your spending…", text: $question)
                     .textFieldStyle(.plain)
-                    .font(.title3)
+                    .font(.body)
                     .focused($focused)
                     .onSubmit(ask)
                 Button(action: ask) {
@@ -293,38 +292,37 @@ struct AskView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
             .glassEffect(.regular, in: .capsule)
-            .padding(.horizontal, 28)
-            .padding(.bottom, 20)
-            .frame(maxWidth: 820)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 14)
         }
-        .navigationTitle("Ask the Academy")
         .onAppear {
-            focused = true
-            if answers.isEmpty, let q = DebugHooks.askQuestion { question = q; ask() }
+            if answers.isEmpty, let q = DebugHooks.askQuestion { store.showsAsk = true; question = q; ask() }
         }
+        .onChange(of: store.showsAsk) { focused = store.showsAsk }
     }
 
     private var intro: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 14) {
-                TonyAvatar(size: 64)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Ask the Academy")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                    Text(CloudAI.isEnabled ? "Ask anything about your money, then keep going: “and last year?”, “why?”, “what about travel?”"
-                                           : "Questions are answered right here on your Mac. Nothing is sent anywhere.")
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                TonyAvatar(size: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Ask")
+                        .font(.system(size: 24, weight: .bold, design: .serif))
+                    Text(CloudAI.isEnabled ? "Anything about your money. Then keep going: “and last year?”, “why?”"
+                                           : "Answered right here on your Mac. Nothing is sent anywhere.")
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            FlowLayout(spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(examples, id: \.self) { example in
                     Button(example) { question = example; ask() }
                         .buttonStyle(.glass)
                 }
             }
         }
-        .padding(.top, 30)
+        .padding(.top, 8)
     }
 
     private func ask() {

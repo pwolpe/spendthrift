@@ -138,7 +138,8 @@ enum PDFStatement {
         // Every amount printed after a label, anywhere on a line. A statement can print several
         // summaries (Amex: Pay In Full, Pay Over Time, Account Total); any one that fits will do.
         func amounts(_ label: String) -> [Double] {
-            let pattern = "(?i)(?:^|\\s)(?:" + label + ")\\s+[-+]?\\$?([\\d,]+\\.\\d{2})\\b"
+            // (Capital One prints "Transactions + $42.45": a sign, a space, then the amount.)
+            let pattern = "(?i)(?:^|\\s)(?:" + label + ")\\s+[-+]?\\s?\\$?([\\d,]+\\.\\d{2})\\b"
             guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
             return re.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { m in
                 Range(m.range(at: 1), in: text).flatMap { MoneyParsing.parse(String(text[$0])) }
@@ -149,7 +150,7 @@ enum PDFStatement {
         guard spent > 0 || received > 0 else { return false }
         let extras = (amounts("Cash Advances").first ?? 0) + (amounts("Balance Transfers").first ?? 0)
             + (amounts("Fees(?: Charged)?").first ?? 0) + (amounts("Interest(?: Charged)?").first ?? 0)
-        let purchases = amounts("Purchases") + amounts("New Charges") + amounts("Total New Charges")
+        let purchases = amounts("Purchases") + amounts("New Charges") + amounts("Total New Charges") + amounts("Transactions")
         var credits = amounts("Payments?,? ?(?:and |& |/ ?)?(?:Other )?Credits") + amounts("Total Payments and Credits")
         if let payments = amounts("Payments").first { credits.append(payments + (amounts("Credits").first ?? 0)) }
         let outMatches = purchases.contains { abs($0 + extras - spent) < 0.005 || abs($0 - spent) < 0.005 }
@@ -316,6 +317,8 @@ enum PDFStatement {
             }
             guard description.filter(\.isLetter).count >= 3,
                   !skipWords.contains(where: description.lowercased().hasPrefix) else { return }
+            // "February 11, 2026" in a sentence is a date, not a charge dated Feb 11 called "2026 …".
+            if description.range(of: #"^(19|20)\d\d\b"#, options: .regularExpression) != nil { return }
             var amount = rawAmount
             sectionSum += abs(rawAmount); sectionCount += 1
             if sectionIsCredit && amount > 0 { amount = -amount }
@@ -330,6 +333,9 @@ enum PDFStatement {
             var recognized = true
             // On a bank account, "Payments & Transfers" is money going out (on a card it's money coming in).
             if t.contains("payments & transfers") || t.contains("payments and transfers") || t.contains("atm & debit") || t.contains("debit card") {
+                sectionIsCredit = false
+            } else if t.hasSuffix(": transactions") {
+                // Capital One heads each cardholder's purchases "NAME #1095: Transactions".
                 sectionIsCredit = false
             } else if ["payments", "credits", "deposits", "additions", "refunds"].contains(where: t.contains) { sectionIsCredit = true }
             // "PURCHASE" (Chase cards print it in the singular), "CASH ADVANCES", "BALANCE TRANSFERS"…
@@ -398,7 +404,9 @@ enum PDFStatement {
                     if let (_, used2) = leadingDate(rest, closing: closing) { rest.removeFirst(used2) }
                     let description = rest.joined(separator: " ")
                     // "10/15/26 10/18/26" (hotel arrival/departure) is detail, not a new charge.
-                    if description.filter(\.isLetter).count >= 3 { pending = (date, description, 0) }
+                    // ("February 11, 2026 on the statement closing date" is a sentence, not a charge.)
+                    if description.filter(\.isLetter).count >= 3,
+                       description.range(of: #"^(19|20)\d\d\b"#, options: .regularExpression) == nil { pending = (date, description, 0) }
                 } else if pending == nil, line.count < 70 {
                     updateSection(line)
                 }
@@ -432,7 +440,9 @@ enum PDFStatement {
             // when only the second carries a dollar sign, that's the one that was charged.
             var amountToken = trailing.first
             if trailing.count == 2, trailing[1].contains("$"), !trailing[0].contains("$") { amountToken = trailing[1] }
-            guard let amountToken, let amount = parseMoney(amountToken) else { continue }
+            guard let amountToken, var amount = parseMoney(amountToken) else { continue }
+            // Capital One prints a payment as "AUTOPAY PYMT - $42.45": the minus stands apart.
+            if tokens.last == "-" { tokens.removeLast(); amount = -abs(amount) }
             pending = nil
             add(date, checkNumber.map { "Check #\($0)" } ?? tokens.joined(separator: " "), amount)
         }

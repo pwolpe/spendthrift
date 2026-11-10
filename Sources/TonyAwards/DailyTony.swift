@@ -20,7 +20,15 @@ final class DailyTony {
 
     /// Cartoon Tony: baked in at build time, or made on first launch.
     private(set) var cartoon: NSImage? = Bundle.main.url(forResource: "tony-cartoon", withExtension: "png").flatMap(NSImage.init(contentsOf:))
-    var avatar: NSImage? { croppedAvatar(cartoon ?? headshot) }
+    /// The portrait used wherever Tony's face appears small: drawn from his photo in the same
+    /// style as the app's default pictures, so the sidebar, the icon and the banner are one person.
+    private let portrait: NSImage? = {
+        if let url = Bundle.main.url(forResource: "tony-avatar", withExtension: "png") { return NSImage(contentsOf: url) }
+        let dev = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Resources/tony-avatar.png")
+        return NSImage(contentsOf: dev)
+    }()
+    var avatar: NSImage? { portrait ?? croppedAvatar(cartoon ?? headshot) }
 
     @ObservationIgnored private var avatarCache: (source: ObjectIdentifier, image: NSImage)?
     private func croppedAvatar(_ source: NSImage?) -> NSImage? {
@@ -106,6 +114,7 @@ final class DailyTony {
         var date: String?
         var seen = false
         var model: String?
+        var style: String?
     }
 
     /// What the picture is about ("Dunkin' · Nov 7"), shown under it. Nil for a starter.
@@ -194,21 +203,24 @@ final class DailyTony {
         async let planned = CloudImage.scene(merchant: pick.merchant, category: pick.category.displayName, amount: pick.amount)
         let model = await chosen
         guard let scene = await planned else { preparedThisLaunch = false; return }
-        var drawn = await CloudImage.draw(scene: scene.scene, photo: photo, model: model), used = model
+        // A style none of the last several pictures used.
+        let usedLately = Set(saved.suffix(7).compactMap(\.style))
+        let style = CloudImage.styles.filter { !usedLately.contains($0.id) }.randomElement() ?? CloudImage.styles.randomElement()!
+        var drawn = await CloudImage.draw(scene: scene.scene, photo: photo, model: model, style: style.look), used = model
         if drawn == nil, model != CloudImage.defaultModel {
-            drawn = await CloudImage.draw(scene: scene.scene, photo: photo, model: CloudImage.defaultModel); used = CloudImage.defaultModel
+            drawn = await CloudImage.draw(scene: scene.scene, photo: photo, model: CloudImage.defaultModel, style: style.look); used = CloudImage.defaultModel
         }
         guard let drawn, NSImage(data: drawn) != nil else { preparedThisLaunch = false; return }
 
         let file = "tony-\(Int(Date.now.timeIntervalSince1970)).png"
         try? drawn.write(to: folder.appendingPathComponent(file))
         saved.append(Picture(file: file, caption: scene.caption, merchant: pick.merchant,
-                             date: pick.date.map { DateParsing.iso.string(from: $0) }, seen: false, model: used))
+                             date: pick.date.map { DateParsing.iso.string(from: $0) }, seen: false, model: used, style: style.id))
         // Keep the last thirty; older ones go, with their files.
         while saved.count > 30 { try? FileManager.default.removeItem(at: folder.appendingPathComponent(saved.removeFirst().file)) }
         gallery = saved
         if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil {
-            print("DEBUG PICTURE next: \(pick.merchant) [\(used)] \(scene.caption)\n  scene: \(scene.scene)")
+            print("DEBUG PICTURE next: \(pick.merchant) [\(used), \(style.id)] \(scene.caption)\n  scene: \(scene.scene)")
         }
     }
 }

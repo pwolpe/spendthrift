@@ -30,12 +30,12 @@ struct TonyAwardsApp: App {
                 Button("Cash Flow") { BudgetStore.shared.selection = .cashflow }.keyboardShortcut("2")
                 Button("Trips & Events") { BudgetStore.shared.selection = .stories }.keyboardShortcut("3")
                 Button("Transactions") { BudgetStore.shared.selection = .transactions }.keyboardShortcut("4")
-                Button("The Year") { BudgetStore.shared.overviewShowsYear = true; BudgetStore.shared.selection = .overview }.keyboardShortcut("5")
-                Button("Ask the Academy") { BudgetStore.shared.selection = .ask }.keyboardShortcut("6")
                 Divider()
-                Button("Double-Check") { BudgetStore.shared.selection = .review }.keyboardShortcut("7")
-                Button("Categories") { BudgetStore.shared.selection = .categories }.keyboardShortcut("8")
-                Button("Accounts") { BudgetStore.shared.selection = .accounts }.keyboardShortcut("9")
+                Button("Ask a Question") { BudgetStore.shared.showsAsk.toggle() }.keyboardShortcut("k")
+                Divider()
+                Button("Double-Check") { BudgetStore.shared.selection = .review }.keyboardShortcut("5")
+                Button("Accounts") { BudgetStore.shared.selection = .accounts }.keyboardShortcut("6")
+                Button("Categories") { BudgetStore.shared.selection = .categories }.keyboardShortcut("7")
             }
         }
 
