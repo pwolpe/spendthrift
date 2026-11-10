@@ -188,21 +188,25 @@ final class DailyPicture {
         return true
     }
 
-    /// On opening: the picture made last time if it hasn't been seen, otherwise a random one.
+    /// One picture a day. Today's is chosen the first time the app opens that day and stays put:
+    /// the one drawn last time if it hasn't been shown yet, otherwise one from the collection.
     private func showOnOpen() {
+        let today = todayKey
+        let chosen = UserDefaults.standard.string(forKey: "pictureOfTheDay")?.components(separatedBy: "|") ?? []
         var saved = gallery
+        let pool = Self.starters + saved.filter { $0.receipt == true }
+        if chosen.count == 2, chosen[0] == today, let same = pool.first(where: { $0.file == chosen[1] }), show(same, animated: false) { return }
         if let index = saved.lastIndex(where: { !$0.seen && $0.receipt == true }), show(saved[index], animated: false) {
-            for i in saved.indices { saved[i].seen = true }
+            saved[index].seen = true
             gallery = saved
+            UserDefaults.standard.set("\(today)|\(saved[index].file)", forKey: "pictureOfTheDay")
             return
         }
-        showRandom(animated: false)
-    }
-
-    /// Any other picture, at once: the starters and everything drawn so far.
-    func showRandom(animated: Bool = true) {
-        let pool = (Self.starters + gallery.filter { $0.seen && $0.receipt == true }).filter { $0.file != current?.file }.shuffled()
-        for picture in pool where show(picture, animated: animated) { return }
+        // Nothing new waiting: one from the collection that wasn't yesterday's.
+        for picture in pool.filter({ $0.file != chosen.last }).shuffled() where show(picture, animated: false) {
+            UserDefaults.standard.set("\(today)|\(picture.file)", forKey: "pictureOfTheDay")
+            return
+        }
     }
 
     /// The real photos, sent along with every drawing so the picture is undeniably the person.
@@ -212,8 +216,8 @@ final class DailyPicture {
             .appendingPathComponent("Resources/\(name).jpg")
         return try? Data(contentsOf: dev)
     }
-    private static let photo: Data? = bundled("tony")
-    private static let paulPhoto: Data? = bundled("paul")
+    fileprivate static let photo: Data? = bundled("tony")
+    fileprivate static let paulPhoto: Data? = bundled("paul")
 
     /// Once per launch, out of sight: choose the best image model there is today, pick a real recent
     /// purchase, and draw the picture that will be waiting the next time the app opens.
@@ -221,6 +225,8 @@ final class DailyPicture {
         lastHighlights = highlights
         if !trips.isEmpty { lastTrips = trips }
         guard CloudAI.isEnabled, !preparedThisLaunch, !isGenerating, !highlights.isEmpty, let photo = Self.photo else { return }
+        // One a day: if tomorrow's picture is already drawn and waiting, there is nothing to do.
+        if forcedCast == nil, gallery.contains(where: { !$0.seen && $0.receipt == true }) { preparedThisLaunch = true; return }
         // Who stars this time: Tony, Paul, or the two of them, a third of the time each. Whoever has
         // appeared least in the recent pictures goes next, and never the same as last time.
         var cast: [(name: String, photo: Data)] = [("Tony", photo)]
@@ -334,19 +340,10 @@ struct BannerCard: View {
                     }
                 }
                 Spacer(minLength: 0)
-                HStack(spacing: 8) {
-                    Button { PictureSharing.share(daily) } label: { Image(systemName: "square.and.arrow.up") }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                        .help("Send this picture to someone")
-                    Button {
-                        daily.showRandom()
-                    } label: {
-                        Label("Another One", systemImage: "wand.and.sparkles")
-                    }
+                Button { PictureSharing.share(daily) } label: { Image(systemName: "square.and.arrow.up") }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
-                }
+                    .help("Send today's picture to someone")
             }
             .padding(.horizontal, 6)
         }
@@ -404,5 +401,127 @@ enum PictureSharing {
         // The menu opens where the button was clicked.
         let point = view.convert(window.mouseLocationOutsideOfEventStream, from: nil)
         NSSharingServicePicker(items: [url]).show(relativeTo: NSRect(x: point.x - 10, y: point.y - 10, width: 20, height: 20), of: view, preferredEdge: .minY)
+    }
+}
+
+// MARK: - A picture for each trip and event
+
+/// Every trip or event gets its own picture: the two of them (or one) in that place, holding a
+/// receipt from it. Drawn the first time the trip is opened, then kept with the other pictures.
+@MainActor @Observable
+final class TripPictures {
+    static let shared = TripPictures()
+
+    struct Kept: Codable, Hashable {
+        var file: String
+        var caption: String
+        var merchant: String
+        var amount: Double
+        var date: String?
+    }
+
+    private(set) var kept: [String: Kept] = [:]
+    private(set) var drawing: Set<String> = []
+    @ObservationIgnored private var failed: Set<String> = []
+    @ObservationIgnored private var images: [String: NSImage] = [:]
+
+    private let folder: URL = {
+        let dir = BudgetPaths().root.appendingPathComponent("Pictures/Trips", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+    private var index: URL { folder.appendingPathComponent("trips.json") }
+
+    private init() {
+        kept = (try? Data(contentsOf: index)).flatMap { try? JSONDecoder().decode([String: Kept].self, from: $0) } ?? [:]
+    }
+
+    func picture(for story: Story) -> (image: NSImage, info: Kept)? {
+        guard let info = kept[story.fingerprint] else { return nil }
+        if let image = images[story.fingerprint] { return (image, info) }
+        guard let image = NSImage(contentsOf: folder.appendingPathComponent(info.file)) else { return nil }
+        images[story.fingerprint] = image
+        return (image, info)
+    }
+
+    func isDrawing(_ story: Story) -> Bool { drawing.contains(story.fingerprint) }
+
+    /// Draws this trip's picture if it has none. Safe to call every time the trip is opened.
+    func ensure(_ story: Story, store: BudgetStore) async {
+        let key = story.fingerprint
+        guard CloudAI.isEnabled, kept[key] == nil, !drawing.contains(key), !failed.contains(key), let tony = DailyPicture.photo else { return }
+        // The charge to put on the receipt: the biggest at a place with a name.
+        let dull = ["withdrawal", "atm", "fee", "payment", "transfer", "unknown", "airlines", "airways"]
+        let charges = store.transactions(in: story).filter { t in t.amount >= 5 && !t.isTransfer && !dull.contains { t.merchant.lowercased().contains($0) } }
+        // Something bought while there beats something booked beforehand (insurance, the outfitter's deposit).
+        let onTheGround = charges.filter { t in let day = DateParsing.iso.string(from: t.date); return day >= story.start && day <= story.end }
+        let pool = onTheGround.count >= 2 ? onTheGround : charges
+        guard let pick = pool.sorted(by: { $0.amount > $1.amount }).prefix(4).randomElement() ?? store.transactions(in: story).max(by: { $0.amount < $1.amount }) else { return }
+        drawing.insert(key)
+        defer { drawing.remove(key) }
+
+        var cast: [(name: String, photo: Data)] = [("Tony", tony)]
+        if let paul = DailyPicture.paulPhoto {
+            cast = [[("Tony", tony)], [("Paul", paul)], [("Tony", tony), ("Paul", paul)]].randomElement()!
+        }
+        async let chosen = CloudImage.bestModel()
+        async let planned = CloudImage.scene(merchant: pick.merchant, category: pick.category.displayName, amount: pick.amount,
+                                             cast: cast.map(\.name), trip: story.name, tripPlace: story.place)
+        let model = await chosen
+        guard let scene = await planned else { failed.insert(key); return }
+        let style = CloudImage.styles.randomElement()!
+        let receipt = CloudImage.Receipt(merchant: pick.merchant, what: scene.what, total: Money.format(pick.amount))
+        var best: Data?, bestMarks = Int.min
+        for _ in 0..<2 {
+            guard let candidate = await CloudImage.draw(scene: scene.scene, cast: cast, model: model, style: style.look, receipt: receipt),
+                  NSImage(data: candidate) != nil else { continue }
+            let marks = await CloudImage.receiptReads(candidate, receipt: receipt) ?? 4
+            if marks > bestMarks { best = candidate; bestMarks = marks }
+            if bestMarks >= 4 { break }
+        }
+        guard let best, let image = NSImage(data: best) else { failed.insert(key); return }
+        let file = "trip-\(Int(Date.now.timeIntervalSince1970)).png"
+        guard (try? best.write(to: folder.appendingPathComponent(file))) != nil else { return }
+        images[key] = image
+        withAnimation(.easeInOut(duration: 0.4)) {
+            kept[key] = Kept(file: file, caption: scene.caption, merchant: pick.merchant, amount: pick.amount, date: DateParsing.iso.string(from: pick.date))
+        }
+        if let data = try? JSONEncoder().encode(kept) { try? data.write(to: index, options: .atomic) }
+        if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG TRIP PICTURE \(story.name): \(pick.merchant) \(pick.amount) marks \(bestMarks) | \(scene.caption)") }
+    }
+}
+
+/// The picture at the head of a trip's page: there at once if it was drawn before, otherwise a
+/// quiet "drawing" strip that the page doesn't wait on.
+struct TripPictureCard: View {
+    let story: Story
+    @State private var pictures = TripPictures.shared
+
+    var body: some View {
+        Group {
+            if let (image, info) = pictures.picture(for: story) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Color.black.opacity(0.06)
+                        .aspectRatio(21.0 / 9.0, contentMode: .fit)
+                        .overlay { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill) }
+                        .clipShape(.rect(cornerRadius: 16, style: .continuous))
+                        .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.hairline) }
+                        .shadow(color: .black.opacity(0.10), radius: 14, y: 5)
+                    Text(info.caption).font(.system(size: 19, weight: .bold, design: .serif)).fixedSize(horizontal: false, vertical: true)
+                    Label("\(info.merchant) · \(Money.format(info.amount))", systemImage: "receipt").font(.callout).foregroundStyle(.secondary)
+                }
+                .transition(.opacity)
+            } else if pictures.isDrawing(story) {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text("Drawing a picture from this \(story.kind == .trip ? "trip" : "occasion")…").font(.callout).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.sheet, in: .rect(cornerRadius: 11, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.hairline) }
+            }
+        }
+        .task(id: story.fingerprint) { await pictures.ensure(story, store: .shared) }
     }
 }

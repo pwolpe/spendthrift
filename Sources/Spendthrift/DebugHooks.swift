@@ -158,6 +158,14 @@ enum DebugHooks {
             if let m = store.months.first(where: { $0.year == wanted && $0.month == 7 }) { show(.month(m)) }
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_TRIPPIC=<part of a trip's name>: draw that trip's picture, then quit.
+        if let wanted = env["SPENDTHRIFT_TRIPPIC"] {
+            if let story = store.stories.first(where: { $0.name.localizedCaseInsensitiveContains(wanted) }) {
+                await TripPictures.shared.ensure(story, store: store)
+                print("TRIPPIC \(story.name): \(TripPictures.shared.kept[story.fingerprint].map { "\($0.file) | \($0.merchant) \($0.amount) | \($0.caption)" } ?? "nothing drawn")")
+            } else { print("TRIPPIC no trip named \(wanted)") }
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_TIEOUT=1: how each card's payments tie to its statements, then quit.
         if env["SPENDTHRIFT_TIEOUT"] != nil {
             await store.notePeriodsIfNeeded()

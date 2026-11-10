@@ -76,8 +76,8 @@ credit, or there's no internet, everything falls back to the on-device paths.
 - **Overview**: a wide banner across the top with a cartoon of Tony living out a daydream about a
   real recent purchase. It never waits: on opening it shows the picture prepared during the last
   visit (or one of twelve starters in `Resources/Starters`), then quietly asks OpenRouter which image
-  model is best today and draws the next one from his photo for next time. **Another One** shows a
-  different picture at once. Below it, a **Month / Year** switch. *Month*: the total, where it went,
+  model is best today and draws the next one from his photo for next time. One picture a day: it stays the same all day,
+  and a share button sends it. Each trip or event page gets its own picture too, drawn the first time it is opened. Below it, a **Month / Year** switch. *Month*: the total, where it went,
   the trend, top places, what's coming up, and **the month, itemized** (a receipt of the month's superlatives plus notes on new
   subscriptions, price increases, possible double charges and unusual purchases). *Year*:
   month-by-month stacked spending, category trends, top places, biggest purchases, repeating

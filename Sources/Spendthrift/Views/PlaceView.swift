@@ -259,6 +259,8 @@ struct ChargesView: View {
                         .font(.system(size: 40, weight: .bold, design: .rounded))
                         .monospacedDigit()
                 }
+                // A trip or an occasion gets its own picture: them, there, holding a receipt from it.
+                if let id = filter.storyID, let story = store.stories.first(where: { $0.id == id }), scrolls { TripPictureCard(story: story) }
                 if all.isEmpty {
                     TonySays(title: "Nothing here", message: "No charges match. Try another month or category.", art: "nothing")
                 } else {
