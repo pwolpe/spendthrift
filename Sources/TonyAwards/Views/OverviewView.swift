@@ -284,13 +284,16 @@ struct OverviewView: View {
                             }
                         }
                     }
-                    .frame(height: 240)
+                    // A fixed size: Swift Charts crashes drawing a ring into a sliver, which a card
+                    // can briefly be handed while the row beside it is laying itself out.
+                    .frame(width: 240, height: 240)
+                    .frame(maxWidth: .infinity)
                     .animation(.snappy, value: hovered)
-                    // While statements are arriving and being sorted the totals change many times a
-                    // second. Animating the ring between those states crashes Swift Charts, so the
-                    // ring redraws at once when the data changes and only animates on hover.
-                    .transaction(value: sum) { $0.animation = nil }
-                    .transaction(value: totals.count) { $0.animation = nil }
+                    // Swift Charts crashes when it animates a ring from one set of slices into another
+                    // (a place changing category, statements arriving). Giving the ring a new identity
+                    // whenever its data changes makes it redraw from scratch instead; hovering still animates.
+                    .id(totals.map { "\($0.category.rawValue)=\(Int(($0.total * 100).rounded()))" }.joined(separator: "|"))
+                    .transition(.identity)
 
                     VStack(spacing: 4) {
                         ForEach(totals, id: \.category) { item in
