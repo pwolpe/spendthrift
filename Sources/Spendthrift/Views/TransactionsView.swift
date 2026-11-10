@@ -278,6 +278,8 @@ struct TransactionInspector: View {
                         TextField("Name", text: $name)
                             .textFieldStyle(.plain)
                             .font(.system(size: 19, weight: .bold, design: .serif))
+                            .frame(minHeight: 26)
+                            .fixedSize(horizontal: false, vertical: true)
                             .multilineTextAlignment(.center)
                             .onSubmit { store.renamePlace(t.merchantKey, to: name) }
                             .help("Click to rename this place")

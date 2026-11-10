@@ -51,6 +51,10 @@ struct PlaceView: View {
                 TextField("Name", text: $draft)
                     .textFieldStyle(.plain)
                     .font(.system(size: 30, weight: .bold, design: .serif))
+                    // A plain text field keeps the height of ordinary text unless told otherwise, which
+                    // cut the top off a name this large.
+                    .frame(minHeight: 40)
+                    .fixedSize(horizontal: false, vertical: true)
                     .onSubmit { rename(keys) }
                     .help("Click to rename. Give two places the same name and they become one.")
                 HStack(spacing: 10) {
