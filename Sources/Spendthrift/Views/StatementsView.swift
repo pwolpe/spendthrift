@@ -239,17 +239,21 @@ private struct AccountTile: View {
                             RoundedRectangle(cornerRadius: 2)
                                 .fill(covered.contains(m) ? Theme.accent.opacity(0.75) : (missing.contains(m) ? Theme.caution.opacity(0.8) : Color.primary.opacity(0.10)))
                                 .frame(height: 9)
-                                .help(m.title + (covered.contains(m) ? "" : ": nothing here"))
+                                .help(m.title + (covered.contains(m) ? "" : (missing.contains(m) ? ": a statement seems to be missing" : ": no charges, so no statement")))
                         }
                     }
                 }
                 let quiet = strip.filter { !covered.contains($0) }.count
-                if missing.isEmpty, quiet == 0 {
-                    Label("No gaps", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(Theme.good)
-                } else if missing.isEmpty {
-                    // Not necessarily a problem: a card nobody used that month has nothing to show.
-                    Label(quiet == 1 ? "1 month with nothing here" : "\(quiet) months with nothing here", systemImage: "circle.dotted")
-                        .font(.caption).foregroundStyle(.secondary)
+                if missing.isEmpty {
+                    // An empty month on a card that isn't used every month is just a month it wasn't used:
+                    // banks issue no statement then. Only a hole the app thinks is real gets a warning.
+                    HStack(spacing: 6) {
+                        Label("No gaps", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.good)
+                        if quiet > 0 {
+                            Text(quiet == 1 ? "· 1 month with no charges" : "· \(quiet) months with no charges").foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.caption)
                 } else {
                     Label(missing.count == 1 ? "Nothing for \(missing[0].title)" : "\(missing.count) months missing, \(missing.prefix(2).map(\.name).joined(separator: " and "))\(missing.count > 2 ? "…" : "")",
                           systemImage: "exclamationmark.circle.fill")
