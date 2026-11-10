@@ -608,7 +608,8 @@ struct NoticedCard: View {
     var body: some View {
         let found = store.noticed(in: scope)
         let reading = store.isReading(scope)
-        Group {
+        // A stack, not a group: it has to exist even while empty, or an earlier year would never be read.
+        VStack(spacing: 0) {
             if !found.isEmpty || reading {
                 Card {
                     VStack(alignment: .leading, spacing: 12) {

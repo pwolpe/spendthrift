@@ -498,7 +498,8 @@ struct TripPictureCard: View {
     @State private var pictures = TripPictures.shared
 
     var body: some View {
-        Group {
+        // A stack, not a group: it has to exist even while empty, or the drawing below would never start.
+        VStack(spacing: 0) {
             if let (image, info) = pictures.picture(for: story) {
                 VStack(alignment: .leading, spacing: 10) {
                     Color.black.opacity(0.06)
