@@ -640,14 +640,50 @@ enum CloudStatementReader {
 
 // MARK: - Drawing Tony
 
-/// Today's picture, drawn by a cloud image model from Paul's caricature: Tony himself, doing
-/// something tied to a purchase he just made. The caricature goes along as the reference so the
-/// face, suit and drawing style stay his.
+/// The banner picture, drawn by a cloud image model from Tony's real photo: a cartoon of him living
+/// out a daydream about a purchase he really made. The photo goes along every time so it stays him.
 enum CloudImage {
     static let defaultModel = "google/gemini-nano-banana-2.1"
     static var model: String {
         get { UserDefaults.standard.string(forKey: "cloudImageModel") ?? defaultModel }
         set { UserDefaults.standard.set(newValue, forKey: "cloudImageModel") }
+    }
+
+    /// The best image model on offer today. Image models improve every few months, so rather than
+    /// name one here for good, the app reads what's available and has the writing model choose.
+    static func bestModel() async -> String {
+        guard let url = URL(string: "https://openrouter.ai/api/v1/models"),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let all = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["data"] as? [[String: Any]] else { return model }
+        let candidates = all.filter { entry in
+            let shape = entry["architecture"] as? [String: Any]
+            let id = entry["id"] as? String ?? ""
+            return (shape?["output_modalities"] as? [String])?.contains("image") == true
+                && (shape?["input_modalities"] as? [String])?.contains("image") == true
+                && !id.hasPrefix("openrouter/")
+        }
+        let ids = candidates.compactMap { $0["id"] as? String }
+        guard !ids.isEmpty else { return model }
+        let lines = candidates.map { entry -> String in
+            let released = Date(timeIntervalSince1970: (entry["created"] as? Double) ?? 0).formatted(.iso8601.year().month().day())
+            let about = String(((entry["description"] as? String) ?? "").prefix(220)).replacingOccurrences(of: "\n", with: " ")
+            return "\(entry["id"] as? String ?? "") | \(entry["name"] as? String ?? "") | released \(released) | \(about)"
+        }
+        let system = """
+        Choose the one image model that will draw the best picture for this job: given a photo of a real man, \
+        draw a rich, funny, cartoon illustration of him in an imagined scene, keeping his face unmistakably his. \
+        Prefer the most capable, most recently released model with a strong record of keeping a person's likeness \
+        from a reference photo. Avoid "lite", "mini" and "preview" versions, and prefer a model that draws in \
+        around ten seconds over a slower one of similar quality. Reply with JSON only: {"model": "<id exactly as listed>"}
+        """
+        let reply = await Timeout.run(30) {
+            try? await CloudAI.complete(system: system, user: lines.joined(separator: "\n"), json: true, maxTokens: 2_000, timeout: 25)
+        }
+        if let reply, let choice = CloudAI.object(from: reply)?["model"] as? String, ids.contains(choice) {
+            model = choice
+            return choice
+        }
+        return ids.contains(model) ? model : defaultModel
     }
 
     struct Scene: Sendable {
@@ -656,29 +692,39 @@ enum CloudImage {
     }
 
     /// One sentence saying what Tony is doing, and the nomination line that goes with it.
-    static func scene(merchant: String, category: String, amount: Double, when: String) async -> Scene? {
+    static func scene(merchant: String, category: String, amount: Double) async -> Scene? {
         let system = """
-        You design today's picture for The Tony Awards, a playful personal budgeting app. The picture shows \
-        Tony, a cartoon businessman in a dark suit, doing something tied to a purchase he just made. Seeing \
-        it should make him laugh because it is so specifically about what he really did.
+        You design the picture at the top of The Tony Awards, a playful personal budgeting app made for Tony. \
+        Each picture is a cartoon of Tony in a Walter Mitty daydream: an ordinary purchase he really made, \
+        blown up into a wildly heroic, absurd, joyful fantasy. Seeing it should make him laugh out loud, because \
+        it is so specifically about where he really just spent money.
 
         Given the purchase, reply with JSON only: {"scene": "...", "caption": "..."}
 
-        scene: one sentence describing what Tony is holding or doing and where, as concretely tied to this \
-        exact business as you can. Use what the business is known for: its products, its colors, its setting. \
-        Examples: Dunkin' -> "holding an iced coffee in an orange-and-pink cup and a box of donuts, outside a \
-        donut shop with an orange and pink awning"; United Airlines -> "proudly holding a toy passenger jet \
-        with a blue tail at an airport gate, a rolling suitcase beside him"; Wynn Las Vegas -> "fanning out \
-        playing cards at a casino table under a curved bronze hotel tower"; Con Edison -> "holding a glowing \
-        light bulb next to an electricity meter". One clear action, one clear setting. Do not ask for any \
-        words, lettering or logos in the picture.
+        scene: one or two sentences, starting with "he is", describing the daydream: what Tony is, what he is \
+        doing, what he wears and where. Tie it concretely to this exact business: what it sells, its colors, its \
+        setting, what people do there. Then exaggerate it into an adventure. Examples: a coffee and donut shop -> \
+        "he is a triumphant explorer in a pith helmet, planting a flag on the summit of a mountain of glazed \
+        donuts, a river of iced coffee running through an orange and pink valley below"; a rideshare -> "he is a \
+        chariot racer in a Roman arena, the chariot a small pink-trimmed city car pulled by four scooters, the \
+        crowd going wild"; an electric utility -> "he is a mad scientist in a castle laboratory, throwing a giant \
+        switch as lightning lights a single enormous light bulb"; a parking garage -> "he is a stunt driver \
+        leaping a convertible between the rooftops of two parking garages, valets holding up scorecards". \
+        Any costume must leave his whole face clearly visible. Funny side characters and details are welcome. \
+        Do not ask for any words, lettering or logos in the picture.
 
         caption: one witty awards-show nomination, at most 14 words, starting with "Nominated for Best", about \
-        this purchase. Light accounting humor is welcome; never negative about spending. Do not mention the amount.
+        this purchase and this daydream. Light accounting humor is welcome; never negative about spending. \
+        Do not mention the amount.
         """
-        let user = "Purchase: \(merchant) (\(category)), \(Money.format(amount)), \(when)."
+        // A different flavor of daydream each time, so the pictures don't settle into one joke.
+        let flavor = ["a blockbuster action movie", "a space adventure", "a medieval legend", "a spy thriller", "a nature documentary",
+                      "an Olympic final", "a superhero comic", "a jungle expedition", "a rock concert", "a fairy tale", "a heist movie",
+                      "a western", "a monster movie", "an old Hollywood musical", "a polar expedition", "a magic show",
+                      "a samurai epic", "a circus", "a pirate adventure", "a deep sea voyage"].randomElement()!
+        let user = "Purchase: \(merchant) (\(category)), \(Money.format(amount)). This time, make the daydream \(flavor)."
         let reply = await Timeout.run(40) {
-            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 3_000, temperature: 0.9, timeout: 35)
+            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 3_000, temperature: 1.0, timeout: 35)
         }
         guard let reply, let o = CloudAI.object(from: reply), let scene = (o["scene"] as? String), !scene.isEmpty else { return nil }
         var caption = ((o["caption"] as? String) ?? "").replacingOccurrences(of: "*", with: "")
@@ -687,25 +733,31 @@ enum CloudImage {
         return Scene(scene: scene, caption: caption)
     }
 
-    /// Draws the scene with the caricature as the model for Tony. Nil if it couldn't be drawn.
-    static func draw(scene: String, reference: Data) async -> Data? {
+    /// Draws the scene as a wide cartoon, with Tony's photo as the model for his face. Nil if it couldn't be drawn.
+    static func draw(scene: String, photo: Data, model: String) async -> Data? {
         guard let key = CloudKey.load() else { return nil }
         let prompt = """
-        This is Tony, a cartoon character. Draw a new picture of this exact same character: the same face, \
-        hair, beard, smile, body proportions, dark suit and light blue tie, in the same clean cartoon style with \
-        bold outlines. In the new picture he is \(scene)
-        Show him full body or three-quarter, clearly the star of the picture, with a colorful, detailed cartoon \
-        background that fits the scene. Square picture. No words, letters, logos, captions or watermarks anywhere.
+        The attached photo is Tony. Draw a fun, vibrant, richly detailed cartoon illustration starring him, in the \
+        style of a modern animated feature film with a touch of caricature.
+        It must be unmistakably the man in the photo: the same face shape, the same short dark hair and hairline, \
+        the same dark eyebrows, the same short dark beard and the same big warm smile. Anyone who knows him \
+        should recognize him at once.
+        The scene, a Walter Mitty daydream: \(scene)
+        Very wide cinematic landscape picture (21:9). Tony is the star: large in the frame, his face clearly \
+        visible and well lit, full of joy and swagger. Keep the bottom edge of the picture free of anything \
+        important. Playful, colorful, full of funny details. No words, letters, numbers, logos, captions or \
+        watermarks anywhere.
         """
         let body: [String: Any] = [
             "model": model,
             "modalities": ["image", "text"],
+            "image_config": ["aspect_ratio": "21:9"],
             "messages": [["role": "user", "content": [
                 ["type": "text", "text": prompt],
-                ["type": "image_url", "image_url": ["url": "data:image/png;base64," + reference.base64EncodedString()]],
+                ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64," + photo.base64EncodedString()]],
             ]]],
         ]
-        var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, timeoutInterval: 120)
+        var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, timeoutInterval: 150)
         request.httpMethod = "POST"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

@@ -3,8 +3,10 @@ import AppKit
 import ImagePlayground
 import FoundationModels
 
-/// Each day, caricature Tony shows up holding something he recently bought, in a matching scene.
-/// Apple's on-device Image Playground draws only the prop and the backdrop; Tony stays exactly as drawn.
+/// The banner across the top of the Overview: a cartoon of Tony living out a daydream about
+/// something he really bought. There is never a wait. What shows on opening is already on disk:
+/// the picture prepared during the last visit, or one of the starters that ship with the app.
+/// Meanwhile, out of sight, the next one is drawn from his real photo for the next time he opens it.
 @MainActor @Observable
 final class DailyTony {
     static let shared = DailyTony()
@@ -14,8 +16,7 @@ final class DailyTony {
     private(set) var isGenerating = false
     private(set) var isAIImage = false
 
-    let headshot: NSImage? = Bundle.main.url(forResource: "tony", withExtension: "jpg").flatMap(NSImage.init(contentsOf:))
-        ?? Bundle.module_tonyFallback
+    let headshot: NSImage? = DailyTony.photo.flatMap(NSImage.init(data:))
 
     /// Cartoon Tony: baked in at build time, or made on first launch.
     private(set) var cartoon: NSImage? = Bundle.main.url(forResource: "tony-cartoon", withExtension: "png").flatMap(NSImage.init(contentsOf:))
@@ -60,14 +61,13 @@ final class DailyTony {
     private var todayKey: String { DateParsing.iso.string(from: .now) }
     private var imageFile: URL { folder.appendingPathComponent("\(todayKey).png") }
     private var captionFile: URL { folder.appendingPathComponent("\(todayKey).txt") }
-    private var loadedKey: String?
     private var lastHighlights: [Highlight] = []
 
-    /// Image Playground refuses to draw while the app is in the background; try again when Tony comes back.
+    /// Coming back to the app is another chance to prepare the next picture, if this launch hasn't yet.
     func retryIfNeeded() {
-        guard loadedKey != todayKey || CloudAI.isEnabled, !isGenerating, !lastHighlights.isEmpty else { return }
+        guard !preparedThisLaunch, !isGenerating, !lastHighlights.isEmpty else { return }
         let highlights = lastHighlights
-        Task { await loadToday(highlights: highlights) }
+        Task { await prepareNext(highlights: highlights) }
     }
 
     /// The caricature as a PNG no larger than 1024 pixels, to send along as the reference for a drawing.
@@ -95,323 +95,186 @@ final class DailyTony {
         var date: Date?
     }
 
-    // MARK: The cloud picture: Tony himself, doing what he just did
+    // MARK: The pictures
 
-    /// What the picture is about ("Dunkin' · Thursday"), shown under it.
-    private(set) var source: String?
-    /// True while a picture is being made the slow, on-device way (which shows a progress note).
-    /// Cloud pictures are made out of sight and simply appear.
-    private(set) var showsProgress = false
-
-    private struct Latest: Codable {
+    /// One picture: a starter that ships with the app, or one drawn here about a real purchase.
+    struct Picture: Codable, Hashable {
         var file: String
         var caption: String
-        var source: String
-        var merchant: String
-        /// The newest purchase when this was drawn: when something newer arrives, draw again.
-        var basis: String
-        var day: String
-    }
-    private var latestFile: URL { folder.appendingPathComponent("latest.json") }
-    private var latest: Latest? {
-        (try? Data(contentsOf: latestFile)).flatMap { try? JSONDecoder().decode(Latest.self, from: $0) }
+        var merchant: String?
+        /// The day of the purchase, as yyyy-MM-dd.
+        var date: String?
+        var seen = false
+        var model: String?
     }
 
-    private func basis(_ highlights: [Highlight]) -> String {
-        guard let newest = highlights.first else { return "" }
-        return "\(newest.merchant)|\(newest.date.map { DateParsing.iso.string(from: $0) } ?? "")"
+    /// What the picture is about ("Dunkin' · Nov 7"), shown under it. Nil for a starter.
+    private(set) var source: String?
+    private(set) var current: Picture?
+    @ObservationIgnored private var preparedThisLaunch = false
+
+    private init() { showOnOpen() }
+
+    private static let starterFolder: URL? = {
+        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("Starters"), FileManager.default.fileExists(atPath: bundled.path) { return bundled }
+        let dev = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Resources/Starters")
+        return FileManager.default.fileExists(atPath: dev.path) ? dev : nil
+    }()
+
+    private struct Starter: Codable { var id: String; var caption: String }
+    private static let starters: [Picture] = {
+        guard let folder = starterFolder, let data = try? Data(contentsOf: folder.appendingPathComponent("starters.json")),
+              let list = try? JSONDecoder().decode([Starter].self, from: data) else { return [] }
+        return list.map { Picture(file: "starter:\($0.id).jpg", caption: $0.caption, seen: true) }
+    }()
+
+    private var galleryFile: URL { folder.appendingPathComponent("gallery.json") }
+    private var gallery: [Picture] {
+        get { (try? Data(contentsOf: galleryFile)).flatMap { try? JSONDecoder().decode([Picture].self, from: $0) } ?? [] }
+        set { if let data = try? JSONEncoder().encode(newValue) { try? data.write(to: galleryFile, options: .atomic) } }
     }
 
-    /// Shows the last picture at once, then (out of sight) draws a new one if there's a new day or a
-    /// newer purchase, and swaps it in. Returns false if the cloud couldn't do it.
-    private func loadFromCloud(highlights: [Highlight], force: Bool) async -> Bool {
-        let saved = latest
-        if image == nil || !isAIImage, let saved, let picture = NSImage(contentsOf: folder.appendingPathComponent(saved.file)) {
-            image = picture; caption = saved.caption; source = saved.source; isAIImage = true
+    private func url(for picture: Picture) -> URL? {
+        if picture.file.hasPrefix("starter:") { return Self.starterFolder?.appendingPathComponent(String(picture.file.dropFirst(8))) }
+        return folder.appendingPathComponent(picture.file)
+    }
+
+    private func show(_ picture: Picture, animated: Bool) -> Bool {
+        guard let url = url(for: picture), let loaded = NSImage(contentsOf: url) else { return false }
+        var label: String?
+        if let merchant = picture.merchant {
+            let day = picture.date.flatMap { DateParsing.parse($0, format: "yyyy-MM-dd") }
+            label = day.map { "\(merchant) · \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? merchant
         }
-        guard !highlights.isEmpty else { return saved != nil }
-        let current = basis(highlights)
-        if !force, let saved, saved.basis == current, saved.day == todayKey { return true }
-        guard !isGenerating, let cartoon, let reference = Self.referencePNG(cartoon) else { return saved != nil }
-        isGenerating = true
-        defer { isGenerating = false }
-        cleanUpOldDays()
-
-        // A purchase from the last few days, picked at random, and not the one already showing.
-        let recent = Array(highlights.prefix(6))
-        let pick = recent.filter { $0.merchant != saved?.merchant }.randomElement() ?? recent[0]
-        let when = pick.date.map { date -> String in
-            let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: date), to: Calendar.current.startOfDay(for: .now)).day ?? 0
-            return days <= 0 ? "today" : days == 1 ? "yesterday" : days < 7 ? "on \(date.formatted(.dateTime.weekday(.wide)))" : "on \(date.formatted(.dateTime.month(.wide).day()))"
-        } ?? "recently"
-        guard let scene = await CloudImage.scene(merchant: pick.merchant, category: pick.category.displayName, amount: pick.amount, when: when),
-              let data = await CloudImage.draw(scene: scene.scene, reference: reference),
-              let picture = NSImage(data: data) else { return saved != nil || image != nil && isAIImage }
-
-        let file = "tony-\(Int(Date.now.timeIntervalSince1970)).png"
-        try? data.write(to: folder.appendingPathComponent(file))
-        let label = "\(pick.merchant) · \(when.replacingOccurrences(of: "on ", with: "").capitalized)"
-        let record = Latest(file: file, caption: scene.caption, source: label, merchant: pick.merchant, basis: current, day: todayKey)
-        if let encoded = try? JSONEncoder().encode(record) { try? encoded.write(to: latestFile, options: .atomic) }
-        withAnimation(.easeInOut(duration: 0.8)) {
-            image = picture; caption = scene.caption; source = label; isAIImage = true
-        }
-        loadedKey = todayKey
+        let apply = { self.image = loaded; self.caption = picture.caption; self.source = label; self.current = picture; self.isAIImage = true }
+        if animated { withAnimation(.easeInOut(duration: 0.5)) { apply() } } else { apply() }
         return true
     }
 
-    struct Plan {
-        let highlight: Highlight?
-        let prop: String
-        let backdrop: String
-    }
-
-    /// Prop + backdrop for each category, used when Apple Intelligence can't suggest one.
-    private static let categoryIdeas: [Category: (prop: String, backdrop: String)] = [
-        .dining: ("a big slice of pepperoni pizza", "a cozy Italian restaurant with string lights"),
-        .groceries: ("a paper grocery bag overflowing with vegetables and bread", "a sunny farmers market"),
-        .shopping: ("a stack of colorful shopping bags", "a bright city shopping street"),
-        .transportation: ("a shiny red toy convertible car", "a coastal road at sunset"),
-        .travel: ("a vintage suitcase covered in travel stickers", "a tropical beach with palm trees"),
-        .subscriptions: ("a big striped bucket of popcorn", "a cozy living room with a big TV"),
-        .entertainment: ("two golden theater tickets", "a theater stage with red velvet curtains"),
-        .home: ("a red toolbox", "a cozy house porch with flowers"),
-        .health: ("a pair of blue dumbbells", "a bright modern gym"),
-        .bills: ("a glowing light bulb", "a city skyline at night"),
-        .gifts: ("a wrapped gift box with a big bow", "a festive party room with balloons"),
-        .personal: ("a fluffy white towel and a spa candle", "a calm spa with plants"),
-        .fees: ("a pink piggy bank", "a grand old bank lobby"),
-        .other: ("a golden trophy", "a theater stage with red velvet curtains"),
-    ]
-
-    private func makePlan(_ highlights: [Highlight], surprise: Bool) async -> Plan {
-        let day = Calendar.current.ordinality(of: .day, in: .era, for: .now) ?? 0
-        let pick = surprise ? highlights.randomElement() : (highlights.isEmpty ? nil : highlights[day % highlights.count])
-        let fallback = Self.categoryIdeas[pick?.category ?? .other] ?? Self.categoryIdeas[.other]!
-        guard let pick, SystemLanguageModel.default.isAvailable, let schema = AISchemas.dailyPlan else {
-            return Plan(highlight: pick, prop: fallback.prop, backdrop: fallback.backdrop)
-        }
-        let session = LanguageModelSession(instructions: """
-        You plan a fun cartoon picture for a budgeting app. Given a purchase, choose:
-        prop: one simple physical object that represents what was bought, that a person could hold up in one hand (e.g. a cup of coffee, a slice of pizza, a television remote, a shopping bag).
-        backdrop: an empty place connected to the purchase, with no people (e.g. a cozy coffee shop, an electronics store).
-        Keep each to a few plain words. Never mention people, brands or logos.
-        """)
-        if let reply = try? await session.respond(to: "Purchase: \(pick.merchant) (\(pick.category.displayName))", schema: schema,
-                                                  options: GenerationOptions(temperature: 0.7, maximumResponseTokens: 80)),
-           let prop = try? reply.content.value(String.self, forProperty: "prop"),
-           let backdrop = try? reply.content.value(String.self, forProperty: "backdrop"),
-           !prop.isEmpty, !backdrop.isEmpty {
-            return Plan(highlight: pick, prop: prop, backdrop: backdrop)
-        }
-        return Plan(highlight: pick, prop: fallback.prop, backdrop: fallback.backdrop)
-    }
-
-    // MARK: Loading
-
-    func loadToday(highlights: [Highlight], force: Bool = false) async {
-        // With a cloud key, Tony is drawn doing what he actually just did. No waiting screen.
-        if CloudAI.isEnabled {
-            lastHighlights = highlights
-            if await loadFromCloud(highlights: highlights, force: force) { return }
-        }
-        guard !isGenerating, force || loadedKey != todayKey else { return }
-        showsProgress = true
-        defer { showsProgress = false }
-
-        if !force, let cached = NSImage(contentsOf: imageFile) {
-            image = cached
-            isAIImage = true
-            caption = (try? String(contentsOf: captionFile, encoding: .utf8)) ?? greeting
-            loadedKey = todayKey
+    /// On opening: the picture made last time if it hasn't been seen, otherwise a random one.
+    private func showOnOpen() {
+        var saved = gallery
+        if let index = saved.lastIndex(where: { !$0.seen }), show(saved[index], animated: false) {
+            for i in saved.indices { saved[i].seen = true }
+            gallery = saved
             return
         }
+        showRandom(animated: false)
+    }
 
+    /// Any other picture, at once: the starters and everything drawn so far.
+    func showRandom(animated: Bool = true) {
+        let pool = (Self.starters + gallery.filter(\.seen)).filter { $0.file != current?.file }.shuffled()
+        for picture in pool where show(picture, animated: animated) { return }
+    }
+
+    /// Tony's real photo, sent along with every drawing so the cartoon always looks like him.
+    private static let photo: Data? = {
+        if let url = Bundle.main.url(forResource: "tony", withExtension: "jpg"), let data = try? Data(contentsOf: url) { return data }
+        let dev = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Resources/tony.jpg")
+        return try? Data(contentsOf: dev)
+    }()
+
+    /// Once per launch, out of sight: choose the best image model there is today, pick a real recent
+    /// purchase, and draw the picture that will be waiting the next time the app opens.
+    func prepareNext(highlights: [Highlight]) async {
         lastHighlights = highlights
+        guard CloudAI.isEnabled, !preparedThisLaunch, !isGenerating, !highlights.isEmpty, let photo = Self.photo else { return }
+        preparedThisLaunch = true
         isGenerating = true
         defer { isGenerating = false }
-        cleanUpOldDays()
 
-        // Apple's on-device models work best one at a time: let category suggestions finish first.
-        for _ in 0..<120 where BudgetStore.shared.isSuggesting { try? await Task.sleep(for: .milliseconds(500)) }
-
-        let plan = await makePlan(highlights, surprise: force)
-        let category = plan.highlight?.category ?? .other
-        // Apple's image model only draws things it's good at: an object and an empty scene.
-        let backdrop = await generate("\(plan.backdrop), empty, no people, wide view")
-        let prop = await generate("\(plan.prop), single object, centered, plain white background")
-
-        guard let caricature = cartoon ?? headshot,
-              let composed = Compositor.compose(caricature: caricature, backdrop: backdrop, prop: prop,
-                                                propSymbol: category.symbol, tint: NSColor(category.color)) else {
-            image = avatar
-            isAIImage = false
-            return
+        var saved = gallery
+        let lately = Set(saved.suffix(8).compactMap(\.merchant))
+        let recent = Array(highlights.prefix(15))
+        let pick = recent.filter { !lately.contains($0.merchant) }.randomElement() ?? recent.randomElement()!
+        async let chosen = CloudImage.bestModel()
+        async let planned = CloudImage.scene(merchant: pick.merchant, category: pick.category.displayName, amount: pick.amount)
+        let model = await chosen
+        guard let scene = await planned else { preparedThisLaunch = false; return }
+        var drawn = await CloudImage.draw(scene: scene.scene, photo: photo, model: model), used = model
+        if drawn == nil, model != CloudImage.defaultModel {
+            drawn = await CloudImage.draw(scene: scene.scene, photo: photo, model: CloudImage.defaultModel); used = CloudImage.defaultModel
         }
-        image = composed
-        isAIImage = backdrop != nil || prop != nil
-        // Only lock in today's picture once it features a real purchase.
-        let final = isAIImage && plan.highlight != nil
-        if final {
-            loadedKey = todayKey
-            try? IconRenderer.png(composed)?.write(to: imageFile)
-        }
-        caption = await makeCaption(plan)
-        if final { try? caption.write(to: captionFile, atomically: true, encoding: .utf8) }
-    }
+        guard let drawn, NSImage(data: drawn) != nil else { preparedThisLaunch = false; return }
 
-    private func generate(_ text: String) async -> NSImage? {
-        do {
-            let creator = try await ImageCreator()
-            let style = [ImagePlaygroundStyle.illustration, .animation].first { creator.availableStyles.contains($0) } ?? .illustration
-            for try await created in creator.images(for: [.text(text)], style: style, limit: 1) {
-                return NSImage(cgImage: created.cgImage, size: NSSize(width: created.cgImage.width, height: created.cgImage.height))
-            }
-        } catch {
-            if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil { print("DEBUG Daily Tony image error (\(text)): \(error)") }
-        }
-        return nil
-    }
-
-    private var greeting: String {
-        let hour = Calendar.current.component(.hour, from: .now)
-        let part = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
-        return "\(part), Tony. The nominees are being announced…"
-    }
-
-    private func makeCaption(_ plan: Plan) async -> String {
-        let fallback = plan.highlight.map { "Nominated for Best Supporting Role at \($0.merchant)." } ?? greeting
-        if CloudAI.isEnabled {
-            var facts = "Today's picture: Tony holding \(plan.prop) in \(plan.backdrop)."
-            if let h = plan.highlight { facts += " It celebrates his recent purchase at \(h.merchant) (\(h.category.displayName))." }
-            if let line = await CloudWriter.line(system: """
-                You write today's nomination for The Tony Awards, a playful budgeting app made for Tony, a CPA.
-                Write one witty awards-show nomination about what Tony is holding, at most 14 words. It must start with "Nominated for Best".
-                Examples: Nominated for Best Coffee Run in a Leading Role. Nominated for Best Grocery Haul, Produce Division.
-                Light accounting puns are welcome. Never be negative about spending. Reply with the nomination only, no quotes.
-                """, facts: facts, maxTokens: 60, temperature: 1.0)?.replacingOccurrences(of: "*", with: "")
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\" \n")), line.hasPrefix("Nominated"), line.count < 140 {
-                return line
-            }
-        }
-        guard SystemLanguageModel.default.isAvailable else { return fallback }
-        let session = LanguageModelSession(instructions: """
-        You write today's nomination for The Tony Awards, a playful budgeting app made for Tony, a CPA.
-        Write one awards-show nomination about what Tony is holding, at most 14 words. It must start with "Nominated for Best".
-        Examples: Nominated for Best Coffee Run in a Leading Role. Nominated for Best Grocery Haul, Produce Division.
-        Light accounting puns are welcome. Never be negative about spending. Reply with the nomination only, no quotes.
-        """)
-        var facts = "Today's picture: Tony holding \(plan.prop) in \(plan.backdrop)."
-        if let h = plan.highlight { facts += " It celebrates his recent purchase at \(h.merchant) (\(h.category.displayName))." }
-        do {
-            let prompt = facts
-            guard let answer = await Timeout.run(45, { try? await session.respond(to: prompt, options: GenerationOptions(temperature: 0.9, maximumResponseTokens: 60)).content }) else { throw CancellationError() }
-            let reply = (content: answer, ())
-            let text = reply.content.replacingOccurrences(of: "*", with: "")
-                .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"")))
-            return text.hasPrefix("Nominated") && text.count < 140 ? text : fallback
-        } catch {
-            return fallback
-        }
-    }
-
-    private func cleanUpOldDays() {
-        let cutoff = Date.now.addingTimeInterval(-14 * 24 * 3600)
-        let items = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-        for url in items where !url.lastPathComponent.hasPrefix("cartoon") {
-            let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .now
-            if date < cutoff { try? FileManager.default.removeItem(at: url) }
+        let file = "tony-\(Int(Date.now.timeIntervalSince1970)).png"
+        try? drawn.write(to: folder.appendingPathComponent(file))
+        saved.append(Picture(file: file, caption: scene.caption, merchant: pick.merchant,
+                             date: pick.date.map { DateParsing.iso.string(from: $0) }, seen: false, model: used))
+        // Keep the last thirty; older ones go, with their files.
+        while saved.count > 30 { try? FileManager.default.removeItem(at: folder.appendingPathComponent(saved.removeFirst().file)) }
+        gallery = saved
+        if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil {
+            print("DEBUG PICTURE next: \(pick.merchant) [\(used)] \(scene.caption)\n  scene: \(scene.scene)")
         }
     }
 }
 
-private extension Bundle {
-    /// When running unbundled during development, look next to the package.
-    static var module_tonyFallback: NSImage? {
-        let dev = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Resources/tony.jpg")
-        return NSImage(contentsOf: dev)
-    }
-}
-
-// MARK: - The card on the Overview
+// MARK: - The banner on the Overview
 
 struct DailyTonyCard: View {
-    @Environment(BudgetStore.self) private var store
+    private var store: BudgetStore { .shared }
     @State private var daily = DailyTony.shared
 
     var body: some View {
-        Card(padding: 0) {
-            HStack(spacing: 0) {
-                ZStack {
-                    if let image = daily.image ?? daily.cartoon ?? daily.avatar {
-                        // A new picture simply fades in over the old one: no spinner, no waiting.
-                        Image(nsImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .blur(radius: daily.showsProgress ? 12 : 0)
-                            .saturation(daily.showsProgress ? 0.3 : 1)
-                            .id(ObjectIdentifier(image))
-                            .transition(.opacity)
-                    }
-                    if daily.showsProgress {
-                        VStack(spacing: 8) {
-                            ProgressView().controlSize(.large)
-                            Text("Drawing today's Tony…").font(.callout.weight(.medium))
-                        }
-                        .padding(14)
-                        .glassEffect(.regular, in: .rect(cornerRadius: 14))
-                    }
+        Color.black
+            .aspectRatio(21.0 / 9.0, contentMode: .fit)
+            .overlay {
+                if let image = daily.image ?? daily.cartoon {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .id(ObjectIdentifier(image))
+                        .transition(.opacity)
                 }
-                .frame(width: 230, height: 230)
-                .clipped()
-                .animation(.easeInOut(duration: 0.6), value: daily.showsProgress)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("Today's Nominee · \(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))", systemImage: "star.circle.fill")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(Color(red: 0.75, green: 0.55, blue: 0.12))
-                        .textCase(.uppercase)
-                    Text(daily.caption.isEmpty ? "Hi, Tony." : daily.caption)
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .contentTransition(.opacity)
-                    Spacer(minLength: 0)
-                    HStack(spacing: 12) {
+            }
+            .overlay {
+                // Darkens the bottom third so the words read over any picture.
+                VStack(spacing: 0) {
+                    Color.clear
+                    LinearGradient(colors: [.black.opacity(0), .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                HStack(alignment: .bottom, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Today's Nominee · \(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))", systemImage: "star.circle.fill")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(Color(red: 1, green: 0.84, blue: 0.4))
+                            .textCase(.uppercase)
+                        Text(daily.caption.isEmpty ? "Hi, Tony." : daily.caption)
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .contentTransition(.opacity)
                         if let source = daily.source {
                             // The real purchase behind the picture: this is what makes it land.
                             Label(source, systemImage: "receipt")
                                 .font(.callout.weight(.medium))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.white.opacity(0.85))
                                 .contentTransition(.opacity)
-                        } else if daily.isAIImage {
-                            Label("Made on this Mac by Apple Intelligence", systemImage: "apple.intelligence")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        Button {
-                            Task { await load(force: true) }
-                        } label: {
-                            Label("Another One", systemImage: "wand.and.sparkles")
-                        }
-                        .buttonStyle(.glass)
-                        .disabled(daily.isGenerating)
                     }
+                    Spacer(minLength: 0)
+                    Button {
+                        daily.showRandom()
+                    } label: {
+                        Label("Another One", systemImage: "wand.and.sparkles")
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
                 }
-                .padding(22)
+                .padding(24)
             }
-        }
-        // A newer purchase arriving (a statement just added itself) is a reason for a new picture.
-        .task(id: "\(store.recentHighlights().count)-\(store.recentHighlights().first?.merchant ?? "")-\(store.isImporting)") {
-            guard !store.isImporting else { return }
-            await load(force: false)
-        }
-    }
-
-    private func load(force: Bool) async {
-        guard store.hasLoadedTransactions || store.accounts.isEmpty else { return }
-        await daily.loadToday(highlights: store.recentHighlights(), force: force)
+            .clipShape(.rect(cornerRadius: 22, style: .continuous))
+            .shadow(color: .black.opacity(0.12), radius: 14, y: 5)
+            // Once the statements are in, quietly get the next picture ready.
+            .task(id: "\(store.hasLoadedTransactions)-\(store.isImporting)-\(store.recentHighlights().first?.merchant ?? "")") {
+                guard store.hasLoadedTransactions, !store.isImporting else { return }
+                await daily.prepareNext(highlights: store.recentHighlights())
+            }
     }
 }

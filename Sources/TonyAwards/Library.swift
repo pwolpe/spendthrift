@@ -45,6 +45,9 @@ struct Library: Codable {
     var stories: [Story]?
     var storiesBasis: String?
     var dismissedStories: Set<String>?
+    /// Charges Tony moved by hand: charge id to the trip it belongs to (a trip's fingerprint), or "" for none.
+    /// These win over whatever the model decides, now and every time it looks again.
+    var storyChoices: [String: String]?
 
     init() {}
 
@@ -61,6 +64,7 @@ struct Library: Codable {
         stories = (try? c.decodeIfPresent(Lossy<Story>.self, forKey: .stories))?.values
         storiesBasis = try? c.decodeIfPresent(String.self, forKey: .storiesBasis)
         dismissedStories = try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedStories)
+        storyChoices = try? c.decodeIfPresent([String: String].self, forKey: .storyChoices)
         // Every line must belong to an account that still exists.
         let known = Set(accounts.map(\.id))
         entries.removeAll { !known.contains($0.accountID) }

@@ -4,6 +4,7 @@ import Charts
 struct OverviewView: View {
     @Environment(BudgetStore.self) private var store
     @State private var month: Month?
+    @State private var period: ReportPeriod?
     @State private var hoveredAngle: Double?
 
     /// False when rendered for a test snapshot (ImageRenderer can't draw scroll views).
@@ -26,7 +27,12 @@ struct OverviewView: View {
                 if !store.reviewItems.isEmpty, !store.isSuggesting { reviewBanner }
                 if !store.missingStatements.isEmpty, !store.isImporting { missingBanner }
 
-                if let m = currentMonth {
+                if store.months.count > 1 { scopePicker }
+
+                if store.overviewShowsYear, let period = currentPeriod {
+                    // The same questions, asked of a whole year: one page, two distances.
+                    ReportContent(data: ReportData(store: store, period: period), interactive: true)
+                } else if let m = currentMonth {
                     header(m)
                     beyondEveryday(m)
                     HStack(alignment: .top, spacing: 20) {
@@ -47,6 +53,43 @@ struct OverviewView: View {
             .padding(28)
             .frame(maxWidth: 1200)
             .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Month or year
+
+    private var periods: [ReportPeriod] { ReportData.periods(for: store) }
+    private var currentPeriod: ReportPeriod? { period.flatMap { periods.contains($0) ? $0 : nil } ?? periods.first }
+
+    private var scopePicker: some View {
+        @Bindable var store = store
+        return HStack(spacing: 12) {
+            Picker("Show", selection: $store.overviewShowsYear) {
+                Text("Month").tag(false)
+                Text("Year").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .controlSize(.large)
+            if store.overviewShowsYear, let current = currentPeriod {
+                if periods.count > 1 {
+                    Picker("Period", selection: Binding(get: { current }, set: { period = $0 })) {
+                        ForEach(periods) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                Spacer()
+                Button {
+                    ReportExporter.savePDF(data: ReportData(store: store, period: current), store: store)
+                } label: {
+                    Label("Save as PDF", systemImage: "square.and.arrow.down")
+                }
+                .help("Save the year as a PDF to print or share")
+            } else {
+                Spacer()
+            }
+        }
     }
 
     // MARK: Header

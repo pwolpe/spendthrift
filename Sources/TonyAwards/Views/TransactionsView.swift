@@ -122,6 +122,10 @@ struct TransactionsView: View {
                 Menu(chosen.count == 1 ? "Change Only This Charge" : "Change Only These \(chosen.count) Charges") {
                     CategoryChoices { store.setCategory($0, for: ids, wholePlace: false) }
                 }
+                if !store.stories.isEmpty {
+                    Divider()
+                    Menu("Trip or Event") { StoryChoices(ids: ids) }
+                }
                 if places.count == 1 {
                     Divider()
                     Button("Show All from \(first.merchant)") {
@@ -273,6 +277,24 @@ private struct TransactionInspector: View {
                     .font(.callout)
                 }
 
+                if !store.stories.isEmpty {
+                    group("Trip or event") {
+                        Menu {
+                            StoryChoices(ids: [t.id])
+                        } label: {
+                            Label(store.story(containing: t.id)?.name ?? "Not part of one",
+                                  systemImage: store.story(containing: t.id) == nil ? "minus.circle" : "airplane.departure")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                        if store.story(containing: t.id) == nil {
+                            Text("If this belongs to a trip, choose it here and it will count toward that trip.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 group("From your statement") {
                     Text(t.description)
                         .font(.callout.monospaced())
@@ -345,5 +367,24 @@ private struct PlaceHistory: View {
             Text(value).font(.headline).monospacedDigit()
             Text(label).font(.caption).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Every trip and event, for a menu that moves charges into one (or out of all of them).
+struct StoryChoices: View {
+    private var store: BudgetStore { .shared }
+    let ids: Set<Transaction.ID>
+
+    var body: some View {
+        let current = ids.count == 1 ? ids.first.flatMap { store.story(containing: $0) } : nil
+        ForEach(store.stories) { story in
+            Button {
+                store.move(ids, to: story)
+            } label: {
+                if current?.id == story.id { Label(story.name, systemImage: "checkmark") } else { Text(story.name) }
+            }
+        }
+        Divider()
+        Button("Not Part of a Trip or Event") { store.move(ids, to: nil) }
     }
 }

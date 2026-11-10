@@ -18,7 +18,7 @@ struct ContentView: View {
                     case .cashflow: CashFlowView()
                     case .stories: StoriesView()
                     case .transactions: TransactionsView()
-                    case .report: ReportView()
+                    case .report: OverviewView()
                     case .ask: AskView()
                     case .review: ReviewView()
                     case .categories: CategoriesView()
@@ -110,8 +110,6 @@ struct SidebarView: View {
                     .tag(SidebarItem.stories)
                 Label("Transactions", systemImage: "list.bullet.rectangle.portrait.fill")
                     .tag(SidebarItem.transactions)
-                Label("Year in Review", systemImage: "chart.bar.xaxis")
-                    .tag(SidebarItem.report)
                 Label("Ask the Academy", systemImage: "bubble.left.and.text.bubble.right.fill")
                     .tag(SidebarItem.ask)
             }

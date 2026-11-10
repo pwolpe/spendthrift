@@ -58,20 +58,6 @@ enum DebugHooks {
             print("DEBUG SUGGEST \(t.description) → \(t.merchant) | \(t.category.rawValue) | \(t.source.rawValue)\(t.needsCheck ? " ?" : "") [\(key)] x\(txns.count)")
         }
         if env["TONY_AWARDS_SUGGEST_ONLY"] != nil { NSApp.terminate(nil); return }
-        // TONY_AWARDS_DRAW="Dunkin'|United Airlines": draw Tony for each purchase, to look at the results.
-        if let list = env["TONY_AWARDS_DRAW"], let cartoon = DailyTony.shared.cartoon, let reference = DailyTony.referencePNG(cartoon) {
-            for (i, merchant) in list.split(separator: "|").map(String.init).enumerated() {
-                let started = Date.now
-                guard let scene = await CloudImage.scene(merchant: merchant, category: "purchase", amount: 42, when: "yesterday") else {
-                    print("DRAW \(merchant): no scene"); continue
-                }
-                let planned = Date.now.timeIntervalSince(started)
-                let picture = await CloudImage.draw(scene: scene.scene, reference: reference)
-                print("DRAW \(merchant) [\(CloudImage.model)] plan \(String(format: "%.1f", planned))s, total \(String(format: "%.1f", Date.now.timeIntervalSince(started)))s, image \(picture?.count ?? 0) bytes\n  scene: \(scene.scene)\n  caption: \(scene.caption)")
-                try? picture?.write(to: outDir.appendingPathComponent("draw-\(i).png"))
-            }
-            NSApp.terminate(nil); return
-        }
         // TONY_AWARDS_CHAT="first question|a follow-up|another": a conversation with Ask the Academy.
         if let chat = env["TONY_AWARDS_CHAT"] {
             var turns: [ChatAnalyst.Turn] = []
@@ -141,6 +127,16 @@ enum DebugHooks {
     private static func selfTest(files: [URL]) async {
         let store = BudgetStore.shared
         func check(_ name: String, _ ok: Bool) { print("SELFTEST \(ok ? "PASS" : "FAIL") \(name)") }
+        if store.stories.count >= 2, let moving = store.transactions(in: store.stories[0]).first?.id {
+            let from = store.stories[0], to = store.stories[1]
+            let before = store.transactions(in: to).count
+            store.move([moving], to: to)
+            check("move a charge between trips", store.story(containing: moving)?.fingerprint == to.fingerprint
+                  && store.stories.first { $0.fingerprint == to.fingerprint }.map { store.transactions(in: $0).count } == before + 1)
+            store.move([moving], to: nil)
+            check("take a charge out of every trip", store.story(containing: moving) == nil)
+            store.move([moving], to: from)
+        }
         guard let t = store.transactions.first(where: { $0.countsAsSpending && $0.category != .gifts }) else { return check("has data", false) }
         let samePlace = store.transactions.filter { $0.merchantKey == t.merchantKey }.count
 

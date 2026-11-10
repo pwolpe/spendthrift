@@ -26,6 +26,8 @@ final class BudgetStore {
     // UI state
     var selection: SidebarItem? = .overview
     var transactionFilter = TransactionFilter()
+    /// The Overview looks at one month or at a whole year; the same page either way.
+    var overviewShowsYear = ProcessInfo.processInfo.environment["TONY_AWARDS_YEAR"] != nil
     var pendingImports: [PendingImport] = []
     /// Something Tony must be told at launch (e.g. data restored from a backup).
     var startupNotice: String?
@@ -351,7 +353,51 @@ final class BudgetStore {
     /// Trips and events, newest first, without the ones Tony said weren't.
     var stories: [Story] {
         let dismissed = library.dismissedStories ?? []
-        return (library.stories ?? []).filter { !dismissed.contains($0.fingerprint) }
+        var list = (library.stories ?? []).filter { !dismissed.contains($0.fingerprint) }
+        // What Tony moved by hand wins over what the model worked out.
+        let choices = library.storyChoices ?? [:]
+        guard !choices.isEmpty else { return list }
+        let moved = Set(choices.keys.compactMap { UUID(uuidString: $0) })
+        for i in list.indices { list[i].entryIDs.removeAll { moved.contains($0) } }
+        for (key, choice) in choices {
+            guard let id = UUID(uuidString: key), let index = Self.resolve(choice, in: list) else { continue }
+            list[index].entryIDs.append(id)
+        }
+        return list
+    }
+
+    /// A choice remembers the trip's name and its dates. When the model looks again it may word the
+    /// name differently ("Austin" becomes "Austin weekend"), so if the name is gone, the trip that
+    /// shares the most days with the remembered dates is the same trip.
+    private static func choice(for story: Story) -> String { "\(story.fingerprint)\t\(story.start)\t\(story.end)" }
+    private static func resolve(_ choice: String, in list: [Story]) -> Int? {
+        let parts = choice.components(separatedBy: "\t")
+        guard parts.count == 3, !parts[0].isEmpty else { return nil }
+        if let exact = list.firstIndex(where: { $0.fingerprint == parts[0] }) { return exact }
+        let overlaps = list.indices.filter { list[$0].start <= parts[2] && list[$0].end >= parts[1] }
+        return overlaps.max { a, b in
+            func shared(_ s: Story) -> Int {
+                guard let from = DateParsing.parse(max(s.start, parts[1]), format: "yyyy-MM-dd"),
+                      let to = DateParsing.parse(min(s.end, parts[2]), format: "yyyy-MM-dd") else { return 0 }
+                return Calendar.current.dateComponents([.day], from: from, to: to).day ?? 0
+            }
+            return shared(list[a]) < shared(list[b])
+        }
+    }
+
+    func story(containing id: Transaction.ID) -> Story? {
+        stories.first { $0.entryIDs.contains(id) }
+    }
+
+    /// Puts charges in a trip or event (or in none), whatever the model thought. Remembered for good.
+    func move(_ ids: Set<Transaction.ID>, to story: Story?) {
+        guard !ids.isEmpty else { return }
+        var choices = library.storyChoices ?? [:]
+        for id in ids { choices[id.uuidString] = story.map(Self.choice(for:)) ?? "" }
+        library.storyChoices = choices
+        changed()
+        let what = ids.count == 1 ? (transactions.first { ids.contains($0.id) }?.merchant ?? "1 charge") : "\(ids.count) charges"
+        showToast(story.map { "Moved \(what) to “\($0.name)”." } ?? "\(what): no longer part of a trip or event.", symbol: "checkmark.circle.fill")
     }
 
     func transactions(in story: Story) -> [Transaction] {

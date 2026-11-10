@@ -62,10 +62,15 @@ credit, or there's no internet, everything falls back to the on-device paths.
 
 ## Screens
 
-- **Overview**: Today's Nominee (caricature Tony holding something he recently bought; Image
-  Playground draws only the prop and backdrop, never Tony), the month's total, where it went, the
-  trend, top places, and **The Monthly Ceremony**: awards plus notes on new subscriptions, price
-  increases, possible double charges and unusual purchases.
+- **Overview**: a wide banner across the top with a cartoon of Tony living out a daydream about a
+  real recent purchase. It never waits: on opening it shows the picture prepared during the last
+  visit (or one of twelve starters in `Resources/Starters`), then quietly asks OpenRouter which image
+  model is best today and draws the next one from his photo for next time. **Another One** shows a
+  different picture at once. Below it, a **Month / Year** switch. *Month*: the total, where it went,
+  the trend, top places, what's coming up, and **The Monthly Ceremony** (awards plus notes on new
+  subscriptions, price increases, possible double charges and unusual purchases). *Year*:
+  month-by-month stacked spending, category trends, top places, biggest purchases, repeating
+  charges and their yearly cost, money in, tax-time totals. **Save as PDF** to share.
 - **Cash Flow**: the whole picture in lanes. *Everyday* (salary in, spending out), *Income taxes* on
   their own line, and *Investments* (distributions, capital calls, the investment loan, brokerage
   moves) kept apart, with a month-by-month chart and a by-fund table. Transfers between own accounts
@@ -73,8 +78,10 @@ credit, or there's no internet, everything falls back to the on-device paths.
   added: a payment only counts as a transfer when that card's purchases are in the app; otherwise it
   counts as spending under "Cards Not Added Yet", so the total is complete either way.
 - **Transactions**: searchable, filterable table with an inspector.
-- **Year in Review**: month-by-month stacked spending, category trends, top places, biggest
-  purchases, repeating charges and their yearly cost, money in. **Save as PDF** to share.
+- **Trips & Events**: runs of charges the model recognizes as a trip or an occasion, with totals
+  added up in code. A charge in the wrong trip can be moved: right-click it in Transactions and
+  choose **Trip or Event**, or use the same menu in the inspector. The move is remembered even
+  when the model looks again and words the trip's name differently.
 - **Ask the Academy**: plain-English questions. The model reads the intent; dates and totals are
   computed exactly in code.
 - **Categories**: every category with its all-time total. **New Category** makes your own (name,
@@ -149,7 +156,7 @@ notarizing the app; `notarytool` and `stapler` are already in the Command Line T
 
 - `library.json`: accounts, every statement line, and what the app has learned about each place
 - `Backups/`: one copy per day, two weeks' worth (**Help → Save a Backup to the Desktop** makes one on demand)
-- `Daily Tony/`: the last two weeks of nominee pictures
+- `Daily Tony/`: the last thirty banner pictures and `gallery.json`, which says what each is about
 
 To back up or move Tony to a new Mac, copy that folder.
 

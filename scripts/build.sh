@@ -47,6 +47,9 @@ if [ -f "$BUILD/icon-1024.png" ]; then
   iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 fi
 if [ -f "$CARTOON" ]; then cp "$CARTOON" "$APP/Contents/Resources/tony-cartoon.png"; fi
+# The banner pictures: a dozen starters, and Tony's photo, which every new drawing is made from.
+cp "$ROOT/Resources/tony.jpg" "$APP/Contents/Resources/tony.jpg"
+mkdir -p "$APP/Contents/Resources/Starters" && cp "$ROOT/Resources/Starters/"* "$APP/Contents/Resources/Starters/"
 
 # 4. Re-sign after adding resources. First drop "downloaded from the internet" marks and other
 #    Finder leftovers that source files may carry; they don't belong in a shipped app.

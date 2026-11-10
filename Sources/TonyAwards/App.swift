@@ -30,7 +30,7 @@ struct TonyAwardsApp: App {
                 Button("Cash Flow") { BudgetStore.shared.selection = .cashflow }.keyboardShortcut("2")
                 Button("Trips & Events") { BudgetStore.shared.selection = .stories }.keyboardShortcut("3")
                 Button("Transactions") { BudgetStore.shared.selection = .transactions }.keyboardShortcut("4")
-                Button("Year in Review") { BudgetStore.shared.selection = .report }.keyboardShortcut("5")
+                Button("The Year") { BudgetStore.shared.overviewShowsYear = true; BudgetStore.shared.selection = .overview }.keyboardShortcut("5")
                 Button("Ask the Academy") { BudgetStore.shared.selection = .ask }.keyboardShortcut("6")
                 Divider()
                 Button("Double-Check") { BudgetStore.shared.selection = .review }.keyboardShortcut("7")
