@@ -656,9 +656,10 @@ final class BudgetStore {
     /// the ones it files there are moved. Nothing else changes category, and anything the person
     /// chose themselves is left alone.
     func adoptWineCategory(force: Bool = false) async {
-        let flag = "adoptedWineCategory"
-        guard CloudAI.isEnabled, !isImporting, !isSuggesting, force || !UserDefaults.standard.bool(forKey: flag) else { return }
-        guard !library.merchants.values.contains(where: { $0.category == .wine }) || force else { UserDefaults.standard.set(true, forKey: flag); return }
+        // Remembered in the library itself, so each library gets this exactly once, on any Mac.
+        func done() { library.adopted = (library.adopted ?? []).union(["wine"]); changed() }
+        guard CloudAI.isEnabled, !isImporting, !isSuggesting, force || library.adopted?.contains("wine") != true else { return }
+        guard !library.entries.isEmpty else { return }
         let used = Dictionary(grouping: library.entries, by: \.merchantKey)
         let hints = ["wine", "liquor", "spirit", "whisk", "bourbon", "cellar", "vineyard", "winery", "vino", "distill", "bottle", "vintner", "champagne"]
         var waiting: [(item: CloudItem, weight: Double)] = []
@@ -691,7 +692,7 @@ final class BudgetStore {
             }
         }
         // Only count it done if the model was reachable; otherwise try again next time.
-        if answered > 0 || batches.isEmpty { UserDefaults.standard.set(true, forKey: flag) }
+        if answered > 0 || batches.isEmpty { done() }
         if moved > 0 {
             withAnimation(.snappy) { changed() }
             showToast("New category: Wine & Spirits. \(moved) \(moved == 1 ? "place" : "places") moved into it from Groceries and Shopping.", symbol: "wineglass.fill")
