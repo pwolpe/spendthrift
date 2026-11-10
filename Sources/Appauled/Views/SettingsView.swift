@@ -67,6 +67,8 @@ struct SettingsView: View {
                     .onChange(of: model) { CloudAI.model = model }
                     Toggle("Read statements the app can't read by itself", isOn: $readsStatements)
                         .onChange(of: readsStatements) { CloudAI.readsStatements = readsStatements }
+                    Toggle("Look up unfamiliar places on the web", isOn: Binding(get: { WebLookup.isOn }, set: { WebLookup.isOn = $0 }))
+                        .help("Sends the statement text for places the model couldn't identify to a web search. About 3 cents a place, the biggest 40 per import.")
                     Button("Test Connection") { Task { await test(announce: true) } }
                         .disabled(testing)
                 }

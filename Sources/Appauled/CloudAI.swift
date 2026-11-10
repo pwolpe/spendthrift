@@ -52,7 +52,7 @@ enum CloudAI {
     ///   writes. Too little and the answer is cut off mid-sentence, so be generous.
     /// - effort: how hard the model should think first ("low", "medium", "high"); nil = its default.
     static func complete(system: String, user: String, json: Bool, maxTokens: Int, temperature: Double = 0,
-                         timeout: TimeInterval = 90, effort: String? = nil) async throws -> String {
+                         timeout: TimeInterval = 90, effort: String? = nil, web: Bool = false) async throws -> String {
         guard let key = CloudKey.load() else { throw CloudError.noKey }
         var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, timeoutInterval: timeout)
         request.httpMethod = "POST"
@@ -66,7 +66,9 @@ enum CloudAI {
             "max_tokens": maxTokens,
             "temperature": temperature,
         ]
-        if json { body["response_format"] = ["type": "json_object"] }
+        if json, !web { body["response_format"] = ["type": "json_object"] }
+        // Let the model search the web (used to work out what an unfamiliar business is).
+        if web { body["plugins"] = [["id": "web", "max_results": 3]] }
         if let effort { body["reasoning"] = ["effort": effort] }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -858,6 +860,107 @@ enum Explainer {
         let name = ((o["name"] as? String) ?? currentName).trimmingCharacters(in: .whitespaces)
         let isNew = !existing.contains(category)
         return Verdict(name: name.isEmpty ? currentName : String(name.prefix(48)), category: category, isNew: isNew, symbol: o["symbol"] as? String)
+    }
+}
+
+// MARK: - Looking places up
+
+/// A line like "69 LEONARD STREET 0000 MANHATTAN NY" means nothing to the model from memory, but a
+/// web search finds it in seconds (a sushi restaurant). The places still guessed at after sorting
+/// are searched for, the biggest first. This sends the statement's text for those places to a
+/// search service: the trade of a little privacy for an app that knows nearly every place.
+enum WebLookup {
+    static var isOn: Bool {
+        get { UserDefaults.standard.object(forKey: "looksUpPlaces") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "looksUpPlaces") }
+    }
+    /// Payments to people, cash and transfers: nothing to find, and not ours to go searching for.
+    static func isSearchable(_ text: String) -> Bool {
+        text.range(of: #"(?i)\b(zelle|venmo|paypal|cash app|check|atm|withdraw|deposit|transfer|wire|payment to|autopay)\b"#, options: .regularExpression) == nil
+    }
+
+    static func identify(_ items: [CloudItem]) async -> [String: CloudVerdict] {
+        guard !items.isEmpty else { return [:] }
+        let system = """
+        Each item is a line from a bank or card statement that could not be identified. Search the web for the \
+        business behind each one; the text usually holds its name, or a street address, and a city. Then file it.
+
+        Reply with JSON only: {"results": [{"id": 1, "found": true, "name": "…", "category": "…", "website": null}]}
+        found: true only if the search clearly identified the business. Otherwise false, and leave the rest as your best guess.
+        name: how a person would say it, under 40 characters ("69 Leonard Street", "Shell").
+        category: exactly one of: \(Category.pickable.map(\.rawValue).joined(separator: "; "))
+        website: the business's own domain, lower case, or null.
+        """
+        let payload: [[String: Any]] = items.enumerated().map { i, item in
+            ["id": i + 1, "text": Redactor.scrub(item.description), "typical_amount": (abs(item.averageAmount) * 100).rounded() / 100,
+             "app_guess": item.appGuess ?? ""]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload), let user = String(data: data, encoding: .utf8) else { return [:] }
+        let reply = await Timeout.run(120) {
+            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 4_000, timeout: 110, web: true)
+        }
+        guard let reply, let results = CloudAI.object(from: reply)?["results"] as? [[String: Any]] else { return [:] }
+        var out: [String: CloudVerdict] = [:]
+        for result in results {
+            guard let id = result["id"] as? Int, id >= 1, id <= items.count, (result["found"] as? Bool) == true,
+                  let name = (result["name"] as? String)?.trimmingCharacters(in: .whitespaces), !name.isEmpty,
+                  let category = Category.pickable.first(where: { $0.rawValue == (result["category"] as? String) }) else { continue }
+            out[items[id - 1].key] = CloudVerdict(name: String(name.prefix(48)), category: category, confident: true,
+                                                  domain: (result["website"] as? String)?.lowercased())
+        }
+        return out
+    }
+}
+
+// MARK: - The analyst
+
+/// Reads every charge of the last year and says what a sharp bookkeeper would point out. The model
+/// chooses which charges make up each finding; the app adds them up, so no total is ever invented.
+enum Discoverer {
+    struct Finding: Sendable {
+        let title: String
+        let detail: String
+        let kind: String
+        let lines: [Int]
+    }
+
+    static func find(_ lines: [StoryFinder.Line], notes: [String]) async -> [Finding]? {
+        guard lines.count >= 40 else { return [] }
+        let system = """
+        You are a sharp, kind personal bookkeeper who has just read a year of someone's charges. Tell them up to 8 \
+        things they would want to know and probably don't. Look for:
+        - subscription: something paid for twice, or two services that do the same job, or one that looks forgotten
+        - increase: a repeating charge whose price went up
+        - duplicate: the same amount charged twice by one place on or near the same day
+        - fees: interest, late fees, bank or foreign-transaction fees
+        - habit: a small frequent thing that adds up to a surprising amount (name the place)
+        - mistake: a charge that looks wrong or unlike anything else they do
+        - tax: charges that may matter at tax time (donations, medical, a home office)
+        - other: anything else genuinely striking
+        Be specific to this person; no generic advice, nothing obvious (that rent is large, that travel costs money), \
+        and do not report trips. Read the person's notes first and respect them.
+
+        For each: {"kind": "…", "title": "…", "detail": "…", "lines": [numbers]}
+        title: under 9 words, names the place or thing, no dollar amounts.
+        detail: one plain sentence saying why it's worth a look. No dollar amounts and no counts: the app adds those from the lines.
+        lines: the number of every charge that makes up the finding. Only include what truly belongs.
+        Order them most valuable first. Reply with JSON only: {"findings": [ … ]}
+        """
+        var user = lines.enumerated().map { i, l in "\(i + 1) | \(l.date) | \(l.text) | \(String(format: "%.2f", l.amount)) | \(l.category)" }
+            .joined(separator: "\n")
+        if !notes.isEmpty { user = "The person's notes:\n" + notes.joined(separator: "\n") + "\n\nCharges:\n" + user }
+        let text = user
+        let reply = await Timeout.run(200) {
+            try? await CloudAI.complete(system: system, user: text, json: true, maxTokens: 12_000, timeout: 190, effort: "medium")
+        }
+        guard let reply, let list = CloudAI.object(from: reply)?["findings"] as? [[String: Any]] else { return nil }
+        return list.compactMap { item in
+            guard let title = (item["title"] as? String)?.trimmingCharacters(in: .whitespaces), !title.isEmpty else { return nil }
+            let numbers = ((item["lines"] as? [Any]) ?? []).compactMap { ($0 as? Int) ?? ($0 as? Double).map(Int.init) }.filter { $0 >= 1 && $0 <= lines.count }
+            guard !numbers.isEmpty else { return nil }
+            return Finding(title: title, detail: ((item["detail"] as? String) ?? "").trimmingCharacters(in: .whitespaces),
+                           kind: (item["kind"] as? String) ?? "other", lines: numbers)
+        }
     }
 }
 

@@ -80,6 +80,30 @@ enum DebugHooks {
     static func startIfRequested() {
         if let folder = env["APPAULED_WINDOW"] { Task { await windowTour(URL(fileURLWithPath: folder)) }; return }
         guard let outDir = env["APPAULED_SNAPSHOT"] else { return }
+        // APPAULED_ENRICH=1: only do the catch-up work (web lookups, things noticed), print it and quit.
+        if env["APPAULED_ENRICH"] != nil {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1))
+                let store = BudgetStore.shared
+                let before = store.reviewItems.count
+                @MainActor func settle() async {
+                    for _ in 0..<300 {
+                        try? await Task.sleep(for: .seconds(1))
+                        if !store.isSuggesting, !store.isLookingUp, !store.isFindingDiscoveries, !store.isFindingStories { break }
+                    }
+                }
+                @MainActor func flags() -> String { "sorting=\(store.isSuggesting) lookingUp=\(store.isLookingUp) noticing=\(store.isFindingDiscoveries) stories=\(store.isFindingStories) cloud=\(CloudAI.isEnabled) web=\(WebLookup.isOn) accounts=\(store.accounts.count)" }
+                print("ENRICH start \(flags())")
+                await settle()          // the app may already be at it (it starts on becoming active)
+                print("ENRICH settled \(flags())")
+                await store.catchUp()
+                print("ENRICH caught up \(flags())")
+                await settle()
+                print("ENRICH guesses \(before) → \(store.reviewItems.count), noticed \(store.discoveries.count)")
+                NSApp.terminate(nil)
+            }
+            return
+        }
         Task { await run(outDir: URL(fileURLWithPath: outDir)) }
     }
 
@@ -136,7 +160,8 @@ enum DebugHooks {
         if env["APPAULED_SELFTEST"] != nil { await selfTest(files: files); NSApp.terminate(nil); return }
 
         await snap("03-review", outDir) { ReviewView(scrolls: false) }
-        store.confirm(store.reviewItems.map(\.key))
+        let confirmedForThePicture = store.reviewItems.map(\.key)
+        store.confirm(confirmedForThePicture)
         try? await Task.sleep(for: .seconds(8))   // let Daily Tony and the recap finish
         await settle()
         await snap("04-overview", outDir) { OverviewView(scrolls: false) }
@@ -187,6 +212,8 @@ enum DebugHooks {
             await snap("13-charges", outDir) { ChargesView(filter: TransactionFilter(storyID: trip.id), scrolls: false).frame(width: 1000) }
         }
         await snap("09-allcaughtup", outDir) { ReviewView(scrolls: false) }
+        // Put the guesses back: the picture needed an empty list, the library doesn't.
+        store.unconfirm(confirmedForThePicture)
         await snap("10-new-category", outDir) {
             CategoryEditorSheet(request: CategoryEditorRequest(editing: CustomCategory(name: "Pets", symbol: "pawprint.fill", color: "teal")))
         }

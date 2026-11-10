@@ -199,6 +199,8 @@ struct MerchantInfo: Codable, Hashable {
     var domain: String?
     /// What the person wants remembered about this place ("only when the in-laws visit"). Optional; the AI reads it.
     var note: String?
+    /// True once this place has been looked up on the web, found or not: it is only ever paid for once.
+    var lookedUp: Bool?
 
     init(name: String, category: Category?, source: Source, confirmed: Bool = false, sample: String) {
         self.name = name; self.category = category; self.source = source; self.confirmed = confirmed; self.sample = sample
@@ -214,6 +216,7 @@ struct MerchantInfo: Codable, Hashable {
         sample = (try? c.decodeIfPresent(String.self, forKey: .sample)) ?? name
         domain = try? c.decodeIfPresent(String.self, forKey: .domain)
         note = try? c.decodeIfPresent(String.self, forKey: .note)
+        lookedUp = try? c.decodeIfPresent(Bool.self, forKey: .lookedUp)
     }
 }
 
@@ -423,6 +426,44 @@ struct TransactionFilter: Equatable {
     var needsCheck = false
     /// Only the charges that belong to one trip or event.
     var storyID: UUID?
+    /// A hand-picked set of charges (something the analyst noticed), and what to call it.
+    var ids: Set<UUID>?
+    var title: String?
+}
+
+/// Something the model noticed reading every charge: a subscription paid twice, a habit that adds
+/// up, a fee nobody would choose to pay. The model picks the charges; the app adds them up.
+struct Discovery: Codable, Identifiable, Hashable {
+    var id = UUID()
+    var title: String
+    var detail: String
+    var kind: String
+    var entryIDs: [UUID]
+
+    init(title: String, detail: String, kind: String, entryIDs: [UUID]) {
+        self.title = title; self.detail = detail; self.kind = kind; self.entryIDs = entryIDs
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
+        title = try c.decode(String.self, forKey: .title)
+        detail = (try? c.decodeIfPresent(String.self, forKey: .detail)) ?? ""
+        kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? "other"
+        entryIDs = (try? c.decodeIfPresent([UUID].self, forKey: .entryIDs)) ?? []
+    }
+
+    var symbol: String {
+        switch kind {
+        case "subscription": "repeat.circle.fill"
+        case "duplicate": "equal.circle.fill"
+        case "increase": "arrow.up.circle.fill"
+        case "fees": "building.columns.circle.fill"
+        case "habit": "flame.circle.fill"
+        case "mistake": "exclamationmark.circle.fill"
+        case "tax": "doc.text.fill"
+        default: "sparkle"
+        }
+    }
 }
 
 /// A trip or an event the app noticed in the spending: a run of charges that belong together.

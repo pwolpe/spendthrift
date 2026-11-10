@@ -111,6 +111,7 @@ struct ShowView: View {
         if let favorite = Dictionary(grouping: spending, by: \.merchant).max(by: { $0.value.count < $1.value.count }), favorite.value.count >= 5 {
             candidates.append("A regular: \(favorite.key), \(favorite.value.count) times")
         }
+        if store.isLookingUp { candidates.append("Looking up the places I didn't recognize…") }
         if store.isSuggesting {
             let unsure = Set(all.filter(\.needsCheck).map(\.merchant)).count
             if unsure > 0 { candidates.append("Working out what \(unsure) unfamiliar places are…") }
@@ -178,13 +179,14 @@ struct ShowView: View {
 /// One card of the premiere. Each can be drawn on its own (the tests take pictures of them).
 struct PremiereCard: View {
     enum Kind: Hashable {
-        case opening, where_, standout, repeats, trips, verdict, finale
+        case opening, where_, standout, repeats, trips, noticed, verdict, finale
 
         @MainActor static func available(in store: BudgetStore) -> [Kind] {
             var list: [Kind] = [.opening, .where_]
             if store.transactions.contains(where: \.countsAsSpending) { list.append(.standout) }
             if store.subscriptions().count >= 2 { list.append(.repeats) }
             if !store.stories.isEmpty || store.isFindingStories { list.append(.trips) }
+            if !store.discoveries.isEmpty { list.append(.noticed) }
             if store.months.count > 2 { list.append(.verdict) }
             list.append(.finale)
             return list
@@ -214,6 +216,7 @@ struct PremiereCard: View {
             case .standout: standout
             case .repeats: repeats
             case .trips: trips
+            case .noticed: noticed
             case .verdict: verdict
             case .finale: finale
             }
@@ -344,6 +347,29 @@ struct PremiereCard: View {
             .frame(maxWidth: 600)
             line("Worked out from the charges alone: a flight, a run of spending somewhere else, a flight home.")
         }
+    }
+
+    @ViewBuilder private var noticed: some View {
+        let found = store.discoveries.prefix(3)
+        eyebrow("I read every charge")
+        headline("A few things you may not know")
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(Array(found)) { item in
+                let total = store.transactions(in: item).reduce(0) { $0 + $1.amount }
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: item.symbol).font(.system(size: 30)).foregroundStyle(Theme.accent).frame(width: 40)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(item.title).font(.title2.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Text(Money.format(abs(total), cents: false)).font(.system(size: 24, weight: .bold, design: .rounded)).monospacedDigit()
+                        }
+                        Text(item.detail).font(.title3).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 640)
     }
 
     @ViewBuilder private var verdict: some View {

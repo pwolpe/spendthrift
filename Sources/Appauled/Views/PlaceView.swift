@@ -227,6 +227,7 @@ struct ChargesView: View {
     var scrolls = true
 
     private var title: String {
+        if let title = filter.title { return title }
         var parts: [String] = []
         if let id = filter.storyID, let story = store.stories.first(where: { $0.id == id }) { parts.append(story.name) }
         if let c = filter.category { parts.append(c.displayName) }

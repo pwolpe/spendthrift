@@ -50,6 +50,7 @@ struct OverviewView: View {
                             if !DebugHooks.off("places") { topPlacesCard(m) }
                         }
                         VStack(spacing: 20) {
+                            NoticedCard()
                             if !DebugHooks.off("trend") { trendCard(m) }
                             ForecastCard()
                             if !DebugHooks.off("coming") { comingUpCard }
@@ -537,6 +538,45 @@ struct ForecastCard: View {
             let result = await Forecaster.estimate(month: next.title, history: history, repeating: repeating,
                                                    notes: store.allNotes(), basis: basis)
             if let result { withAnimation(.snappy) { estimate = result } }
+        }
+    }
+}
+
+/// What the analyst noticed reading every charge. Each line opens the charges behind it.
+struct NoticedCard: View {
+    private var store: BudgetStore { .shared }
+
+    var body: some View {
+        let found = store.discoveries
+        if !found.isEmpty {
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionHeader(title: "Things I noticed", subtitle: "From reading every charge of the last year")
+                    ForEach(Array(found.prefix(6).enumerated()), id: \.element.id) { i, item in
+                        let list = store.transactions(in: item)
+                        let total = list.reduce(0) { $0 + $1.amount }
+                        Button { store.showDiscovery(item) } label: {
+                            HStack(alignment: .top, spacing: 11) {
+                                Image(systemName: item.symbol).font(.title2).foregroundStyle(Theme.accent).frame(width: 28)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text(item.title).font(.body.weight(.semibold)).multilineTextAlignment(.leading)
+                                            .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                                        Spacer(minLength: 6)
+                                        Text(Money.format(abs(total), cents: false)).font(.body.weight(.semibold)).monospacedDigit()
+                                    }
+                                    Text(item.detail).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu { Button("Not Interesting", systemImage: "xmark.circle") { store.dismissDiscovery(item) } }
+                        if i < min(found.count, 6) - 1 { Divider().padding(.leading, 39) }
+                    }
+                }
+            }
         }
     }
 }

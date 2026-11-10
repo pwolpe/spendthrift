@@ -114,6 +114,7 @@ struct ContentView: View {
             DebugHooks.startIfRequested()
             await DailyPicture.shared.ensureCartoon()
             TonyArt.shared.prepare()
+            await store.catchUp()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.refreshDownloads()

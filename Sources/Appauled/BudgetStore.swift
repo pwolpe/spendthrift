@@ -241,10 +241,11 @@ final class BudgetStore {
             // Once everything has a category, look for the trips and events in it, and find logos.
             Task { await findStoriesIfNeeded() }
             Task { await findLogosIfNeeded() }
+            Task { await findDiscoveriesIfNeeded() }
             announceNewFindings()
         }
         // With a cloud key, the powerful model decides everything the built-in list doesn't know.
-        if CloudAI.isEnabled { await sortWithCloud() }
+        if CloudAI.isEnabled { await sortWithCloud(); await lookUpGuesses() }
         guard aiAvailable else { return }
         while true {
             let used = Dictionary(grouping: library.entries, by: \.merchantKey)
@@ -436,6 +437,121 @@ final class BudgetStore {
     }
 
     /// What the stories were last worked out from: when the data changes, look again.
+    /// Work that may be owed from an earlier session (the app was quit mid-way, or a feature is
+    /// new since the last import): look up the remaining guesses, then read for things to notice.
+    func catchUp() async {
+        guard CloudAI.isEnabled, !isImporting, !isSuggesting, !accounts.isEmpty else { return }
+        await lookUpGuesses()
+        await findStoriesIfNeeded()
+        await findDiscoveriesIfNeeded()
+    }
+
+    // MARK: - Looking places up on the web
+
+    private(set) var isLookingUp = false
+
+    /// The guesses that matter most by dollars are searched for on the web, once each.
+    private func lookUpGuesses() async {
+        guard CloudAI.isEnabled, WebLookup.isOn, !isLookingUp else { return }
+        let used = Dictionary(grouping: library.entries, by: \.merchantKey)
+        var waiting: [(item: CloudItem, weight: Double)] = []
+        for (key, info) in library.merchants where info.source == .cloudGuess && !info.confirmed && info.lookedUp != true {
+            guard let entries = used[key], !entries.isEmpty, WebLookup.isSearchable(info.sample) else { continue }
+            let total = entries.reduce(0) { $0 + $1.amount }
+            var item = CloudItem(key: key, description: info.sample, averageAmount: total / Double(entries.count),
+                                 count: entries.count, bankCategory: nil)
+            item.appGuess = "\(info.name): \(info.category?.rawValue ?? "unknown")"
+            waiting.append((item, abs(total)))
+        }
+        guard !waiting.isEmpty else { return }
+        let cap = ProcessInfo.processInfo.environment["APPAULED_LOOKUP_CAP"].flatMap(Int.init) ?? 40
+        let chosen = waiting.sorted { $0.weight > $1.weight }.prefix(cap).map(\.item)
+        isLookingUp = true
+        defer { isLookingUp = false }
+        let batches = chosen.chunked(into: 5)
+        await withTaskGroup(of: ([CloudItem], [String: CloudVerdict]).self) { group in
+            for batch in batches { group.addTask { (batch, await WebLookup.identify(batch)) } }
+            for await (batch, verdicts) in group {
+                for item in batch { library.merchants[item.key]?.lookedUp = true }
+                for (key, verdict) in verdicts where library.merchants[key]?.confirmed == false {
+                    if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil {
+                        print("DEBUG LOOKUP \(library.merchants[key]?.sample ?? "") → \(verdict.name) | \(verdict.category.rawValue) | \(verdict.domain ?? "-")")
+                    }
+                    library.merchants[key]?.name = verdict.name
+                    library.merchants[key]?.category = verdict.category
+                    library.merchants[key]?.source = .cloud
+                    if let domain = verdict.domain, !domain.isEmpty { library.merchants[key]?.domain = domain }
+                }
+                withAnimation(.snappy) { changed() }
+            }
+        }
+    }
+
+    // MARK: - What the analyst noticed
+
+    private(set) var isFindingDiscoveries = false
+
+    var discoveries: [Discovery] {
+        let dismissed = library.dismissedDiscoveries ?? []
+        let kept = (library.discoveries ?? []).filter { !dismissed.contains($0.title.lowercased()) }
+        // One of each kind before a second of any: four double charges in a row read as one finding.
+        var byKind: [String: [Discovery]] = [:], order: [String] = []
+        for item in kept { if byKind[item.kind] == nil { order.append(item.kind) }; byKind[item.kind, default: []].append(item) }
+        var mixed: [Discovery] = []
+        while mixed.count < kept.count {
+            for kind in order { if let next = byKind[kind]?.first { mixed.append(next); byKind[kind]?.removeFirst() } }
+        }
+        return mixed
+    }
+
+    func transactions(in discovery: Discovery) -> [Transaction] {
+        let ids = Set(discovery.entryIDs)
+        return transactions.filter { ids.contains($0.id) }
+    }
+
+    func dismissDiscovery(_ discovery: Discovery) {
+        var dismissed = library.dismissedDiscoveries ?? []
+        dismissed.insert(discovery.title.lowercased())
+        library.dismissedDiscoveries = dismissed
+        withAnimation(.snappy) { changed() }
+    }
+
+    func showDiscovery(_ discovery: Discovery) {
+        var filter = TransactionFilter()
+        filter.ids = Set(discovery.entryIDs)
+        filter.title = discovery.title
+        showCharges(filter)
+    }
+
+    private func findDiscoveriesIfNeeded() async {
+        guard CloudAI.isEnabled, !isFindingDiscoveries, !isImporting, !isSuggesting, let last = months.last else { return }
+        let basis = storiesBasis
+        guard library.discoveriesBasis != basis else { return }
+        isFindingDiscoveries = true
+        defer { isFindingDiscoveries = false }
+        // The last twelve months of real spending: recent enough to act on.
+        let start = last.adding(-11)
+        let recent = transactions.filter { $0.month >= start && !$0.isTransfer && !$0.isUnknown && $0.lane != .investments }.suffix(3_000)
+        let lines = recent.map { t in
+            StoryFinder.Line(id: t.id, date: DateParsing.iso.string(from: t.date),
+                             text: t.note.map { "\(t.merchant) (\(t.description)) [note: \($0.prefix(120))]" } ?? "\(t.merchant) (\(t.description.prefix(40)))",
+                             amount: t.amount, category: t.category.displayName)
+        }
+        guard let found = await Discoverer.find(lines, notes: allNotes(limit: 20)) else { return }
+        guard storiesBasis == basis else { return }
+        library.discoveries = found.map { finding in
+            Discovery(title: finding.title, detail: finding.detail, kind: finding.kind, entryIDs: finding.lines.map { lines[$0 - 1].id })
+        }
+        library.discoveriesBasis = basis
+        withAnimation(.snappy) { changed() }
+        if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil {
+            for d in discoveries {
+                let list = transactions(in: d)
+                print("DEBUG NOTICED [\(d.kind)] \(d.title) | \(list.count) charges | \(Int(list.reduce(0) { $0 + $1.amount })) | \(d.detail)")
+            }
+        }
+    }
+
     private var storiesBasis: String {
         "\(library.entries.count)|\(Int(library.entries.reduce(0) { $0 + abs($1.amount) }))"
     }
@@ -593,6 +709,12 @@ final class BudgetStore {
         return true
     }
 
+    /// Returns places to the Double-Check list (used by the test pictures, which confirm everything briefly).
+    func unconfirm(_ keys: [String]) {
+        for key in keys where library.merchants[key]?.source != .user { library.merchants[key]?.confirmed = false }
+        changed()
+    }
+
     func renamePlace(_ key: String, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, library.merchants[key] != nil, library.merchants[key]?.name != trimmed else { return }
@@ -633,6 +755,7 @@ final class BudgetStore {
             let ids = Set(story.entryIDs)
             list = list.filter { ids.contains($0.id) }
         }
+        if let ids = f.ids { list = list.filter { ids.contains($0.id) } }
         if f.needsCheck { list = list.filter(\.needsCheck) }
         return list
     }
