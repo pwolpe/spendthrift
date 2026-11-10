@@ -26,10 +26,10 @@ struct StoryView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Tony rang his friend Paul with a confession: he had no real idea where his money was going, and he wanted help finding out.")
-                        Text("Paul can't resist a problem like that. He went looking and found [Tally](https://tallyai.money), a clever tool for making sense of bank statements, and the idea got its hooks into him. So he sat down with Claude, an AI, and built the app he had always wanted and never would have dared to start on his own: drop in your statements, and it tells you where it all went.")
-                        Text("That's why the two of them turn up all over Spendthrift. Tony is the reason it exists. Paul is the one who couldn't stop building it. When you see them holding one of your receipts, they mean it kindly. They've been there.")
-                        Text("It was made for one friend. It's here for anyone who has ever looked at a statement and thought: I spent *what*?")
+                        Text("Tony called his friend Paul with a confession: he had no idea where his money was going. Could Paul help him find out?")
+                        Text("Paul can't leave a problem like that alone. He found [Tally](https://tallyai.money), a clever tool for making sense of bank statements, and the idea took hold. Then he sat down with Claude and built the app he had always wanted and never would have attempted alone. Drop in your statements and it tells you where it all went.")
+                        Text("That's why the two of them turn up all over Spendthrift. Tony is the reason it exists; Paul is the one who couldn't stop building it. When you catch them holding one of your receipts, they mean it kindly. They've been there.")
+                        Text("It was made for one friend. It's for anyone who has ever looked at a statement and thought: I spent *what*?")
                     }
                     .font(.title3)
                     .lineSpacing(4)
