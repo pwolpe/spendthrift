@@ -26,7 +26,7 @@ struct Insight: Identifiable, Hashable {
         case .newSubscription: .purple
         case .priceIncrease: .orange
         case .duplicate: .red
-        case .unusual: .pink
+        case .unusual: Theme.spent
         case .categoryUp: .yellow
         case .categoryDown: .green
         }

@@ -254,61 +254,55 @@ struct BannerCard: View {
     @State private var daily = DailyPicture.shared
 
     var body: some View {
-        Color.black
-            .aspectRatio(21.0 / 9.0, contentMode: .fit)
-            .overlay {
-                if let image = daily.image ?? daily.cartoon {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .id(ObjectIdentifier(image))
-                        .transition(.opacity)
-                }
-            }
-            .overlay {
-                // Darkens the bottom third so the words read over any picture.
-                VStack(spacing: 0) {
-                    Color.clear
-                    LinearGradient(colors: [.black.opacity(0), .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
-                }
-            }
-            .overlay(alignment: .bottom) {
-                HStack(alignment: .bottom, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Today's Nominee · \(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))", systemImage: "star.circle.fill")
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(Color(red: 1, green: 0.84, blue: 0.4))
-                            .textCase(.uppercase)
-                        Text(daily.caption.isEmpty ? "Today's daydream" : daily.caption)
-                            .font(.system(size: 30, weight: .bold, design: .serif))
-                            .foregroundStyle(.white)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .contentTransition(.opacity)
-                        if let source = daily.source {
-                            // The real purchase behind the picture: this is what makes it land.
-                            Label(source, systemImage: "receipt")
-                                .font(.callout.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .contentTransition(.opacity)
-                        }
+        // The picture hangs clean, like a print; its caption sits beneath it like a gallery label.
+        // (Words laid over a picture depend on the picture; words on paper never fail to read.)
+        VStack(alignment: .leading, spacing: 14) {
+            Color.black.opacity(0.06)
+                .aspectRatio(21.0 / 9.0, contentMode: .fit)
+                .overlay {
+                    if let image = daily.image ?? daily.cartoon {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .id(ObjectIdentifier(image))
+                            .transition(.opacity)
                     }
-                    Spacer(minLength: 0)
-                    Button {
-                        daily.showRandom()
-                    } label: {
-                        Label("Another One", systemImage: "wand.and.sparkles")
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.large)
                 }
-                .padding(24)
+                .clipShape(.rect(cornerRadius: 18, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.hairline) }
+                .shadow(color: .black.opacity(0.10), radius: 16, y: 6)
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Today's Nominee · \(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))".uppercased())
+                        .font(.caption.weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(Theme.goldDeep)
+                    Text(daily.caption.isEmpty ? "Today's daydream" : daily.caption)
+                        .font(.system(size: 24, weight: .bold, design: .serif))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let source = daily.source {
+                        // The real purchase behind the picture: this is what makes it land.
+                        Label(source, systemImage: "receipt")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+                Button {
+                    daily.showRandom()
+                } label: {
+                    Label("Another One", systemImage: "wand.and.sparkles")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             }
-            .clipShape(.rect(cornerRadius: 22, style: .continuous))
-            .shadow(color: .black.opacity(0.12), radius: 14, y: 5)
-            // Once the statements are in, quietly get the next picture ready.
-            .task(id: "\(store.hasLoadedTransactions)-\(store.isImporting)-\(store.recentHighlights().first?.merchant ?? "")") {
-                guard store.hasLoadedTransactions, !store.isImporting else { return }
-                await daily.prepareNext(highlights: store.recentHighlights())
-            }
+            .padding(.horizontal, 6)
+        }
+        // Once the statements are in, quietly get the next picture ready.
+        .task(id: "\(store.hasLoadedTransactions)-\(store.isImporting)-\(store.recentHighlights().first?.merchant ?? "")") {
+            guard store.hasLoadedTransactions, !store.isImporting else { return }
+            await daily.prepareNext(highlights: store.recentHighlights())
+        }
     }
 }

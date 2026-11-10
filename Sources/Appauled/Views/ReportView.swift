@@ -797,7 +797,7 @@ enum ReportExporter {
         let content = ReportContent(data: data, interactive: false)
             .padding(36)
             .frame(width: 960)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(Theme.paper)
             .environment(store)
             .environment(\.colorScheme, .light)
         let renderer = ImageRenderer(content: content)

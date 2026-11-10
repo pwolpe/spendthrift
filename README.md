@@ -100,6 +100,23 @@ credit, or there's no internet, everything falls back to the on-device paths.
   about custom categories and sorts new places into them.
 - **Accounts**: rename, remove, or fix an account whose amounts came in backwards.
 
+## The look
+
+Japanese in sensibility: paper and ink (an unbleached-paper background by day, sumi by night), cards
+as sheets with a hairline edge, one warm accent, category colors taken from traditional dyes, and
+space left empty on purpose. It is all in `Theme` (Components.swift) and the category table
+(Models.swift). The banner picture hangs clean with its caption beneath it, like a gallery label.
+
+## When things go wrong
+
+- A zip (a year of statements from the bank) is opened and read like a folder, at any depth.
+- Files that aren't statements are listed with a plain reason; inside a dropped folder they are skipped.
+- European exports (semicolons, 31.12.2026, 1.234,56) are understood.
+- If the model can't be used (bad key, no credit, no connection), the import still finishes with
+  what the app can do by itself, and a banner says what happened and that nothing was lost.
+- `APPAULED_FAIL_CLOUD=credit|key|offline` simulates that; `APPAULED_WIDTH` and `APPAULED_DARK`
+  render the test pictures at a given width and in Dark Mode.
+
 ## Build (on your Mac)
 
 Requires Command Line Tools or Xcode for macOS 26, on an Apple Silicon Mac.

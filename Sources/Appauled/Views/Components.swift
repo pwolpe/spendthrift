@@ -4,16 +4,33 @@ import AppKit
 // MARK: - Look & feel
 
 /// One accent for the whole app: awards gold. Category colors do the rest.
+/// The look, in one place. The sensibility is Japanese: paper and ink, one warm accent, colors
+/// taken from traditional dyes, space left empty on purpose (ma), and nothing that shouts.
 enum Theme {
-    /// Deep enough for white text on prominent buttons, in light and dark mode.
+    private static func adaptive(_ light: (CGFloat, CGFloat, CGFloat), _ dark: (CGFloat, CGFloat, CGFloat)) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let c = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+            return NSColor(srgbRed: c.0, green: c.1, blue: c.2, alpha: 1)
+        })
+    }
+    /// Unbleached paper (kinari) by day, sumi ink by night.
+    static let paper = adaptive((0.969, 0.957, 0.929), (0.098, 0.094, 0.090))
+    /// A sheet laid on the paper: a shade lighter than what it rests on.
+    static let sheet = adaptive((1.0, 0.995, 0.982), (0.145, 0.139, 0.133))
+    /// Yamabuki gold: deep enough for white text on prominent buttons, in light and dark mode.
     static let accent = Color(red: 0.74, green: 0.49, blue: 0.06)
     static let goldLight = Color(red: 0.98, green: 0.82, blue: 0.36)
     static let goldDeep = Color(red: 0.78, green: 0.56, blue: 0.13)
     static let gold = LinearGradient(colors: [goldLight, goldDeep], startPoint: .top, endPoint: .bottom)
     static let curtain = LinearGradient(colors: [Color(red: 0.62, green: 0.08, blue: 0.14), Color(red: 0.36, green: 0.03, blue: 0.08)],
                                         startPoint: .top, endPoint: .bottom)
-    static let good = Color.green
-    static let caution = Color.orange
+    /// Tokiwa, the green of pines: money in, things that went well.
+    static let good = adaptive((0.20, 0.50, 0.37), (0.42, 0.72, 0.57))
+    /// Kaki, persimmon: worth a look, never an alarm.
+    static let caution = Color(red: 0.84, green: 0.45, blue: 0.20)
+    /// Akane, madder red: money consumed, and the rare real warning.
+    static let spent = Color(red: 0.78, green: 0.33, blue: 0.34)
+    static let hairline = Color.primary.opacity(0.09)
 }
 
 struct Card<Content: View>: View {
@@ -24,12 +41,13 @@ struct Card<Content: View>: View {
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor), in: .rect(cornerRadius: 18, style: .continuous))
+            // A sheet on paper: a hairline edge and the faintest lift, no heavy shadow.
+            .background(Theme.sheet, in: .rect(cornerRadius: 16, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Theme.hairline)
             }
-            .shadow(color: .black.opacity(0.05), radius: 10, y: 3)
+            .shadow(color: .black.opacity(0.025), radius: 6, y: 2)
     }
 }
 
@@ -65,6 +83,33 @@ struct TonyAvatar: View {
         .clipShape(Circle())
         .overlay(Circle().strokeBorder(Theme.gold, lineWidth: max(1.5, size / 22)))
         .shadow(color: .black.opacity(0.15), radius: size / 12, y: size / 30)
+    }
+}
+
+/// Shown when the model can't be used at all. Says what happened, that nothing is lost, and what to do.
+struct CloudTroubleBanner: View {
+    private var store: BudgetStore { .shared }
+    @State private var status = CloudStatus.shared
+
+    var body: some View {
+        if let reason = status.stopped, status.hasKey {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "wand.and.stars.inverse").font(.title3).foregroundStyle(Theme.caution)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Smarter AI has paused").font(.callout.weight(.semibold))
+                    Text("\(reason) Everything already read is safe. Places it couldn't sort are waiting in Double-Check, and the rest picks up where it left off.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Button("Try Again") { store.cloudBecameAvailable() }
+                SettingsLink { Text("Settings") }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Theme.caution.opacity(0.09), in: .rect(cornerRadius: 12, style: .continuous))
+        }
     }
 }
 
@@ -198,7 +243,7 @@ struct CategoryIcon: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                .fill(category.color.gradient)
+                .fill(category.color)
             Image(systemName: category.symbol)
                 .font(.system(size: size * 0.46, weight: .semibold))
                 .foregroundStyle(.white)

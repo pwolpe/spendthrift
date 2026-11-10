@@ -44,7 +44,7 @@ struct ContentView: View {
                     .allowsHitTesting(store.showsAsk)
                 }
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(Theme.paper)
             .toolbar {
                 if !store.accounts.isEmpty {
                     ToolbarItem(placement: .primaryAction) {

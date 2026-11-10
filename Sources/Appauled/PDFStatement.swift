@@ -9,7 +9,7 @@ enum PDFStatement {
         case unreadable, locked, lockedAndSkipped, noTransactions
         var errorDescription: String? {
             switch self {
-            case .unreadable: "This PDF couldn't be opened."
+            case .unreadable: "This file couldn't be opened. It may be damaged, or not a statement at all."
             case .locked: "This PDF is locked with a password that didn't open it."
             case .lockedAndSkipped: "This PDF is locked with a password, so it was skipped. Drop it in again when you have the password."
             case .noTransactions: "No transactions were found in this PDF. If your bank offers a CSV download, try that instead."

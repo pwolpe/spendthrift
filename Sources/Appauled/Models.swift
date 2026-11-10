@@ -39,20 +39,32 @@ struct Category: Hashable, Identifiable, Codable {
     /// A payment to a credit card whose statements haven't been added: the only record of that spending.
     static let uncoveredCards = Category("Cards Not Added Yet")
 
+    /// Colors from traditional Japanese dyes: distinct enough to tell apart in a chart, quiet enough
+    /// to sit together. (The names are the dyes': wakatake is young bamboo, ai is indigo, and so on.)
+    private static func dye(_ r: Double, _ g: Double, _ b: Double) -> Color { Color(red: r, green: g, blue: b) }
     private static let builtInLook: [(Category, symbol: String, color: Color)] = [
-        (.groceries, "cart.fill", .green), (.dining, "fork.knife", .orange), (.shopping, "bag.fill", .pink),
-        (.transportation, "car.fill", .blue), (.bills, "bolt.fill", .yellow), (.subscriptions, "play.rectangle.fill", .purple),
-        (.health, "heart.fill", .red), (.home, "house.fill", .brown), (.travel, "airplane", .cyan),
-        (.entertainment, "ticket.fill", .indigo), (.personal, "scissors", .mint),
-        (.gifts, "gift.fill", Color(red: 0.95, green: 0.35, blue: 0.45)),
-        (.fees, "building.columns.fill", Color(red: 0.45, green: 0.5, blue: 0.6)), (.other, "square.grid.2x2.fill", .teal),
-        (.transfer, "arrow.left.arrow.right", .gray), (.income, "dollarsign", Color(red: 0.2, green: 0.7, blue: 0.4)),
+        (.groceries, "cart.fill", dye(0.41, 0.66, 0.50)),            // wakatake
+        (.dining, "fork.knife", dye(0.86, 0.51, 0.29)),              // kaki
+        (.shopping, "bag.fill", dye(0.84, 0.50, 0.57)),              // kobai
+        (.transportation, "car.fill", dye(0.24, 0.43, 0.63)),        // ai
+        (.bills, "bolt.fill", dye(0.88, 0.70, 0.27)),                // yamabuki
+        (.subscriptions, "play.rectangle.fill", dye(0.59, 0.51, 0.74)), // fuji
+        (.health, "heart.fill", dye(0.75, 0.29, 0.31)),              // akane
+        (.home, "house.fill", dye(0.56, 0.42, 0.31)),                // kuri
+        (.travel, "airplane", dye(0.27, 0.62, 0.70)),                // asagi
+        (.entertainment, "ticket.fill", dye(0.41, 0.41, 0.69)),      // kikyo
+        (.personal, "scissors", dye(0.50, 0.70, 0.64)),              // seiji
+        (.gifts, "gift.fill", dye(0.88, 0.52, 0.47)),                // sango
+        (.fees, "building.columns.fill", dye(0.50, 0.54, 0.60)),     // nezumi
+        (.other, "square.grid.2x2.fill", dye(0.55, 0.61, 0.56)),     // rikyu-nezumi
+        (.transfer, "arrow.left.arrow.right", dye(0.62, 0.62, 0.60)),
+        (.income, "dollarsign", dye(0.23, 0.53, 0.39)),              // tokiwa
         (.unsorted, "questionmark", Color(nsColor: .tertiaryLabelColor)),
-        (.investmentIncome, "chart.line.uptrend.xyaxis", Color(red: 0.16, green: 0.55, blue: 0.47)),
-        (.investing, "building.columns.circle.fill", Color(red: 0.25, green: 0.38, blue: 0.62)),
-        (.investmentLoan, "percent", Color(red: 0.45, green: 0.36, blue: 0.62)),
-        (.taxes, "doc.text.fill", Color(red: 0.55, green: 0.45, blue: 0.35)),
-        (.uncoveredCards, "creditcard.trianglebadge.exclamationmark", Color(red: 0.85, green: 0.5, blue: 0.2)),
+        (.investmentIncome, "chart.line.uptrend.xyaxis", dye(0.20, 0.47, 0.42)), // chitose-midori
+        (.investing, "building.columns.circle.fill", dye(0.22, 0.32, 0.52)),     // kon
+        (.investmentLoan, "percent", dye(0.46, 0.37, 0.59)),                     // edo-murasaki
+        (.taxes, "doc.text.fill", dye(0.57, 0.46, 0.33)),                        // kuchiba
+        (.uncoveredCards, "creditcard.trianglebadge.exclamationmark", dye(0.84, 0.45, 0.20)),
     ]
     private static let look: [Category: (symbol: String, color: Color)] =
         Dictionary(uniqueKeysWithValues: builtInLook.map { ($0.0, ($0.symbol, $0.color)) })

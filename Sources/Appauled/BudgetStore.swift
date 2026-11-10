@@ -875,15 +875,44 @@ final class BudgetStore {
     nonisolated private static func expand(_ urls: [URL]) -> (files: [URL], fromFolder: Set<URL>) {
         var files: [URL] = [], fromFolder: Set<URL> = []
         let fm = FileManager.default
+
+        /// Banks often hand over a year of statements as one zip. Opens it; nil if it isn't one.
+        func unzipped(_ url: URL) -> URL? {
+            let unpacked = fm.temporaryDirectory.appendingPathComponent("AppauledZip-\(UUID().uuidString)", isDirectory: true)
+            let unzip = Process()
+            unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            unzip.arguments = ["-x", "-k", url.path, unpacked.path]
+            unzip.standardOutput = FileHandle.nullDevice; unzip.standardError = FileHandle.nullDevice
+            guard (try? unzip.run()) != nil else { return nil }
+            unzip.waitUntilExit()
+            return unzip.terminationStatus == 0 ? unpacked : nil
+        }
+        /// Everything readable inside a folder (or an opened zip), a few levels down, zips included.
+        func walk(_ folder: URL, depth: Int) {
+            guard depth < 4, let items = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey],
+                                                                     options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return }
+            for item in items.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where files.count < 500 {
+                let name = item.lastPathComponent
+                if name.hasPrefix("._") || name == "__MACOSX" { continue }
+                let ext = item.pathExtension.lowercased()
+                if (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                    if ext != "app" { walk(item, depth: depth + 1) }
+                } else if ext == "zip" {
+                    if let inside = unzipped(item) { walk(inside, depth: depth + 1) }
+                } else if StatementReader.extensions.contains(ext) {
+                    files.append(item); fromFolder.insert(item)
+                }
+            }
+        }
         for url in urls {
             var isDirectory: ObjCBool = false
             guard fm.fileExists(atPath: url.path, isDirectory: &isDirectory) else { files.append(url); continue }
-            guard isDirectory.boolValue, url.pathExtension.lowercased() != "app" else { files.append(url); continue }
-            let walker = fm.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles, .skipsPackageDescendants])
-            while let item = walker?.nextObject() as? URL {
-                if (walker?.level ?? 0) > 2 { walker?.skipDescendants(); continue }
-                if StatementReader.extensions.contains(item.pathExtension.lowercased()) { files.append(item); fromFolder.insert(item) }
-                if files.count >= 500 { break }
+            if isDirectory.boolValue, url.pathExtension.lowercased() != "app" {
+                walk(url, depth: 0)
+            } else if url.pathExtension.lowercased() == "zip", let inside = unzipped(url) {
+                walk(inside, depth: 0)
+            } else {
+                files.append(url)
             }
         }
         return (files.sorted { $0.lastPathComponent < $1.lastPathComponent }, fromFolder)

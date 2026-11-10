@@ -55,6 +55,7 @@ struct ShowView: View {
             }
             .frame(height: 130, alignment: .bottom)
             .animation(.spring(duration: 0.45), value: facts)
+            CloudTroubleBanner().frame(maxWidth: 620)
             Button("Keep Working in the Background") { store.stage = nil }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)

@@ -332,7 +332,7 @@ enum DebugHooks {
             .tint(Theme.accent)
             .frame(width: width)
             .frame(minHeight: 500)
-            .background(dark ? Color(red: 0.12, green: 0.12, blue: 0.13) : Color(nsColor: .windowBackgroundColor))
+            .background(Theme.paper)
             .environment(\.colorScheme, dark ? .dark : .light)
         let renderer = ImageRenderer(content: content)
         renderer.scale = 1.5

@@ -218,7 +218,14 @@ enum MoneyParsing {
         var negative = false
         if s.hasPrefix("(") && s.hasSuffix(")") { negative = true; s = String(s.dropFirst().dropLast()) }
         if s.hasSuffix("-") { negative = true; s.removeLast() }
-        for junk in ["$", "€", "£", "USD", ",", " ", "\u{00A0}"] { s = s.replacingOccurrences(of: junk, with: "") }
+        for junk in ["$", "€", "£", "USD", "EUR", "GBP", "CHF", " ", "\u{00A0}", "'"] { s = s.replacingOccurrences(of: junk, with: "") }
+        if s.hasPrefix("-") { negative.toggle(); s.removeFirst() }
+        // Much of the world writes 1.234,56. A comma followed by exactly one or two digits at the very
+        // end is a decimal comma (nobody writes thousands that way); the dots before it are separators.
+        if s.range(of: #"^\d{1,3}(\.\d{3})*,\d{1,2}$|^\d+,\d{1,2}$"#, options: .regularExpression) != nil {
+            s = s.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".")
+        }
+        s = s.replacingOccurrences(of: ",", with: "")
         if s.hasPrefix("+") { s.removeFirst() }
         guard s.contains(where: \.isNumber), let v = Double(s) else { return nil }
         return negative ? -v : v

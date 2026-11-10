@@ -38,7 +38,7 @@ enum StatementReader {
         case "xls", "numbers", "xlsm":
             return "This is a spreadsheet the app can't open directly. On your bank's website, choose CSV or PDF when you download."
         case "zip":
-            return "This is a zip file. Double-click it in Finder to unzip it, then drop in what's inside."
+            return "This zip couldn't be opened. Double-click it in Finder to unzip it, then drop in what's inside."
         case "doc", "docx", "pages", "rtf", "html", "htm":
             return "This is a document, not a statement download. Look for “Download” or “Export” on your bank's website and choose CSV or PDF."
         case "":

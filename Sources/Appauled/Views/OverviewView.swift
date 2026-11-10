@@ -23,6 +23,7 @@ struct OverviewView: View {
     private var content: some View {
             VStack(alignment: .leading, spacing: 20) {
                 if !DebugHooks.off("daily") { BannerCard() }
+                CloudTroubleBanner()
                 DownloadsBanner()
                 if !store.reviewItems.isEmpty, !store.isSuggesting { reviewBanner }
                 if !store.missingStatements.isEmpty, !store.isImporting { missingBanner }

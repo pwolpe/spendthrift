@@ -54,6 +54,12 @@ enum CloudAI {
     static func complete(system: String, user: String, json: Bool, maxTokens: Int, temperature: Double = 0,
                          timeout: TimeInterval = 90, effort: String? = nil, web: Bool = false) async throws -> String {
         guard let key = CloudKey.load() else { throw CloudError.noKey }
+        // APPAULED_FAIL_CLOUD=credit|key|offline: behave as if the model had stopped working (for tests).
+        if let fail = ProcessInfo.processInfo.environment["APPAULED_FAIL_CLOUD"] {
+            let error: CloudError = fail == "key" ? .badKey : fail == "offline" ? .unreachable : .outOfCredit
+            await CloudStatus.shared.note(error: error)
+            throw error
+        }
         var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
@@ -133,9 +139,20 @@ final class CloudStatus {
     private(set) var hasKey = CloudKey.exists
     private(set) var requests = 0
 
+    /// Set while the model can't be used at all (bad key, no credit, no connection), as opposed to
+    /// one request going wrong. This is what the person needs to be told about, plainly.
+    private(set) var stopped: String?
+
     func note(error: CloudAI.CloudError?) {
         requests += 1
         lastError = error?.errorDescription
+        switch error {
+        case nil: stopped = nil
+        case .badKey: stopped = "OpenRouter didn't accept the key."
+        case .outOfCredit: stopped = "The OpenRouter key is out of credit or over its limit."
+        case .unreachable: stopped = "OpenRouter couldn't be reached. Check the internet connection."
+        default: break
+        }
     }
     func refreshKey() { hasKey = CloudKey.exists; if !hasKey { lastError = nil } }
 }

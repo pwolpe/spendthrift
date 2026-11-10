@@ -66,7 +66,7 @@ struct CashFlowData {
     var isEmpty: Bool { months.isEmpty }
 
     static let laneOrder = ["Salary & income", "Lived on", "Income taxes", "Back from investments", "Invested"]
-    static let laneColors: [Color] = [Category.income.color, .pink, Category.taxes.color, Category.investmentIncome.color, Theme.goldDeep]
+    static let laneColors: [Color] = [Category.income.color, Theme.spent, Category.taxes.color, Category.investmentIncome.color, Theme.goldDeep]
 
     @MainActor init(store: BudgetStore, period: ReportPeriod) {
         self.period = period
@@ -224,7 +224,7 @@ struct VerdictCard: View {
         let income = data.totalIncome, consumed = data.consumed
         let within = data.surplus >= 0
         let share = income > 0 ? consumed / income : 0
-        let color: Color = within ? Theme.good : .red
+        let color: Color = within ? Theme.good : Theme.spent
         Card(padding: compact ? 14 : 20) {
             VStack(alignment: .leading, spacing: compact ? 8 : 14) {
                 HStack(alignment: compact ? .firstTextBaseline : .center, spacing: compact ? 10 : 18) {
@@ -254,16 +254,16 @@ struct VerdictCard: View {
                         let full = geo.size.width
                         let track = within ? full : full / CGFloat(share)
                         ZStack(alignment: .leading) {
-                            Capsule().fill(Color.red.opacity(within ? 0 : 0.85)).frame(width: full)
+                            Capsule().fill(Theme.spent.opacity(within ? 0 : 0.9)).frame(width: full)
                             Capsule().fill(Theme.good.opacity(0.18)).frame(width: track)
-                            Capsule().fill(Color.pink.gradient).frame(width: max(6, min(track, track * CGFloat(share))))
+                            Capsule().fill(Theme.spent.gradient).frame(width: max(6, min(track, track * CGFloat(share))))
                             Rectangle().fill(Color.primary).frame(width: 2, height: compact ? 16 : 22).offset(x: track - 1)
                         }
                     }
                     .frame(height: compact ? 10 : 14)
                     if !compact {
                         HStack {
-                            Label("Consumed \(Money.format(consumed, cents: false))", systemImage: "circle.fill").foregroundStyle(.pink)
+                            Label("Consumed \(Money.format(consumed, cents: false))", systemImage: "circle.fill").foregroundStyle(Theme.spent)
                             Spacer()
                             Text("Income \(Money.format(income, cents: false))").foregroundStyle(.secondary)
                         }
@@ -314,7 +314,7 @@ private struct PurposeCard: View {
         ].filter { $0.amount > 0.5 }
         let uses = [
             Part(name: "Invested", amount: data.built, color: Theme.goldDeep, note: "still yours", kept: true),
-            Part(name: "Lived on", amount: data.spending, color: .pink),
+            Part(name: "Lived on", amount: data.spending, color: Theme.spent),
             Part(name: "Income taxes", amount: data.taxes, color: Category.taxes.color),
             Part(name: "Loan interest", amount: data.loanInterest, color: Category.investmentLoan.color.opacity(0.7)),
         ].filter { $0.amount > 0.5 }
@@ -412,7 +412,7 @@ private struct StatementCard: View {
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                heading("Everyday", symbol: "house.fill", color: .pink)
+                heading("Everyday", symbol: "house.fill", color: Theme.spent)
                 row("Salary & income", data.income, sign: 1, category: .income)
                 if data.unsortedIn > 0 {
                     row("Deposits not labelled yet", data.unsortedIn, sign: 1, category: .unsorted,
