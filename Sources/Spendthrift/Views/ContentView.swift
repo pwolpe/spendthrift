@@ -219,7 +219,7 @@ struct SidebarView: View {
 }
 
 /// The app's name at the top of the sidebar, set like the head of a receipt: the mark, the name,
-/// a dashed rule, and the two people it's about.
+/// a dashed rule, and what it's for.
 struct Masthead: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -232,15 +232,11 @@ struct Masthead: View {
                 Spacer(minLength: 0)
             }
             ReceiptRule()
-            HStack(spacing: 8) {
-                Text("WHERE IT ALL WENT")
-                    .font(Theme.mono(9.5, .semibold))
-                    .tracking(1.2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                CastAvatars(size: 22)
-            }
+            Text("WHERE IT ALL WENT")
+                .font(Theme.mono(9.5, .semibold))
+                .tracking(1.2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
     }
 }
