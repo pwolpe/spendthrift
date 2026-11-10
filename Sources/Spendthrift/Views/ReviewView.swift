@@ -98,19 +98,27 @@ private struct ReviewRow: View {
         }
     }
 
+    /// How many charges a row lists before "See all".
+    private let shown = 3
+    private var charges: [Transaction] { store.transactions.filter { $0.merchantKey == item.key }.sorted { $0.date > $1.date } }
+
+    /// ", Mar 2024 to Oct 2026" when the charges span more than one month.
+    private func span(_ charges: [Transaction]) -> String {
+        guard let first = charges.last?.date, let last = charges.first?.date, Month(date: first) != Month(date: last) else { return "" }
+        let f = Date.FormatStyle.dateTime.month(.abbreviated).year()
+        return " · \(first.formatted(f)) to \(last.formatted(f))"
+    }
+
     var body: some View {
         let busy = store.explaining.contains(item.key)
+        let charges = charges
         Card(padding: 14) {
           VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
                 MerchantIcon(name: item.info.name, category: item.info.category ?? .unsorted, size: 42)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.info.name).font(.headline)
-                    Text(item.info.sample)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Text("\(item.count == 1 ? "1 charge" : "\(item.count) charges") · \(item.total < 0 ? "\(Money.format(-item.total)) in" : Money.format(item.total))")
+                    Text("\(item.count) \(item.total < 0 ? (item.count == 1 ? "deposit" : "deposits") : (item.count == 1 ? "charge" : "charges")) · \(item.total < 0 ? "\(Money.format(-item.total)) in" : Money.format(item.total))\(span(charges))")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -127,6 +135,49 @@ private struct ReviewRow: View {
                 .disabled(item.info.category == nil)
                 .help("Looks right")
             }
+            // What it actually was: each charge with its day, the account it was on and the line as the
+            // statement prints it. Click one to see it in the original statement.
+            VStack(spacing: 0) {
+                ForEach(Array(charges.prefix(shown).enumerated()), id: \.element.id) { index, t in
+                    if index > 0 { Divider() }
+                    Button { store.showOriginal(of: t.id) } label: {
+                        HStack(spacing: 10) {
+                            Text(t.date.formatted(.dateTime.month(.abbreviated).day().year()))
+                                .font(Theme.mono(11.5))
+                                .frame(width: 92, alignment: .leading)
+                            Text(t.account).font(.callout).lineLimit(1)
+                                .frame(width: 150, alignment: .leading)
+                            Text(t.description)
+                                .font(Theme.mono(11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer(minLength: 8)
+                            Text(Money.format(abs(t.amount)))
+                                .font(Theme.mono(12, .medium))
+                                .foregroundStyle(t.amount < 0 ? Theme.good : .primary)
+                            Image(systemName: "doc.text.magnifyingglass").foregroundStyle(Theme.accent)
+                        }
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show this charge in its original statement")
+                }
+                if charges.count > shown {
+                    Divider()
+                    Button("See all \(charges.count)") {
+                        store.showCharges(TransactionFilter(merchantKey: item.key, title: item.info.name))
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 6)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 2)
+            .overlay { RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.hairline) }
             // The fast way: say what it was, in your own words. No menu, no new-category sheet.
             HStack(spacing: 8) {
                 Image(systemName: "text.bubble").foregroundStyle(.secondary)
