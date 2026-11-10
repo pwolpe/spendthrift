@@ -32,6 +32,9 @@ final class BudgetStore {
     var placeFocus: String?
     /// The question pane on the right, available from every page.
     var showsAsk = false
+    /// The show that plays over the window during a big import: the work, then the premiere.
+    enum Stage { case working, premiere }
+    var stage: Stage?
     var transactionFilter = TransactionFilter()
     /// The Overview looks at one month or at a whole year; the same page either way.
     var overviewShowsYear = ProcessInfo.processInfo.environment["APPAULED_YEAR"] != nil
@@ -758,6 +761,12 @@ final class BudgetStore {
         var added = 0, touched: [String] = [], verified = 0, mismatches: [String] = [], scanned = 0
         var batch: (entries: Set<UUID>, accounts: Set<UUID>, hashes: Set<String>) = ([], [], [])
         isImporting = true
+        // A pile of statements (or the very first one) gets the full show; one new statement doesn't.
+        let fresh = library.entries.isEmpty
+        if !automatic, ProcessInfo.processInfo.environment["APPAULED_NO_SHOW"] == nil,
+           urls.filter({ StatementReader.extensions.contains($0.pathExtension.lowercased()) }).count >= (fresh ? 1 : 4) {
+            stage = .working
+        }
         // Read every file first, several at a time: a statement that needs the cloud model takes
         // 10 to 40 seconds, and a year of them shouldn't queue up one behind another.
         typealias Reading = Result<(hash: String, data: Data, outcome: StatementReader.Outcome), Error>
@@ -832,7 +841,9 @@ final class BudgetStore {
                     }
                 }
             }
-            for _ in 0..<8 { startNext() }
+            // Reading is mostly waiting (on the disk, or on the model for a statement that needs it),
+            // so many at once costs little and a year of statements arrives several times sooner.
+            for _ in 0..<24 { startNext() }
             for await (index, reading) in group {
                 if let progress = importProgress { importProgress = (progress.done + 1, progress.total) }
                 await apply(urls[index], reading)

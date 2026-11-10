@@ -138,26 +138,48 @@ enum PDFStatement {
     static func matchesAccountSummary(_ text: String, rows: [CanonicalRow]) -> Bool {
         // Every amount printed after a label, anywhere on a line. A statement can print several
         // summaries (Amex: Pay In Full, Pay Over Time, Account Total); any one that fits will do.
+        // Every amount on the rest of the line counts: Amex prints three columns ("Total New Charges
+        // $0.00 $2,384.41 $2,384.41": pay in full, pay over time, total), and the total is the last.
         func amounts(_ label: String) -> [Double] {
-            // (Capital One prints "Transactions + $42.45": a sign, a space, then the amount.)
-            let pattern = "(?i)(?:^|\\s)(?:" + label + ")\\s+[-+]?\\s?\\$?([\\d,]+\\.\\d{2})\\b"
-            guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
-            return re.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { m in
-                Range(m.range(at: 1), in: text).flatMap { MoneyParsing.parse(String(text[$0])) }
+            let pattern = "(?im)(?:^|\\s)(?:" + label + ")((?:\\s+[-+]?\\s?\\$?[\\d,]+\\.\\d{2}\\b)+)"
+            guard let re = try? NSRegularExpression(pattern: pattern),
+                  let money = try? NSRegularExpression(pattern: "[\\d,]+\\.\\d{2}") else { return [] }
+            var found: [Double] = []
+            for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                guard let r = Range(m.range(at: 1), in: text) else { continue }
+                let run = String(text[r])
+                for token in money.matches(in: run, range: NSRange(run.startIndex..., in: run)) {
+                    if let tr = Range(token.range, in: run), let value = MoneyParsing.parse(String(run[tr])) { found.append(value) }
+                }
             }
+            return found
         }
         let spent = rows.filter { $0.amount > 0 }.reduce(0) { $0 + $1.amount }
         let received = rows.filter { $0.amount < 0 }.reduce(0) { $0 - $1.amount }
         guard spent > 0 || received > 0 else { return false }
-        let extras = (amounts("Cash Advances").first ?? 0) + (amounts("Balance Transfers").first ?? 0)
-            + (amounts("Fees(?: Charged)?").first ?? 0) + (amounts("Interest(?: Charged)?").first ?? 0)
+        // Fees and interest are printed in more than one place, sometimes as a column of zeros beside
+        // the real figure; any printed combination that makes the sums agree is the statement agreeing.
+        let other = (amounts("Cash Advances").first ?? 0) + (amounts("Balance Transfers").first ?? 0)
+        let fees = Set(amounts("Fees(?: Charged)?").prefix(3) + amounts("Total Fees for this Period") + [0])
+        let interest = Set(amounts("Interest(?: Charged)?").prefix(3) + amounts("Total Interest Charged for this Period") + [0])
+        let extraOptions = Set(fees.flatMap { f in interest.map { other + f + $0 } })
         let purchases = amounts("Purchases") + amounts("New Charges") + amounts("Total New Charges") + amounts("Transactions")
             + amounts("Total new charges in this period")
         var credits = amounts("Payments?,? ?(?:and |& |/ ?)?(?:Other )?Credits") + amounts("Total Payments and Credits") + amounts("Total payments and credits in this period")
         if let payments = amounts("Payments").first { credits.append(payments + (amounts("Credits").first ?? 0)) }
-        let outMatches = purchases.contains { abs($0 + extras - spent) < 0.005 || abs($0 - spent) < 0.005 }
+        let outMatches = purchases.contains { p in abs(p - spent) < 0.005 || extraOptions.contains { abs(p + $0 - spent) < 0.005 } }
         let inMatches = credits.contains { abs($0 - received) < 0.005 }
-        return outMatches && inMatches
+        if outMatches && inMatches { return true }
+        // Amex moves balances between "Pay In Full" and "Pay Over Time" with a matching charge and
+        // credit that the reader leaves out, because they cancel. Then both printed totals exceed
+        // ours by exactly the same amount, which is as good a proof as matching outright.
+        for p in purchases where p > 0 {
+            for c in credits where c > 0 {
+                let moreIn = c - received
+                if moreIn > 0.005, extraOptions.contains(where: { abs(p + $0 - spent - moreIn) < 0.005 }) { return true }
+            }
+        }
+        return false
     }
 
     /// Rebuilds the visual rows of a page: text fragments at the same height are one row, read left to right.

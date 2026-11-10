@@ -101,6 +101,9 @@ enum DebugHooks {
         }
         await snap("06-stories", outDir) { StoriesView(scrolls: false) }
         await snap("11-coverage", outDir) { CoverageCard().padding(28).frame(width: 1000) }
+        for (i, kind) in PremiereCard.Kind.available(in: store).enumerated() {
+            await snap("20-premiere-\(i + 1)", outDir) { PremiereCard(kind: kind).padding(.vertical, 50).frame(width: 900) }
+        }
         if let busiest = Dictionary(grouping: store.transactions.filter(\.countsAsSpending), by: \.merchant).max(by: { $0.value.count < $1.value.count })?.key {
             await snap("12-place", outDir) { PlaceView(name: busiest).frame(width: 1000) }
         }

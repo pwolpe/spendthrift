@@ -25,6 +25,8 @@ struct WelcomeView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            KeyEntry()
+
             dropZone
 
             DownloadsBanner()

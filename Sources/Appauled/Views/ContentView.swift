@@ -70,6 +70,9 @@ struct ContentView: View {
                 DropOverlay().transition(.opacity).allowsHitTesting(false)
             }
         }
+        .overlay {
+            if store.stage != nil { ShowView().transition(.opacity) }
+        }
         .overlay(alignment: .bottom) {
             if let toast = store.toast {
                 ToastView(toast: toast)
