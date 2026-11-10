@@ -2,25 +2,28 @@ import SwiftUI
 import PDFKit
 import AppKit
 
-// MARK: - The Statements page: every original, and the one that's open
+// MARK: - The Statements page: choose an account, then browse its originals
 
 struct StatementsView: View {
     @Environment(BudgetStore.self) private var store
-    @State private var search = ""
+    /// The account whose statements are open; nil shows every account to choose from.
+    @State private var account: AccountChoice?
     @State private var selected: String?
+    @State private var search = ""
+    /// False when rendered for a test snapshot.
+    var scrolls = true
 
-    private var files: [SourceFile] {
-        let all = store.sourceFiles
-        guard !search.isEmpty else { return all }
-        let names = Dictionary(uniqueKeysWithValues: store.accounts.map { ($0.id, $0.name) })
-        return all.filter {
-            $0.name.localizedCaseInsensitiveContains(search) || $0.period.localizedCaseInsensitiveContains(search)
-                || ($0.accountID.flatMap { names[$0] }?.localizedCaseInsensitiveContains(search) ?? false)
+    /// An account, or the few files that belong to none.
+    enum AccountChoice: Hashable { case account(UUID), loose }
+
+    private func files(of choice: AccountChoice) -> [SourceFile] {
+        switch choice {
+        case .account(let id): store.sourceFiles.filter { $0.accountID == id }
+        case .loose: store.sourceFiles.filter { s in s.accountID == nil || !store.accounts.contains { $0.id == s.accountID } }
         }
     }
 
     var body: some View {
-        let files = files
         let all = store.sourceFiles
         Group {
             if all.isEmpty {
@@ -31,20 +34,10 @@ struct StatementsView: View {
                 }
                 .frame(maxWidth: 520)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let account {
+                browser(account)
             } else {
-                HStack(spacing: 0) {
-                    list(files)
-                        .frame(width: 290)
-                    Divider()
-                    if let source = all.first(where: { $0.id == selected }) {
-                        let entry = store.statementFocus.flatMap { $0.sourceID == source.id ? $0.entryID : nil }.flatMap(store.entry)
-                        OriginalViewer(source: source, entry: entry)
-                            .id(source.id)
-                    } else {
-                        ContentUnavailableView("Choose a statement", systemImage: "doc.text.magnifyingglass")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                }
+                chooser(all)
             }
         }
         .navigationTitle("Statements")
@@ -53,55 +46,226 @@ struct StatementsView: View {
         .onChange(of: store.statementFocus) { follow() }
     }
 
-    /// Shows the file that was asked for, or the newest one.
+    /// Goes to the file that was asked for ("Open in Statements" on a charge).
     private func follow() {
-        if let wanted = store.statementFocus?.sourceID { selected = wanted }
-        else if selected == nil || !store.sourceFiles.contains(where: { $0.id == selected }) { selected = store.sourceFiles.first?.id }
+        guard let wanted = store.statementFocus?.sourceID, let source = store.sourceFiles.first(where: { $0.id == wanted }) else { return }
+        account = source.accountID.flatMap { id in store.accounts.contains { $0.id == id } ? .account(id) : nil } ?? .loose
+        selected = wanted
     }
 
-    private func list(_ files: [SourceFile]) -> some View {
-        let byAccount = Dictionary(grouping: files) { $0.accountID }
+    private func open(_ choice: AccountChoice) {
+        search = ""
+        store.statementFocus = nil
+        selected = files(of: choice).first?.id
+        withAnimation(.snappy(duration: 0.25)) { account = choice }
+    }
+
+    // MARK: Choosing an account
+
+    private func chooser(_ all: [SourceFile]) -> some View {
         // Accounts in the order of their newest statement.
-        let order = store.accounts.filter { byAccount[$0.id] != nil }
-            .sorted { (byAccount[$0.id]?.first?.lastDate ?? "") > (byAccount[$1.id]?.first?.lastDate ?? "") }
+        let accounts = store.accounts.filter { a in all.contains { $0.accountID == a.id } }
+            .sorted { (files(of: .account($0.id)).first?.lastDate ?? "") > (files(of: .account($1.id)).first?.lastDate ?? "") }
+        let loose = files(of: .loose)
         let missing = store.chargesWithoutOriginal
-        return VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Find a statement", text: $search).textFieldStyle(.plain)
-                if !search.isEmpty {
-                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.tertiary)
+        return MaybeScroll(scrolls: scrolls) {
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Statements").font(.system(size: 30, weight: .bold, design: .serif))
+                    Text("Every statement exactly as it came from the bank. Choose an account to browse them.")
+                        .font(.title3).foregroundStyle(.secondary)
                 }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(Theme.sheet, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.hairline))
-            .padding(10)
-            List(selection: Binding(get: { selected }, set: { id in
-                selected = id
-                // Choosing a file by hand lets go of the charge that was being pointed at.
-                if store.statementFocus?.sourceID != id { store.statementFocus = nil }
-            })) {
-                ForEach(order) { account in
-                    Section(account.name) {
-                        ForEach(byAccount[account.id] ?? []) { StatementRow(source: $0).tag($0.id) }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
+                    ForEach(accounts) { a in
+                        AccountTile(name: a.name, files: files(of: .account(a.id)),
+                                    alsoCovered: Set((a.statementMonths ?? []).compactMap { Month(key: $0) }),
+                                    missing: store.missingStatements.first { $0.accountID == a.id }?.months ?? []) { open(.account(a.id)) }
+                    }
+                    if !loose.isEmpty {
+                        AccountTile(name: "Other files", files: loose, missing: []) { open(.loose) }
                     }
                 }
-                if let loose = byAccount[nil], !loose.isEmpty {
-                    Section("Other") { ForEach(loose) { StatementRow(source: $0).tag($0.id) } }
+                if missing > 0 {
+                    Label("\(missing) older \(missing == 1 ? "charge has" : "charges have") no original here yet. Drop those statements in again and they'll be linked.",
+                          systemImage: "doc.questionmark")
+                        .font(.callout).foregroundStyle(.secondary)
                 }
             }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
-            if missing > 0 {
-                Divider()
-                Text("\(missing) older \(missing == 1 ? "charge has" : "charges have") no original here yet. Drop those statements in again to link them.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(28)
+            .frame(maxWidth: 1040, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    // MARK: One account's statements
+
+    private func browser(_ choice: AccountChoice) -> some View {
+        let mine = files(of: choice)
+        let shown = search.isEmpty ? mine : mine.filter {
+            $0.name.localizedCaseInsensitiveContains(search) || $0.period.localizedCaseInsensitiveContains(search) || $0.monthTitle.localizedCaseInsensitiveContains(search)
+        }
+        let name: String = { if case .account(let id) = choice { return store.accounts.first { $0.id == id }?.name ?? "Account" } else { return "Other files" } }()
+        let index = mine.firstIndex { $0.id == selected }
+        func go(_ offset: Int) {
+            guard let index, mine.indices.contains(index + offset) else { return }
+            store.statementFocus = nil
+            selected = mine[index + offset].id
+        }
+        return HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                // Where you are, and the way back to the other accounts.
+                VStack(alignment: .leading, spacing: 8) {
+                    Button { withAnimation(.snappy(duration: 0.25)) { account = nil; store.statementFocus = nil } } label: {
+                        Label("All Accounts", systemImage: "chevron.left").font(.callout)
+                    }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut(.cancelAction)
+                    Text(name).font(.system(size: 19, weight: .bold, design: .serif)).lineLimit(2)
+                    Text(mine.count == 1 ? "1 statement" : "\(mine.count) statements")
+                        .font(Theme.mono(10, .semibold)).tracking(1).foregroundStyle(.secondary).textCase(.uppercase)
+                    if mine.count > 12 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField("Month, year or file name", text: $search).textFieldStyle(.plain)
+                            if !search.isEmpty {
+                                Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.tertiary)
+                            }
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(Theme.sheet, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.hairline))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 10)
+                ReceiptRule().padding(.horizontal, 14)
+
+                // Newest first, a heading for each year.
+                let years = Dictionary(grouping: shown) { String(($0.lastDate ?? "").prefix(4)) }
+                List(selection: Binding(get: { selected }, set: { id in
+                    // Choosing a file by hand lets go of the charge that was being pointed at.
+                    if store.statementFocus?.sourceID != id { store.statementFocus = nil }
+                    selected = id
+                })) {
+                    ForEach(years.keys.sorted(by: >), id: \.self) { year in
+                        Section(year.isEmpty ? "Undated" : year) {
+                            ForEach(years[year] ?? []) { StatementRow(source: $0).tag($0.id) }
+                        }
+                    }
+                }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+                .overlay { if shown.isEmpty { ContentUnavailableView.search(text: search) } }
+            }
+            .frame(width: 280)
+            Divider()
+            if let source = mine.first(where: { $0.id == selected }) {
+                let entry = store.statementFocus.flatMap { $0.sourceID == source.id ? $0.entryID : nil }.flatMap(store.entry)
+                OriginalViewer(source: source, entry: entry,
+                               newer: index.map { $0 > 0 } == true ? { go(-1) } : nil,
+                               older: index.map { $0 < mine.count - 1 } == true ? { go(1) } : nil)
+                    .id(source.id)
+            } else {
+                ContentUnavailableView("Choose a statement", systemImage: "doc.text.magnifyingglass")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+}
+
+extension SourceFile {
+    /// "October 2026" for a monthly statement; the dates themselves for an export that spans more.
+    var monthTitle: String {
+        guard let a = firstDate.flatMap({ DateParsing.parse($0, format: "yyyy-MM-dd") }),
+              let b = lastDate.flatMap({ DateParsing.parse($0, format: "yyyy-MM-dd") }) else { return name }
+        return b.timeIntervalSince(a) <= 45 * 86_400 ? Month(date: b).title : period
+    }
+    /// The months this file has lines in.
+    var monthsCovered: Set<Month> {
+        guard let a = firstDate.flatMap({ DateParsing.parse($0, format: "yyyy-MM-dd") }),
+              let b = lastDate.flatMap({ DateParsing.parse($0, format: "yyyy-MM-dd") }) else { return [] }
+        var out: Set<Month> = [], m = Month(date: a)
+        let end = Month(date: b)
+        while m <= end, out.count < 240 { out.insert(m); m = m.adding(1) }
+        return out
+    }
+}
+
+/// One account on the Statements page: what it is, how much is here, and whether any month is missing.
+private struct AccountTile: View {
+    let name: String
+    /// Newest first.
+    let files: [SourceFile]
+    /// Months a statement says it covers even though nothing was bought in them.
+    var alsoCovered: Set<Month> = []
+    let missing: [Month]
+    let open: () -> Void
+    @State private var hovering = false
+
+    private var isBank: Bool { name.localizedCaseInsensitiveContains("checking") || name.localizedCaseInsensitiveContains("savings") }
+
+    var body: some View {
+        let withCharges = files.reduce(into: Set<Month>()) { $0.formUnion($1.monthsCovered) }
+        let last = withCharges.max(), first = withCharges.min()
+        let covered = withCharges.union(alsoCovered)
+        // The last two years, a square a month: filled where a statement covers it.
+        let strip: [Month] = last.map { l in (0..<24).reversed().map { l.adding(-$0) }.filter { $0 >= (first ?? l) } } ?? []
+        let kinds = Array(Set(files.map(\.kind))).sorted().joined(separator: ", ")
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: isBank ? "building.columns.fill" : "creditcard.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background(Theme.accent, in: .rect(cornerRadius: 11, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name).font(.system(size: 17, weight: .bold, design: .serif)).lineLimit(1).minimumScaleFactor(0.75)
+                        Text("\(files.count) \(files.count == 1 ? "statement" : "statements") · \(kinds)")
+                            .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.callout.weight(.semibold)).foregroundStyle(hovering ? Theme.accent : Color.secondary.opacity(0.5))
+                }
+                ReceiptRule()
+                if let first, let last {
+                    ReceiptLine(value: first == last ? last.title : "\(first.shortName) \(String(first.year)) to \(last.shortName) \(String(last.year))") {
+                        Text("Covers").font(.callout)
+                    }
+                }
+                if strip.count > 1 {
+                    HStack(spacing: 3) {
+                        ForEach(strip) { m in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(covered.contains(m) ? Theme.accent.opacity(0.75) : (missing.contains(m) ? Theme.caution.opacity(0.8) : Color.primary.opacity(0.10)))
+                                .frame(height: 9)
+                                .help(m.title + (covered.contains(m) ? "" : ": nothing here"))
+                        }
+                    }
+                }
+                let quiet = strip.filter { !covered.contains($0) }.count
+                if missing.isEmpty, quiet == 0 {
+                    Label("No gaps", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(Theme.good)
+                } else if missing.isEmpty {
+                    // Not necessarily a problem: a card nobody used that month has nothing to show.
+                    Label(quiet == 1 ? "1 month with nothing here" : "\(quiet) months with nothing here", systemImage: "circle.dotted")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Label(missing.count == 1 ? "Nothing for \(missing[0].title)" : "\(missing.count) months missing, \(missing.prefix(2).map(\.name).joined(separator: " and "))\(missing.count > 2 ? "…" : "")",
+                          systemImage: "exclamationmark.circle.fill")
+                        .font(.caption).foregroundStyle(Theme.caution).lineLimit(1)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.sheet, in: .rect(cornerRadius: 16, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(hovering ? Theme.accent.opacity(0.45) : Theme.hairline) }
+            .shadow(color: .black.opacity(hovering ? 0.07 : 0.025), radius: hovering ? 10 : 6, y: 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
 
@@ -114,8 +278,9 @@ private struct StatementRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 1) {
-                Text(source.period).font(.body.weight(.medium)).lineLimit(1)
-                Text("\(source.kind) · \(source.rows) \(source.rows == 1 ? "line" : "lines")")
+                Text(source.monthTitle).font(.body.weight(.medium)).lineLimit(1)
+                Text(source.monthTitle == source.period ? "\(source.kind) · \(source.rows) \(source.rows == 1 ? "line" : "lines")"
+                                                        : "\(source.period.components(separatedBy: ",").first ?? source.period) · \(source.rows) \(source.rows == 1 ? "line" : "lines")")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -189,6 +354,9 @@ struct OriginalViewer: View {
     /// The charge to point at, if any.
     var entry: LedgerEntry?
     var inSheet = false
+    /// Step to the next statement of the same account, when there is one.
+    var newer: (() -> Void)? = nil
+    var older: (() -> Void)? = nil
 
     enum Content {
         case pdf(PDFDocument, SourceLocator.PDFHit?)
@@ -248,6 +416,13 @@ struct OriginalViewer: View {
             }
             Spacer(minLength: 12)
             if !inSheet {
+                ControlGroup {
+                    Button { older?() } label: { Image(systemName: "chevron.left") }
+                        .disabled(older == nil).help("The statement before this one")
+                    Button { newer?() } label: { Image(systemName: "chevron.right") }
+                        .disabled(newer == nil).help("The statement after this one")
+                }
+                .fixedSize()
                 let count = store.entries(in: source).count
                 if count > 0 {
                     Button("\(count) \(count == 1 ? "Charge" : "Charges")") {

@@ -168,6 +168,7 @@ enum DebugHooks {
         if env["SPENDTHRIFT_PIECES"] != nil {
             await snap("30-masthead", outDir, width: 230) { Masthead().padding(16) }
             await snap("35-story", outDir, width: 700) { StoryView(scrolls: false) }
+            await snap("36-statements", outDir) { StatementsView(scrolls: false) }
             let q = "Where did most of my money go in October?"
             let query = await QueryParser.parse(q, months: store.months)
             var answer = AnswerEngine.answer(q, query: query, store: store)
