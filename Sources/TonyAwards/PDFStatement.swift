@@ -151,7 +151,8 @@ enum PDFStatement {
         let extras = (amounts("Cash Advances").first ?? 0) + (amounts("Balance Transfers").first ?? 0)
             + (amounts("Fees(?: Charged)?").first ?? 0) + (amounts("Interest(?: Charged)?").first ?? 0)
         let purchases = amounts("Purchases") + amounts("New Charges") + amounts("Total New Charges") + amounts("Transactions")
-        var credits = amounts("Payments?,? ?(?:and |& |/ ?)?(?:Other )?Credits") + amounts("Total Payments and Credits")
+            + amounts("Total new charges in this period")
+        var credits = amounts("Payments?,? ?(?:and |& |/ ?)?(?:Other )?Credits") + amounts("Total Payments and Credits") + amounts("Total payments and credits in this period")
         if let payments = amounts("Payments").first { credits.append(payments + (amounts("Credits").first ?? 0)) }
         let outMatches = purchases.contains { abs($0 + extras - spent) < 0.005 || abs($0 - spent) < 0.005 }
         let inMatches = credits.contains { abs($0 - received) < 0.005 }
@@ -191,7 +192,7 @@ enum PDFStatement {
 
     private static let issuers = ["American Express", "Chase", "Citi", "Capital One", "Bank of America", "Wells Fargo",
                                   "Discover", "U.S. Bank", "Barclays", "Synchrony", "PNC", "TD Bank", "Fidelity",
-                                  "Charles Schwab", "Ally", "USAA", "Navy Federal", "Apple Card", "Goldman Sachs"]
+                                  "Charles Schwab", "Ally", "USAA", "Navy Federal", "Apple Card", "Goldman Sachs", "Coinbase"]
 
     static func detectIssuer(_ text: String) -> String? {
         let head = String(text.prefix(6000))
@@ -293,6 +294,17 @@ enum PDFStatement {
     ///   one line:    "10/14  BEST BUY 00012          1,249.99"
     ///   several:     "10/18/26 WYNN LAS VEGAS HOTEL/H LAS VEGAS NV" … detail lines … "$2,152.54 ⧫"   (Amex)
     ///   checks:      "178 02/23 180.00"   (under "Checks Paid")
+    /// Text after a date that reads like a sentence or a summary label, not a merchant.
+    /// (Lower case alone proves nothing: "eBay" and "iHerb" are merchants.)
+    private static func isProse(_ description: String) -> Bool {
+        let lower = description.lowercased()
+        let first = lower.split(separator: " ").first.map(String.init) ?? ""
+        if ["on", "to", "of", "in", "and", "or", "the", "by", "if", "for", "at", "is", "as", "when", "we", "you", "your"].contains(first),
+           description.first?.isLowercase == true { return true }
+        let label = lower.trimmingCharacters(in: CharacterSet(charactersIn: " -+:"))
+        return ["payments", "purchases", "transactions", "other credits", "cash advances", "previous balance", "new balance"].contains(label)
+    }
+
     static func parseLines(_ text: String, closing: Date) -> Parsed {
         var out = Parsed()
         var sectionIsCredit = false
@@ -302,6 +314,9 @@ enum PDFStatement {
         let isMoney: (String) -> Bool = { t in
             moneyRE.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) != nil
         }
+        // Coinbase heads its purchases with the single word "Transactions". Other banks print that
+        // word in passing (Chase, in the middle of a section), so only Coinbase's counts as a heading.
+        let bareTransactionsHeading = text.contains("Coinbase One Card")
         // A charge whose amount is on a later line.
         var pending: (date: Date, description: String, linesWaited: Int)?
         // The row just added from a bare amount with no "$": the next line may hold the real dollars.
@@ -319,6 +334,9 @@ enum PDFStatement {
                   !skipWords.contains(where: description.lowercased().hasPrefix) else { return }
             // "February 11, 2026" in a sentence is a date, not a charge dated Feb 11 called "2026 …".
             if description.range(of: #"^(19|20)\d\d\b"#, options: .regularExpression) != nil { return }
+            // A sentence that happens to begin with a date ("February 11, 2026 on the statement closing
+            // date…") or a summary label beside one ("April 8, 2025 Payments - $42.45") is not a charge.
+            if Self.isProse(description) { return }
             var amount = rawAmount
             sectionSum += abs(rawAmount); sectionCount += 1
             if sectionIsCredit && amount > 0 { amount = -amount }
@@ -334,8 +352,8 @@ enum PDFStatement {
             // On a bank account, "Payments & Transfers" is money going out (on a card it's money coming in).
             if t.contains("payments & transfers") || t.contains("payments and transfers") || t.contains("atm & debit") || t.contains("debit card") {
                 sectionIsCredit = false
-            } else if t.hasSuffix(": transactions") {
-                // Capital One heads each cardholder's purchases "NAME #1095: Transactions".
+            } else if t.hasSuffix(": transactions") || (t == "transactions" && bareTransactionsHeading) {
+                // Capital One heads each cardholder's purchases "NAME #1095: Transactions"; Coinbase, just "Transactions".
                 sectionIsCredit = false
             } else if ["payments", "credits", "deposits", "additions", "refunds"].contains(where: t.contains) { sectionIsCredit = true }
             // "PURCHASE" (Chase cards print it in the singular), "CASH ADVANCES", "BALANCE TRANSFERS"…
@@ -405,7 +423,9 @@ enum PDFStatement {
                     let description = rest.joined(separator: " ")
                     // "10/15/26 10/18/26" (hotel arrival/departure) is detail, not a new charge.
                     // ("February 11, 2026 on the statement closing date" is a sentence, not a charge.)
-                    if description.filter(\.isLetter).count >= 3,
+                    // ("Feb 12, 2025 - Mar 14, 2025 31 days in Billing Cycle" is a date range, not a charge.)
+                    if description.filter(\.isLetter).count >= 3, !Self.isProse(description),
+                       description.first.map({ $0.isLetter || $0.isNumber }) == true,
                        description.range(of: #"^(19|20)\d\d\b"#, options: .regularExpression) == nil { pending = (date, description, 0) }
                 } else if pending == nil, line.count < 70 {
                     updateSection(line)
@@ -515,6 +535,11 @@ enum PDFStatement {
         if tokens.count >= 2, let mi = monthNames.firstIndex(of: String(first.lowercased().prefix(3))),
            first.count <= 5, let day = Int(tokens[1].trimmingCharacters(in: CharacterSet(charactersIn: ","))),
            let date = withYear(month: mi + 1, day: day) {
+            // "Sep 16, 2026 PAYPAL…" (Coinbase): the year is printed, so use it.
+            if tokens.count >= 3, tokens[2].count == 4, let year = Int(tokens[2]), (1990...2100).contains(year),
+               let exact = cal.date(from: DateComponents(year: year, month: mi + 1, day: day)) {
+                return (exact, 3)
+            }
             return (date, 2)
         }
         return nil

@@ -85,9 +85,13 @@ enum StatementReader {
 
     /// "Chase4090_Activity_20261109.csv" → "4090". Banks often put the card's last digits in the name.
     static func cardDigits(in url: URL) -> String? {
-        let stem = url.deletingPathExtension().lastPathComponent
-        guard let r = stem.range(of: #"(?<![0-9])[0-9]{4}(?![0-9])"#, options: .regularExpression) else { return nil }
-        return String(stem[r])
+        var stem = url.deletingPathExtension().lastPathComponent
+        // A date in the name ("…_2026-10-12_Coinbase") is not a card number.
+        stem = stem.replacingOccurrences(of: #"(?<![0-9])(19|20)[0-9]{2}[-_.][0-9]{2}[-_.][0-9]{2}(?![0-9])"#, with: " ", options: .regularExpression)
+        if let r = stem.range(of: #"(?<![0-9])[0-9]{4}(?![0-9])"#, options: .regularExpression) { return String(stem[r]) }
+        // A whole account number in the name: its last four digits.
+        if let r = stem.range(of: #"(?<![0-9])[0-9]{12,19}(?![0-9])"#, options: .regularExpression) { return String(stem[r].suffix(4)) }
+        return nil
     }
 
     /// "Chase4090_Activity_20261109.csv" → "Chase ••4090".
