@@ -21,6 +21,7 @@ struct AccountsView: View {
                 }
                 DownloadsBanner()
                 CoverageCard()
+                if !store.cardCoverage.isEmpty { CardCoverageCard(coverage: store.cardCoverage) }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16)], spacing: 16) {
                     ForEach(store.accounts) { AccountCard(account: $0) }
                 }

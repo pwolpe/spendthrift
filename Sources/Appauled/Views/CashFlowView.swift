@@ -192,11 +192,9 @@ struct CashFlowContent: View {
             PurposeCard(data: data)
             HStack(alignment: .top, spacing: 22) {
                 StatementCard(data: data, open: interactive ? open : nil)
-                VStack(spacing: 22) {
-                    MonthlyFlowCard(data: data)
-                    if !store.cardCoverage.isEmpty { CardCoverageCard(coverage: store.cardCoverage) }
-                }
-                .frame(minWidth: 380)
+                // (Which card statements are here lives in Setup, with the rest of what's missing.)
+                MonthlyFlowCard(data: data)
+                    .frame(minWidth: 380)
             }
             if !data.investmentLines.isEmpty { InvestmentsCard(data: data, open: interactive ? openPlace : nil) }
             Text("Money moved between your own accounts and payments to cards whose statements are here are left out (\(Money.format(data.transfersHidden, cents: false)) in all), so nothing is counted twice.")
@@ -229,9 +227,15 @@ struct VerdictCard: View {
         let color: Color = within ? Theme.good : .red
         Card(padding: compact ? 14 : 20) {
             VStack(alignment: .leading, spacing: compact ? 8 : 14) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Image(systemName: within ? "checkmark.seal.fill" : "exclamationmark.triangle.fill").foregroundStyle(color)
-                        .font(compact ? .title3 : .title2)
+                HStack(alignment: compact ? .firstTextBaseline : .center, spacing: compact ? 10 : 18) {
+                    // On the full card the two of them deliver the verdict: proud when it went well,
+                    // appalled (the app's namesake) when it didn't.
+                    if !compact, income > 0 {
+                        SpotArt(name: within ? "within" : "over", height: 104)
+                    } else {
+                        Image(systemName: within ? "checkmark.seal.fill" : "exclamationmark.triangle.fill").foregroundStyle(color)
+                            .font(compact ? .title3 : .title2)
+                    }
                     VStack(alignment: .leading, spacing: 3) {
                         Text(income <= 0 ? "No income found for this period"
                              : within ? "You lived within your income" : "You spent \(Money.format(-data.surplus, cents: false)) more than you earned")
@@ -242,8 +246,6 @@ struct VerdictCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 0)
-                    // Proud when it went well; appalled (the app's namesake) when it didn't.
-                    if !compact, income > 0 { SpotArt(name: within ? "within" : "over", height: 96) }
                     if compact { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary) }
                 }
                 if income > 0 {

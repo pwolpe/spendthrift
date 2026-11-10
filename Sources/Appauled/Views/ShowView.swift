@@ -277,7 +277,11 @@ struct PremiereCard: View {
 
     @ViewBuilder private var standout: some View {
         let spending = recent.filter(\.countsAsSpending)
-        if let biggest = spending.max(by: { $0.amount < $1.amount }) {
+        // Rent and the electric bill are large and no surprise to anyone. What stands out is the
+        // biggest thing that isn't a bill and doesn't come around every month.
+        let routine = Set(store.subscriptions().map(\.merchant))
+        let candidates = spending.filter { !routine.contains($0.merchant) && ![Category.home, .bills, .fees].contains($0.category) }
+        if let biggest = (candidates.isEmpty ? spending : candidates).max(by: { $0.amount < $1.amount }) {
             eyebrow("The one that stands out")
             MerchantIcon(name: biggest.merchant, category: biggest.category, size: 84)
             big(Money.format(biggest.amount, cents: false))

@@ -118,7 +118,7 @@ struct OverviewView: View {
                 Text("Spent in \(m.name)")
                     .font(.title3.weight(.medium))
                     .foregroundStyle(.secondary)
-                Text(Money.format(total))
+                Text(Money.format(total, cents: false))
                     .font(.system(size: 54, weight: .bold, design: .rounded))
                     .contentTransition(.numericText(value: total))
                     .monospacedDigit()

@@ -19,7 +19,7 @@ struct StoriesView: View {
         let stories = store.stories
         return VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .center, spacing: 16) {
-                TonyAvatar(size: 56)
+                CastAvatars(size: 50)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Trips & Events")
                         .font(.system(size: 30, weight: .bold, design: .serif))
@@ -45,8 +45,21 @@ struct StoriesView: View {
                     TonySays(title: "No trips yet", message: "When your statements show a trip or a big occasion, it will appear here with what it cost.", art: "notrips")
                 }
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 360), spacing: 18, alignment: .top)], alignment: .leading, spacing: 18) {
-                    ForEach(stories) { StoryCard(story: $0) }
+                // A year at a time, newest first: with several years of statements there can be dozens.
+                let byYear = Dictionary(grouping: stories) { String($0.start.prefix(4)) }
+                ForEach(byYear.keys.sorted(by: >), id: \.self) { year in
+                    let list = (byYear[year] ?? []).sorted { $0.start > $1.start }
+                    let total = list.reduce(0.0) { sum, story in sum + store.transactions(in: story).reduce(0) { $0 + $1.amount } }
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(year).font(.system(size: 22, weight: .bold, design: .serif))
+                        Text("\(list.count == 1 ? "1 trip" : "\(list.count) trips") · \(Money.format(total, cents: false))")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.top, 6)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 18, alignment: .top)], alignment: .leading, spacing: 18) {
+                        ForEach(list) { StoryCard(story: $0) }
+                    }
                 }
                 Text("Click a trip to see its charges. If one isn't a trip at all, right-click it.")
                     .font(.caption)
@@ -123,8 +136,8 @@ struct StoryCard: View {
                         .background(Circle().fill(Theme.gold))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(story.name)
-                            .font(.system(compact ? .headline : .title2, design: .serif).weight(.bold))
-                            .lineLimit(2)
+                            .font(.system(compact ? .headline : .title3, design: .serif).weight(.bold))
+                            .lineLimit(1)
                         Text(Self.dates(story))
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -140,28 +153,15 @@ struct StoryCard: View {
                     }
                 }
                 if !story.summary.isEmpty, !compact {
+                    // Always two lines' worth of room, so every tile is the same height.
                     Text(story.summary)
-                        .font(.body)
-                        .italic()
+                        .font(.callout)
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(2, reservesSpace: true)
                 }
                 if !byCategory.isEmpty, total > 0 {
                     CategoryStrip(parts: byCategory.map { ($0.category.color, $0.total) })
                         .frame(height: 8)
-                    if !compact {
-                        HStack(spacing: 14) {
-                            ForEach(byCategory.prefix(4), id: \.category) { item in
-                                HStack(spacing: 5) {
-                                    Circle().fill(item.category.color).frame(width: 7, height: 7)
-                                    Text("\(item.category.displayName) \(Money.format(item.total, cents: false))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }

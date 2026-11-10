@@ -16,7 +16,69 @@ enum DebugHooks {
     private static let offParts = Set((env["APPAULED_OFF"] ?? "").split(separator: ",").map(String.init))
     static func off(_ part: String) -> Bool { offParts.contains(part) }
 
+    /// APPAULED_WINDOW=<folder>: photograph the real window in each of its states (the live
+    /// controls, sidebar and panes, which a rendered view can't show), then quit.
+    private static func windowTour(_ folder: URL) async {
+        let store = BudgetStore.shared
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? await Task.sleep(for: .seconds(2.5))
+        guard let window = NSApp.windows.first(where: { $0.contentView != nil && $0.frame.height > 300 }) else { NSApp.terminate(nil); return }
+        window.setFrame(NSRect(x: 60, y: 60, width: 1480, height: 920), display: true)
+        func shot(_ name: String, wait: Double = 1.6) async {
+            try? await Task.sleep(for: .seconds(wait))
+            guard let view = window.contentView?.superview ?? window.contentView, let layer = view.layer else { return }
+            let scale: CGFloat = 2
+            let size = view.bounds.size
+            guard let ctx = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale), bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+            ctx.setFillColor(NSColor.windowBackgroundColor.cgColor)
+            ctx.fill(CGRect(x: 0, y: 0, width: size.width * scale, height: size.height * scale))
+            ctx.scaleBy(x: scale, y: scale)
+            if !view.isFlipped { } else { ctx.translateBy(x: 0, y: size.height); ctx.scaleBy(x: 1, y: -1) }
+            layer.render(in: ctx)
+            guard let image = ctx.makeImage() else { return }
+            try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: folder.appendingPathComponent(name + ".png"))
+            print("WINDOW \(name)")
+        }
+        store.stage = nil
+        store.showsAsk = false; store.selection = .overview
+        await shot("1-overview", wait: 2.5)
+        store.showsAsk = true
+        await shot("2-overview-ask")
+        store.overviewShowsYear = true
+        await shot("3-year")
+        store.overviewShowsYear = false
+        store.selection = .cashflow
+        await shot("4-cashflow")
+        store.selection = .stories
+        await shot("5-trips")
+        if let trip = store.stories.max(by: { store.transactions(in: $0).count < store.transactions(in: $1).count }) {
+            store.showCharges(TransactionFilter(storyID: trip.id))
+            await shot("6-trip-charges")
+            if let place = store.transactions(in: trip).max(by: { $0.amount < $1.amount })?.merchant {
+                store.showPlace(place)
+                await shot("7-place")
+            }
+        }
+        store.selection = .transactions
+        await shot("8-transactions")
+        store.showsAsk = false
+        await shot("9-transactions-details")
+        store.selection = .review
+        await shot("10-doublecheck")
+        store.selection = .accounts
+        await shot("11-setup")
+        if env["APPAULED_WINDOW_SHOW"] != nil {
+            store.stage = .premiere
+            await shot("12-premiere", wait: 2.0)
+            store.stage = .working
+            await shot("13-working", wait: 1.2)
+        }
+        NSApp.terminate(nil)
+    }
+
     static func startIfRequested() {
+        if let folder = env["APPAULED_WINDOW"] { Task { await windowTour(URL(fileURLWithPath: folder)) }; return }
         guard let outDir = env["APPAULED_SNAPSHOT"] else { return }
         Task { await run(outDir: URL(fileURLWithPath: outDir)) }
     }
@@ -234,12 +296,17 @@ enum DebugHooks {
     /// Renders a screen's content to a PNG. (ImageRenderer can't draw scroll views, tables or
     /// AppKit-backed controls such as menus and text fields; those show as blank or yellow boxes.)
     private static func snap(_ name: String, _ dir: URL, @ViewBuilder _ view: () -> some View) async {
+        // APPAULED_WIDTH: the width a page really gets (about 870 beside the question pane).
+        // APPAULED_DARK: the same pages in Dark Mode.
+        let width = env["APPAULED_WIDTH"].flatMap(Double.init).map { CGFloat($0) } ?? 1000
+        let dark = env["APPAULED_DARK"] != nil
         let content = view()
             .environment(BudgetStore.shared)
             .tint(Theme.accent)
-            .frame(width: 1000)
+            .frame(width: width)
             .frame(minHeight: 500)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(dark ? Color(red: 0.12, green: 0.12, blue: 0.13) : Color(nsColor: .windowBackgroundColor))
+            .environment(\.colorScheme, dark ? .dark : .light)
         let renderer = ImageRenderer(content: content)
         renderer.scale = 1.5
         if let image = renderer.nsImage, let data = IconRenderer.png(image) {
