@@ -121,10 +121,14 @@ window to draw the icon (Tony in a gold medallion on stage).
    **System Settings → Privacy & Security → Open Anyway**.
 4. When asked, **Allow** access to the Downloads folder (so new statements are offered automatically).
 
-Requirements: an Apple Silicon Mac on macOS 26 with Apple Intelligence turned on (**System
-Settings → Apple Intelligence & Siri**). Without it everything still works, except that places the
-built-in rules can't sort wait in Double-Check for Tony to pick, and Today's Nominee uses a simpler
-picture.
+5. On the welcome screen, paste an OpenRouter key (his own, or one made for him with a spending
+   limit) and click **Turn On**. Then drop in a folder of statements: the import plays as a show and
+   ends in a premiere of what it found.
+
+Requirements: an Apple Silicon Mac on macOS 26. The key is what makes it magic (reading any
+statement, naming every place, trips, pictures, questions, the estimate); without one the app still
+reads and sorts what its built-in rules know and leaves the rest in Double-Check. A full first
+import of about 130 statements costs roughly $3 on the key.
 
 **Updates (automatic)**
 
