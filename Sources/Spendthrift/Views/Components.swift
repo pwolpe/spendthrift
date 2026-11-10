@@ -327,6 +327,28 @@ struct SpotArt: View {
     }
 }
 
+/// A small square scene of Tony and Paul, for the head of a page or a sheet: the playful stand-in
+/// for what would otherwise be a plain portrait.
+struct Vignette: View {
+    let name: String
+    var size: CGFloat = 76
+
+    var body: some View {
+        if let image = SpotArt.image(name) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size)
+                .clipShape(.rect(cornerRadius: size * 0.24, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: size * 0.24, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75) }
+                .shadow(color: .black.opacity(0.10), radius: size / 12, y: size / 30)
+                .accessibilityHidden(true)
+        } else {
+            TonyAvatar(size: size)
+        }
+    }
+}
+
 struct TonySays<Actions: View>: View {
     let title: String
     let message: String

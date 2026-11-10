@@ -15,7 +15,7 @@ struct SettingsView: View {
         Form {
             Section {
                 HStack(alignment: .top, spacing: 14) {
-                    TonyAvatar(size: 52)
+                    Vignette(name: "v-settings", size: 68)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Smarter AI").font(.title2.weight(.bold))
                         Text("With an OpenRouter key, a powerful AI model sorts every place it doesn't already know, reads statements in any layout, and understands questions better. Without one, the app uses Apple Intelligence on this Mac.")

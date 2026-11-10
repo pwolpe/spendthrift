@@ -19,7 +19,7 @@ struct StoriesView: View {
         let stories = store.stories
         return VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .center, spacing: 16) {
-                CastAvatars(size: 50)
+                Vignette(name: "notrips", size: 80)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Trips & Events")
                         .font(.system(size: 30, weight: .bold, design: .serif))

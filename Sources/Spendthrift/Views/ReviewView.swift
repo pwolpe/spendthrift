@@ -54,7 +54,7 @@ struct ReviewView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 16) {
-            TonyAvatar(size: 56)
+            Vignette(name: "v-check", size: 80)
             VStack(alignment: .leading, spacing: 4) {
                 Text("A few educated guesses")
                     .font(.system(size: 30, weight: .bold, design: .serif))

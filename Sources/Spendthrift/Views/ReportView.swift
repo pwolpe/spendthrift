@@ -278,7 +278,7 @@ struct ReportContent: View {
 
     private var hero: some View {
         HStack(alignment: .center, spacing: 16) {
-            TonyAvatar(size: 64)
+            Vignette(name: "v-review", size: 88)
             VStack(alignment: .leading, spacing: 2) {
                 Text(heroTitle)
                     .font(.system(size: 34, weight: .bold, design: .serif))

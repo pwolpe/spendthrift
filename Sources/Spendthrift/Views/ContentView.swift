@@ -255,7 +255,7 @@ struct DropOverlay: View {
         ZStack {
             Rectangle().fill(.ultraThinMaterial)
             VStack(spacing: 12) {
-                TonyFigure(height: 240)
+                SpotArt(name: "v-drop", height: 240)
                 Text("Drop it right here")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                 Text("I'll read it, sort it and add it up.")
@@ -301,7 +301,7 @@ struct ImportIssuesSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 14) {
-                TonyAvatar(size: 52)
+                Vignette(name: "v-issue", size: 72)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(issues.count == 1 ? "I couldn't add one file" : "I couldn't add \(issues.count) files")
                         .font(.title2.weight(.bold))

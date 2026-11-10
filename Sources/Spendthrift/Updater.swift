@@ -191,7 +191,7 @@ struct UpdateSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 14) {
-                TonyAvatar(size: 56)
+                Vignette(name: "v-update", size: 76)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.title2.weight(.bold))
                     Text(subtitle).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
