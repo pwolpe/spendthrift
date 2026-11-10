@@ -212,6 +212,9 @@ struct SourceFile: Codable, Identifiable, Hashable {
     var lastDate: String?
     /// "verified" when its lines add up to the totals it prints, "mismatch", "scanned", or nil.
     var check: String?
+    /// The billing period the statement itself prints (yyyy-MM-dd), when it prints one. "" = looked, none.
+    var periodStart: String?
+    var periodEnd: String?
 
     var isPDF: Bool { ext == "pdf" }
     var isPicture: Bool { Scans.imageExtensions.contains(ext) }
@@ -428,11 +431,40 @@ struct CardCoverage: Identifiable, Hashable {
     let issuer: String
     var paid = 0.0
     var payments = 0
-    /// Payments with no card statement covering the weeks before them.
+    /// Payments that tie to nothing here: these count as spending, because what they bought can't be seen.
     var uncoveredPaid = 0.0
     var uncoveredPayments = 0
     var statementSpend = 0.0
     var accounts: [String] = []
+
+    // The tie-out, payment by payment.
+    /// Payments matched to a statement: by the "payment received" line on one, or by one's balance.
+    var tied = 0
+    /// Statements that must exist (a payment was made for them) and aren't here.
+    var toFind: [StatementToFind] = []
+    /// Payments older than the first statement here: they paid for something before the records begin.
+    var early: [LoosePayment] = []
+    /// Payments inside the records that match no statement.
+    var unexplained: [LoosePayment] = []
+
+    var isComplete: Bool { !accounts.isEmpty && toFind.isEmpty && unexplained.isEmpty }
+}
+
+/// A statement the tie-out shows is missing: the stretch it covers, and the payment that proves it existed.
+struct StatementToFind: Hashable, Identifiable {
+    var id: String { "\(account)|\(from)" }
+    let account: String
+    /// yyyy-MM-dd, the days no statement here covers.
+    let from: String
+    let to: String
+    let paid: Double
+    let paidOn: String
+}
+
+struct LoosePayment: Hashable, Identifiable {
+    let id: UUID
+    let date: String
+    let amount: Double
 }
 
 /// Months an account has no statement for, though the months around them (or other accounts) do.

@@ -158,6 +158,18 @@ enum DebugHooks {
             if let m = store.months.first(where: { $0.year == wanted && $0.month == 7 }) { show(.month(m)) }
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_TIEOUT=1: how each card's payments tie to its statements, then quit.
+        if env["SPENDTHRIFT_TIEOUT"] != nil {
+            await store.notePeriodsIfNeeded()
+            for c in store.cardCoverage {
+                print("TIEOUT \(c.issuer) \(c.accounts): \(c.payments) payments \(Int(c.paid)) | tied \(c.tied) | uncovered \(c.uncoveredPayments) (\(Int(c.uncoveredPaid)))")
+                for f in c.toFind { print("   FIND \(f.account): \(f.from) to \(f.to), paid \(f.paid) on \(f.paidOn)") }
+                for e in c.early { print("   EARLY \(e.date) \(e.amount)") }
+                for u in c.unexplained { print("   UNEXPLAINED \(u.date) \(u.amount)") }
+            }
+            for m in store.missingStatements { print("TIEOUT MONTHS \(m.summary)") }
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_HUNCH=1: ask for a best guess at every place on Double-Check, print them, then quit.
         if env["SPENDTHRIFT_HUNCH"] != nil {
             await store.guessWhatTheyWere()
@@ -169,6 +181,8 @@ enum DebugHooks {
             await snap("30-masthead", outDir, width: 230) { Masthead().padding(16) }
             await snap("35-story", outDir, width: 700) { StoryView(scrolls: false) }
             await snap("36-statements", outDir) { StatementsView(scrolls: false) }
+            await store.notePeriodsIfNeeded()
+            await snap("37-tieout", outDir, width: 944) { CardCoverageCard(coverage: store.cardCoverage).padding(20) }
             let q = "Where did most of my money go in October?"
             let query = await QueryParser.parse(q, months: store.months)
             var answer = AnswerEngine.answer(q, query: query, store: store)

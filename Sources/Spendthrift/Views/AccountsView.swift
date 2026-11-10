@@ -135,12 +135,13 @@ struct CoverageCard: View {
         var rows = store.accounts.map { account -> Row in
             let have = Set((byAccount[account.id] ?? []).map(\.month)).union((account.statementMonths ?? []).compactMap { Month(key: $0) })
             var missing = Set(store.missingStatements.first { $0.accountID == account.id }?.months ?? [])
-            // A card whose payments from the bank aren't all explained: the empty months in the
-            // middle of what's here are where the unexplained spending is.
-            if let card = store.cardCoverage.first(where: { $0.accounts.contains(account.name) }), card.uncoveredPayments > 0,
-               let first = have.min(), let last = have.max() {
-                var m = first.adding(1)
-                while m < last { if !have.contains(m) { missing.insert(m) }; m = m.adding(1) }
+            // A stretch the tie-out proves a statement is missing for (a payment was made for it).
+            if let card = store.cardCoverage.first(where: { $0.accounts.contains(account.name) }) {
+                for find in card.toFind where find.account == account.name {
+                    guard let from = DateParsing.parse(find.from, format: "yyyy-MM-dd"), let to = DateParsing.parse(find.to, format: "yyyy-MM-dd") else { continue }
+                    var m = Month(date: from)
+                    while m <= Month(date: to) { if !have.contains(m) { missing.insert(m) }; m = m.adding(1) }
+                }
             }
             return Row(id: account.id.uuidString, name: account.name, have: have, missing: missing)
         }

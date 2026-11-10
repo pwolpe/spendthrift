@@ -544,43 +544,115 @@ private struct MonthlyFlowCard: View {
 
 // MARK: - Card coverage
 
+/// Do the cards tie out? Every payment a bank account made to a card, matched to that card's
+/// statements, and exactly which statement to look for when one doesn't.
 struct CardCoverageCard: View {
+    private var store: BudgetStore { .shared }
     let coverage: [CardCoverage]
 
+    private func day(_ iso: String) -> Date? { DateParsing.parse(iso, format: "yyyy-MM-dd") }
+    private func long(_ iso: String) -> String { day(iso)?.formatted(.dateTime.month(.abbreviated).day().year()) ?? iso }
+    private func span(_ from: String, _ to: String) -> String {
+        guard let a = day(from), let b = day(to) else { return "\(from) to \(to)" }
+        let sameYear = Calendar.current.component(.year, from: a) == Calendar.current.component(.year, from: b)
+        return "\(a.formatted(sameYear ? .dateTime.month(.abbreviated).day() : .dateTime.month(.abbreviated).day().year())) to \(b.formatted(.dateTime.month(.abbreviated).day().year()))"
+    }
+
     var body: some View {
+        let toFind = coverage.reduce(0) { $0 + $1.toFind.count }
+        let notAdded = coverage.filter { $0.accounts.isEmpty && $0.uncoveredPayments > 0 }.count
+        let loose = coverage.reduce(0) { $0 + $1.unexplained.count }
         Card {
-            VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Credit Cards", subtitle: "What your bank paid them, and whether I can see what it bought")
-                ForEach(coverage) { c in
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: c.uncoveredPayments == 0 ? "checkmark.circle.fill" : (c.accounts.isEmpty ? "creditcard.trianglebadge.exclamationmark" : "circle.lefthalf.filled"))
-                            .font(.title3)
-                            .foregroundStyle(c.uncoveredPayments == 0 ? Theme.good : Theme.caution)
-                            .frame(width: 26)
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack {
-                                Text(c.issuer).font(.body.weight(.semibold))
-                                Spacer()
-                                Text(Money.format(c.paid, cents: false)).monospacedDigit()
-                            }
-                            Text(detail(c))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 14) {
+                SectionHeader(title: "Do the cards tie out?",
+                              subtitle: "Every payment your bank made to a card, matched to that card's own statements")
+                // The answer first.
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: toFind + notAdded + loose == 0 ? "checkmark.seal.fill" : "doc.badge.ellipsis")
+                        .font(.title2)
+                        .foregroundStyle(toFind + notAdded + loose == 0 ? Theme.good : Theme.caution)
+                    Text(verdict(toFind: toFind, notAdded: notAdded, loose: loose))
+                        .font(.body.weight(.medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background((toFind + notAdded + loose == 0 ? Theme.good : Theme.caution).opacity(0.08), in: .rect(cornerRadius: 10, style: .continuous))
+
+                ForEach(Array(coverage.enumerated()), id: \.element.id) { index, c in
+                    if index > 0 { Divider() }
+                    row(c)
+                }
+            }
+        }
+    }
+
+    private func verdict(toFind: Int, notAdded: Int, loose: Int) -> String {
+        if toFind + notAdded + loose == 0 {
+            return "Yes. Every card payment is matched to a statement that's here, so no statement is missing and nothing is counted twice."
+        }
+        var parts: [String] = []
+        if toFind > 0 { parts.append(toFind == 1 ? "1 statement to find" : "\(toFind) statements to find") }
+        if notAdded > 0 { parts.append(notAdded == 1 ? "1 card whose statements were never added" : "\(notAdded) cards whose statements were never added") }
+        if loose > 0 { parts.append(loose == 1 ? "1 payment that matches no statement" : "\(loose) payments that match no statement") }
+        return "Not quite: " + parts.joined(separator: ", ") + ". The details are below."
+    }
+
+    @ViewBuilder private func row(_ c: CardCoverage) -> some View {
+        let fine = c.isComplete
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: fine ? "checkmark.circle.fill" : (c.accounts.isEmpty ? "creditcard.trianglebadge.exclamationmark" : "exclamationmark.circle.fill"))
+                .font(.title3)
+                .foregroundStyle(fine ? Theme.good : Theme.caution)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(c.accounts.isEmpty ? c.issuer : c.accounts.joined(separator: ", ")).font(.body.weight(.semibold)).lineLimit(1)
+                    Spacer()
+                    Text(Money.format(c.paid, cents: false)).monospacedDigit()
+                }
+                if c.accounts.isEmpty {
+                    Text("\(count(c.payments)) from your bank, but none of this card's statements are here. Until they are, the payments count as spending under “Cards Not Added Yet”. Add its statements to see what they bought.")
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("\(c.tied) of \(count(c.payments)) matched to a statement.\(fine && c.early.isEmpty ? " Nothing missing." : "")")
+                        .font(.callout).foregroundStyle(.secondary)
+                    ForEach(c.toFind) { find in
+                        note("magnifyingglass", Theme.caution,
+                             "Find the \(find.account) statement for \(span(find.from, find.to)).",
+                             "\(Money.format(find.paid)) was paid for it on \(long(find.paidOn)), so it exists. Its purchases aren't in your totals yet.")
+                    }
+                    ForEach(c.unexplained) { p in
+                        Button { store.showOriginal(of: p.id) } label: {
+                            note("questionmark.circle", Theme.caution,
+                                 "\(Money.format(p.amount)) on \(long(p.date)) matches no statement.",
+                                 "It may have paid a different card from this bank. It counts as spending until its statement is added. Click to see the payment.")
                         }
+                        .buttonStyle(.plain)
+                    }
+                    if !c.early.isEmpty {
+                        let total = c.early.reduce(0) { $0 + $1.amount }
+                        note("clock.arrow.circlepath", .secondary,
+                             c.early.count == 1 ? "\(Money.format(total)) on \(long(c.early[0].date)) is from before your records begin."
+                                                : "\(c.early.count) payments (\(Money.format(total))) are from before your records begin.",
+                             "\(c.early.count == 1 ? "It" : "They") paid for a statement older than the first one here. Nothing to do, unless you want that earlier statement too.")
                     }
                 }
             }
         }
     }
 
-    private func detail(_ c: CardCoverage) -> String {
-        let n = c.payments == 1 ? "1 payment" : "\(c.payments) payments"
-        if c.uncoveredPayments == 0 { return "\(n), all explained by the statements you've added." }
-        if c.accounts.isEmpty {
-            return "\(n). No statements added, so these count as spending in “Cards Not Added Yet”. Add this card's statements to see what it bought."
+    private func count(_ n: Int) -> String { n == 1 ? "1 payment" : "\(n) payments" }
+
+    private func note(_ symbol: String, _ color: Color, _ title: String, _ detail: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(color).frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
+                Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
         }
-        return "\(n). \(c.uncoveredPayments) of them (\(Money.format(c.uncoveredPaid, cents: false))) aren't covered by the statements added so far. Add the missing months to break that down."
+        .contentShape(Rectangle())
     }
 }
 

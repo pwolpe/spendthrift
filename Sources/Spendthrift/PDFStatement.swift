@@ -254,12 +254,17 @@ enum PDFStatement {
     /// The billing period a statement prints ("Sep 13 – Oct 12, 2026", "09/26/26 - 10/25/26"), as the
     /// months it touches. A month with a statement but no purchases is covered, not missing.
     static func statementMonths(_ text: String) -> [String] {
+        guard let period = statementPeriod(text) else { return [] }
+        return Array(Set([Month(date: period.start).key, Month(date: period.end).key])).sorted()
+    }
+
+    /// The first and last day of the billing period a statement prints.
+    static func statementPeriod(_ text: String) -> (start: Date, end: Date)? {
         let head = String(text.prefix(8000))
         let cal = Calendar.current
-        func result(_ start: Date, _ end: Date) -> [String]? {
+        func result(_ start: Date, _ end: Date) -> (start: Date, end: Date)? {
             let days = cal.dateComponents([.day], from: start, to: end).day ?? 0
-            guard (20...40).contains(days) else { return nil }
-            return Array(Set([Month(date: start).key, Month(date: end).key])).sorted()
+            return (20...40).contains(days) ? (start, end) : nil
         }
         let named = #"\b([A-Z][a-z]{2})[a-z]*\.? (\d{1,2})(?:, (\d{4}))? ?[–—-] ?([A-Z][a-z]{2})[a-z]*\.? (\d{1,2}), (\d{4})"#
         if let re = try? NSRegularExpression(pattern: named) {
@@ -270,18 +275,26 @@ enum PDFStatement {
                       let y2 = group(6).flatMap(Int.init) else { continue }
                 let y1 = group(3).flatMap(Int.init) ?? (m1 > m2 ? y2 - 1 : y2)
                 if let start = cal.date(from: DateComponents(year: y1, month: m1 + 1, day: d1)),
-                   let end = cal.date(from: DateComponents(year: y2, month: m2 + 1, day: d2)), let months = result(start, end) { return months }
+                   let end = cal.date(from: DateComponents(year: y2, month: m2 + 1, day: d2)), let period = result(start, end) { return period }
             }
         }
         let slashed = #"(\d{1,2}/\d{1,2}/\d{2,4}) ?(?:[–—-]|through|to) ?(\d{1,2}/\d{1,2}/\d{2,4})"#
         if let re = try? NSRegularExpression(pattern: slashed) {
             for m in re.matches(in: head, range: NSRange(head.startIndex..., in: head)) {
                 guard let a = Range(m.range(at: 1), in: head), let b = Range(m.range(at: 2), in: head),
-                      let start = slashDate(String(head[a])), let end = slashDate(String(head[b])), let months = result(start, end) else { continue }
-                return months
+                      let start = slashDate(String(head[a])), let end = slashDate(String(head[b])), let period = result(start, end) else { continue }
+                return period
             }
         }
-        return []
+        return nil
+    }
+
+    /// The billing period printed in a PDF statement file, as yyyy-MM-dd; nil when it prints none.
+    nonisolated static func period(ofPDF data: Data) -> (start: String, end: String)? {
+        guard let doc = PDFDocument(data: data), !doc.isLocked else { return nil }
+        let text = (0..<min(doc.pageCount, 3)).compactMap { doc.page(at: $0)?.string }.joined(separator: "\n")
+        guard let period = statementPeriod(text) else { return nil }
+        return (DateParsing.iso.string(from: period.start), DateParsing.iso.string(from: period.end))
     }
 
     /// The latest full date printed on the statement, used to fill in missing years.

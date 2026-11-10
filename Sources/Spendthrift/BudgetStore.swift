@@ -93,6 +93,7 @@ final class BudgetStore {
             MainActor.assumeIsolated { BudgetStore.shared.saveNow() }
         }
         Task { await sortRemaining() }
+        Task { await notePeriodsIfNeeded() }
     }
 
     // MARK: - Persistence
@@ -154,7 +155,8 @@ final class BudgetStore {
             cardDays[issuer, default: []].insert(day(d))
             if e.amount > 0 { cardSpend[issuer, default: 0] += e.amount }
         }
-        var coverage: [String: CardCoverage] = [:]
+        let tie = reconcileCards(cardAccount: cardAccount, cardDays: cardDays)
+        var coverage = tie.cards
 
         var list: [Transaction] = []
         list.reserveCapacity(library.entries.count)
@@ -163,20 +165,9 @@ final class BudgetStore {
             let info = library.merchants[e.merchantKey]
             let unchecked = info?.isUnconfirmedGuess ?? true
             var category = e.override ?? info?.category ?? .unsorted
-            if category == .transfer, e.override == nil, e.amount > 0, cardAccount[e.accountID] == nil,
-               let name = info?.name, name.hasSuffix("Card Payment") {
-                // A payment that doesn't say which card ("ONLINE PAYMENT") is matched against any card added.
-                let issuer = Self.issuer(in: name) ?? "Other cards"
-                let d = day(date)
-                let days = issuer == "Other cards" ? cardDays.values.reduce(into: Set<Int>()) { $0.formUnion($1) } : (cardDays[issuer] ?? [])
-                // A payment settles the statement that closed two to four weeks earlier, so look for
-                // that card's purchases 15 to 50 days back.
-                let covered = (15...50).contains { days.contains(d - $0) }
-                var c = coverage[issuer] ?? CardCoverage(issuer: issuer)
-                c.paid += e.amount; c.payments += 1
-                if !covered { c.uncoveredPaid += e.amount; c.uncoveredPayments += 1; category = .uncoveredCards }
-                coverage[issuer] = c
-            }
+            // A payment to a card is a plain transfer only when it ties to that card's statements;
+            // otherwise the payment is the only record of the spending, and has to count.
+            if tie.covered[e.id] == false { category = .uncoveredCards }
             list.append(Transaction(
                 id: e.id, date: date, month: Month(date: date), description: e.description, amount: e.amount,
                 merchant: info?.name ?? KeywordExtractor.displayName(for: e.description), merchantKey: e.merchantKey,
@@ -240,6 +231,135 @@ final class BudgetStore {
 
     /// Places the instant rules couldn't sort go to the on-device model, a few at a time.
     /// Results are applied automatically; Double-Check lets Tony glance over them later.
+    /// Ties every card payment that left a bank account to that card's statements.
+    ///
+    /// A payment is accounted for when the card's own statement shows it arriving (the same amount
+    /// within a few days), or when it equals the balance of a statement that closed shortly before.
+    /// A stretch between two statements that a payment was plainly made for is a statement to find;
+    /// a stretch nobody paid anything for is just a month the card wasn't used.
+    private func reconcileCards(cardAccount: [UUID: String], cardDays: [String: Set<Int>]) -> (covered: [UUID: Bool], cards: [String: CardCoverage]) {
+        var parsed: [String: Int] = [:]
+        func day(_ s: String) -> Int? {
+            if let d = parsed[s] { return d }
+            guard let date = DateParsing.parse(s, format: "yyyy-MM-dd") else { return nil }
+            let d = Int(date.timeIntervalSinceReferenceDate / 86_400)
+            parsed[s] = d
+            return d
+        }
+        func text(_ day: Int) -> String { DateParsing.iso.string(from: Date(timeIntervalSinceReferenceDate: Double(day) * 86_400 + 43_200)) }
+        let names = Dictionary(uniqueKeysWithValues: library.accounts.map { ($0.id, $0.name) })
+
+        struct Payment { let id: UUID; let day: Int; let amount: Double; let issuer: String; var billed = false; var lineAccount: UUID? }
+        struct Credit { let day: Int; let amount: Double; let account: UUID; var used = false }
+        struct Statement { let account: UUID; let start: Int?; let close: Int; var purchases = 0.0; var net = 0.0 }
+        var payments: [Payment] = []
+        var credits: [String: [Credit]] = [:]
+        var bySource: [String: (purchases: Double, net: Double)] = [:]
+        var firstCharge: [String: Int] = [:]
+        for e in library.entries {
+            guard let d = day(e.date) else { continue }
+            let info = library.merchants[e.merchantKey]
+            if let issuer = cardAccount[e.accountID] {
+                firstCharge[issuer] = min(firstCharge[issuer] ?? d, d)
+                let upper = e.description.uppercased()
+                let isPayment = e.amount < 0 && ["PAYMENT", "AUTOPAY", "PYMT", "AUTO-PMT"].contains(where: upper.contains)
+                if e.amount < 0 { credits[issuer, default: []].append(Credit(day: d, amount: -e.amount, account: e.accountID)) }
+                if let source = e.sourceID {
+                    var sums = bySource[source] ?? (0, 0)
+                    if e.amount > 0 { sums.purchases += e.amount }
+                    if !isPayment { sums.net += e.amount }
+                    bySource[source] = sums
+                }
+            } else if (e.override ?? info?.category) == .transfer, e.override == nil, e.amount > 0,
+                      let name = info?.name, name.hasSuffix("Card Payment") {
+                payments.append(Payment(id: e.id, day: d, amount: e.amount, issuer: Self.issuer(in: name) ?? "Other cards"))
+            }
+        }
+        var statements: [String: [Statement]] = [:]
+        for source in library.sources ?? [] {
+            guard let account = source.accountID, let issuer = cardAccount[account],
+                  let close = (source.periodEnd.flatMap { $0.isEmpty ? nil : day($0) }) ?? source.lastDate.flatMap(day) else { continue }
+            let sums = bySource[source.id] ?? (0, 0)
+            statements[issuer, default: []].append(Statement(account: account, start: source.periodStart.flatMap { $0.isEmpty ? nil : day($0) },
+                                                             close: close, purchases: sums.purchases, net: sums.net))
+        }
+
+        var covered: [UUID: Bool] = [:]
+        var cards: [String: CardCoverage] = [:]
+        payments.sort { $0.day < $1.day }
+        let allDays = cardDays.values.reduce(into: Set<Int>()) { $0.formUnion($1) }
+        for i in payments.indices {
+            let p = payments[i]
+            var card = cards[p.issuer] ?? CardCoverage(issuer: p.issuer)
+            card.paid += p.amount; card.payments += 1
+            // The card's statement shows this payment arriving.
+            var line = false
+            if let index = credits[p.issuer]?.firstIndex(where: { !$0.used && abs($0.amount - p.amount) < 0.005 && (-4...7).contains($0.day - p.day) }) {
+                credits[p.issuer]![index].used = true
+                payments[i].lineAccount = credits[p.issuer]![index].account
+                line = true
+            }
+            // It pays off, to the cent, a statement that closed in the weeks before.
+            let billed = (statements[p.issuer] ?? []).contains { s in
+                (1...75).contains(p.day - s.close) && (abs(s.purchases - p.amount) < 0.005 || abs(s.net - p.amount) < 0.005)
+            }
+            payments[i].billed = billed
+            // Or, for a card not paid in full, that card's purchases are simply here for the weeks before.
+            let days = p.issuer == "Other cards" ? allDays : (cardDays[p.issuer] ?? [])
+            let inRange = (15...50).contains { days.contains(p.day - $0) }
+            covered[p.id] = line || billed || inRange
+            if line || billed || inRange {
+                card.tied += 1
+            } else {
+                card.uncoveredPaid += p.amount; card.uncoveredPayments += 1
+                let loose = LoosePayment(id: p.id, date: text(p.day), amount: p.amount)
+                let begins = (statements[p.issuer] ?? []).map(\.close).min() ?? firstCharge[p.issuer]
+                if let begins, p.day < begins + 45 { card.early.append(loose) } else if begins != nil { card.unexplained.append(loose) }
+            }
+            cards[p.issuer] = card
+        }
+
+        // Holes between one statement and the next. A payment made for the hole proves a statement is missing.
+        for (issuer, list) in statements {
+            for (account, mine) in Dictionary(grouping: list.filter { $0.start != nil }, by: \.account) where mine.count >= 3 {
+                let ordered = mine.sorted { $0.close < $1.close }
+                for (a, b) in zip(ordered, ordered.dropFirst()) {
+                    guard let nextStart = b.start, nextStart - a.close > 7 else { continue }
+                    let from = a.close + 1, to = nextStart - 1
+                    // What was due for a statement closing in the hole would be paid two to five weeks after it closed.
+                    let proof = payments.first { p in
+                        p.issuer == issuer && !p.billed && (p.lineAccount == nil || p.lineAccount == account) && (from + 15...to + 35).contains(p.day)
+                    }
+                    guard let proof else { continue }
+                    cards[issuer]?.toFind.append(StatementToFind(account: names[account] ?? issuer, from: text(from), to: text(to),
+                                                                 paid: proof.amount, paidOn: text(proof.day)))
+                }
+            }
+        }
+        for issuer in cards.keys { cards[issuer]?.toFind.sort { $0.from < $1.from } }
+        return (covered, cards)
+    }
+
+    /// Statements added before the app noted the billing period they print: read it from the kept copies.
+    func notePeriodsIfNeeded() async {
+        let waiting = (library.sources ?? []).filter { $0.isPDF && $0.periodStart == nil }
+        guard !waiting.isEmpty else { return }
+        let files = waiting.map { ($0.id, paths.statementFile($0)) }
+        let found = await Task.detached(priority: .utility) { () -> [String: (String, String)] in
+            var out: [String: (String, String)] = [:]
+            for (id, url) in files {
+                guard let data = try? Data(contentsOf: url) else { continue }
+                out[id] = PDFStatement.period(ofPDF: data).map { ($0.start, $0.end) } ?? ("", "")
+            }
+            return out
+        }.value
+        guard !found.isEmpty else { return }
+        for i in (library.sources ?? []).indices {
+            if let period = found[library.sources![i].id] { library.sources![i].periodStart = period.0; library.sources![i].periodEnd = period.1 }
+        }
+        changed()
+    }
+
     private func sortRemaining() async {
         guard !isSuggesting else { return }
         isSuggesting = true
@@ -1420,6 +1540,10 @@ final class BudgetStore {
         let ext = url.pathExtension.lowercased()
         var source = SourceFile(id: hash, name: url.lastPathComponent, ext: ext.isEmpty ? "txt" : ext, accountID: accountID, added: .now,
                                 rows: rows.count, firstDate: rows.map(\.date).min(), lastDate: rows.map(\.date).max(), check: nil)
+        if source.isPDF {
+            let period = PDFStatement.period(ofPDF: data)
+            source.periodStart = period?.start ?? ""; source.periodEnd = period?.end ?? ""
+        }
         switch check {
         case .verified: source.check = "verified"
         case .mismatch: source.check = "mismatch"
