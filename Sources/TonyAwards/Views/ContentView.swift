@@ -76,11 +76,6 @@ struct ContentView: View {
             DebugHooks.startIfRequested()
             await DailyTony.shared.ensureCartoon()
             TonyArt.shared.prepare()
-            // A key saved by an earlier build moves out of the keychain, once.
-            if await CloudKey.migrateFromKeychain() {
-                CloudStatus.shared.refreshKey()
-                store.cloudBecameAvailable()
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.refreshDownloads()

@@ -1,5 +1,4 @@
 import Foundation
-import Security
 import Observation
 
 /// Optional: a powerful cloud model (through OpenRouter) for the jobs where Apple's small
@@ -141,14 +140,12 @@ final class CloudStatus {
 
 /// The OpenRouter key lives in a private file in the data folder: never in the app, the library file, or a backup.
 enum CloudKey {
-    private static let service = "com.pwolpe.tonyawards.openrouter"
-    private static let account = "api-key"
     nonisolated(unsafe) private static var cached: String??
     private static let lock = NSLock()
 
-    private static var query: [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
-    }
+    /// A dot-file in the home folder also works, and wins if present: handy for setting a Mac up
+    /// from Terminal without opening Settings.  pbpaste > ~/.tony-awards-key && chmod 600 ~/.tony-awards-key
+    private static let dotFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tony-awards-key")
 
     /// Why a file and not the keychain: macOS ties keychain access to the exact build of an app
     /// unless it's signed with an Apple Developer ID. Every update would make Tony type his Mac
@@ -167,8 +164,11 @@ enum CloudKey {
     static func load() -> String? {
         lock.lock(); defer { lock.unlock() }
         if let cached { return cached }
-        let value = (try? String(contentsOf: file, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let key = value?.isEmpty == false ? value : nil
+        let read = { (url: URL) -> String? in
+            let value = (try? String(contentsOf: url, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value?.isEmpty == false ? value : nil
+        }
+        let key = read(dotFile) ?? read(file)
         cached = .some(key)
         return key
     }
@@ -191,24 +191,8 @@ enum CloudKey {
     static func delete() {
         lock.lock(); defer { lock.unlock() }
         try? FileManager.default.removeItem(at: file)
+        try? FileManager.default.removeItem(at: dotFile)
         cached = .some(nil)
-    }
-
-    /// Earlier builds kept the key in the keychain. Move it across once, off the main thread
-    /// (reading it may show macOS's permission dialog, which must never freeze the app).
-    /// Returns true if a key was moved.
-    static func migrateFromKeychain() async -> Bool {
-        guard load() == nil else { return false }
-        return await Task.detached(priority: .utility) { () -> Bool in
-            var q = query
-            q[kSecReturnData as String] = true
-            q[kSecMatchLimit as String] = kSecMatchLimitOne
-            var item: CFTypeRef?
-            guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-                  let key = (item as? Data).flatMap({ String(data: $0, encoding: .utf8) }), save(key) else { return false }
-            SecItemDelete(query as CFDictionary)
-            return true
-        }.value
     }
 }
 
