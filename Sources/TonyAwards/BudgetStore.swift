@@ -191,12 +191,18 @@ final class BudgetStore {
         let byAccount = Dictionary(grouping: list, by: \.accountID)
         for account in library.accounts {
             guard let txns = byAccount[account.id] else { continue }
-            let counts = Dictionary(grouping: txns, by: \.month).mapValues(\.count)
+            var counts = Dictionary(grouping: txns, by: \.month).mapValues(\.count)
+            // A month a statement covers is not missing, even if nothing was bought in it.
+            for key in account.statementMonths ?? [] { if let m = Month(key: key), counts[m] == nil { counts[m] = 0 } }
             let covered = counts.keys.sorted()
             guard covered.count >= 2, let first = covered.first, let last = covered.last else { continue }
             var gaps: [Month] = []
-            let typical = counts.values.sorted()[counts.count / 2]
-            if typical >= 3 {
+            let busy = counts.values.filter { $0 > 0 }.sorted()
+            let typical = busy.isEmpty ? 0 : busy[busy.count / 2]
+            // A busy account, or a quiet one that shows up nearly every month (a card with one
+            // subscription on it): either way a hole in the middle is a statement that was skipped.
+            let span = Calendar.current.dateComponents([.month], from: first.firstDay, to: last.firstDay).month.map { $0 + 1 } ?? covered.count
+            if typical >= 3 || (covered.count >= 6 && Double(covered.count) / Double(max(span, 1)) >= 0.8) {
                 var m = first.adding(1)
                 while m < last { if counts[m] == nil { gaps.append(m) }; m = m.adding(1) }
             }
@@ -698,6 +704,9 @@ final class BudgetStore {
                 case .ready(let statement):
                     let (accountID, isNew) = account(for: statement.signature, name: statement.suggestedName)
                     let ids = add(statement.rows, to: accountID)
+                    if !statement.months.isEmpty, let a = library.accounts.firstIndex(where: { $0.id == accountID }) {
+                        library.accounts[a].statementMonths = (library.accounts[a].statementMonths ?? []).union(statement.months)
+                    }
                     switch statement.check {
                     case .verified: verified += 1
                     case .mismatch(let sections): mismatches.append("\(url.lastPathComponent) (\(sections))")

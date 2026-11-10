@@ -115,6 +115,10 @@ final class DailyTony {
         var seen = false
         var model: String?
         var style: String?
+        /// Who is in it: "tony", "paul" or "both".
+        var who: String?
+        /// What the purchase cost: the real number is what makes the picture land.
+        var amount: Double?
     }
 
     /// What the picture is about ("Dunkin' · Nov 7"), shown under it. Nil for a starter.
@@ -131,11 +135,11 @@ final class DailyTony {
         return FileManager.default.fileExists(atPath: dev.path) ? dev : nil
     }()
 
-    private struct Starter: Codable { var id: String; var caption: String }
+    private struct Starter: Codable { var id: String; var caption: String; var who: String? }
     private static let starters: [Picture] = {
         guard let folder = starterFolder, let data = try? Data(contentsOf: folder.appendingPathComponent("starters.json")),
               let list = try? JSONDecoder().decode([Starter].self, from: data) else { return [] }
-        return list.map { Picture(file: "starter:\($0.id).jpg", caption: $0.caption, seen: true) }
+        return list.map { Picture(file: "starter:\($0.id).jpg", caption: $0.caption, seen: true, who: $0.who) }
     }()
 
     private var galleryFile: URL { folder.appendingPathComponent("gallery.json") }
@@ -155,6 +159,7 @@ final class DailyTony {
         if let merchant = picture.merchant {
             let day = picture.date.flatMap { DateParsing.parse($0, format: "yyyy-MM-dd") }
             label = day.map { "\(merchant) · \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? merchant
+            if let amount = picture.amount { label = (label ?? merchant) + " · " + Money.format(amount) }
         }
         let apply = { self.image = loaded; self.caption = picture.caption; self.source = label; self.current = picture; self.isAIImage = true }
         if animated { withAnimation(.easeInOut(duration: 0.5)) { apply() } } else { apply() }
@@ -178,19 +183,28 @@ final class DailyTony {
         for picture in pool where show(picture, animated: animated) { return }
     }
 
-    /// Tony's real photo, sent along with every drawing so the cartoon always looks like him.
-    private static let photo: Data? = {
-        if let url = Bundle.main.url(forResource: "tony", withExtension: "jpg"), let data = try? Data(contentsOf: url) { return data }
+    /// The real photos, sent along with every drawing so the picture is undeniably the person.
+    private static func bundled(_ name: String) -> Data? {
+        if let url = Bundle.main.url(forResource: name, withExtension: "jpg"), let data = try? Data(contentsOf: url) { return data }
         let dev = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Resources/tony.jpg")
+            .appendingPathComponent("Resources/\(name).jpg")
         return try? Data(contentsOf: dev)
-    }()
+    }
+    private static let photo: Data? = bundled("tony")
+    private static let paulPhoto: Data? = bundled("paul")
 
     /// Once per launch, out of sight: choose the best image model there is today, pick a real recent
     /// purchase, and draw the picture that will be waiting the next time the app opens.
     func prepareNext(highlights: [Highlight]) async {
         lastHighlights = highlights
         guard CloudAI.isEnabled, !preparedThisLaunch, !isGenerating, !highlights.isEmpty, let photo = Self.photo else { return }
+        // Who stars this time: Tony, Paul, or the two of them, never the same as last time.
+        var cast: [(name: String, photo: Data)] = [("Tony", photo)]
+        var who = "tony"
+        if let paul = Self.paulPhoto {
+            who = ["tony", "paul", "both"].filter { $0 != gallery.last?.who }.randomElement() ?? "tony"
+            cast = who == "tony" ? [("Tony", photo)] : who == "paul" ? [("Paul", paul)] : [("Tony", photo), ("Paul", paul)]
+        }
         preparedThisLaunch = true
         isGenerating = true
         defer { isGenerating = false }
@@ -200,27 +214,28 @@ final class DailyTony {
         let recent = Array(highlights.prefix(15))
         let pick = recent.filter { !lately.contains($0.merchant) }.randomElement() ?? recent.randomElement()!
         async let chosen = CloudImage.bestModel()
-        async let planned = CloudImage.scene(merchant: pick.merchant, category: pick.category.displayName, amount: pick.amount)
+        let names = cast.map(\.name)
+        async let planned = CloudImage.scene(merchant: pick.merchant, category: pick.category.displayName, amount: pick.amount, cast: names)
         let model = await chosen
         guard let scene = await planned else { preparedThisLaunch = false; return }
         // A style none of the last several pictures used.
         let usedLately = Set(saved.suffix(7).compactMap(\.style))
         let style = CloudImage.styles.filter { !usedLately.contains($0.id) }.randomElement() ?? CloudImage.styles.randomElement()!
-        var drawn = await CloudImage.draw(scene: scene.scene, photo: photo, model: model, style: style.look), used = model
+        var drawn = await CloudImage.draw(scene: scene.scene, cast: cast, model: model, style: style.look), used = model
         if drawn == nil, model != CloudImage.defaultModel {
-            drawn = await CloudImage.draw(scene: scene.scene, photo: photo, model: CloudImage.defaultModel, style: style.look); used = CloudImage.defaultModel
+            drawn = await CloudImage.draw(scene: scene.scene, cast: cast, model: CloudImage.defaultModel, style: style.look); used = CloudImage.defaultModel
         }
         guard let drawn, NSImage(data: drawn) != nil else { preparedThisLaunch = false; return }
 
         let file = "tony-\(Int(Date.now.timeIntervalSince1970)).png"
         try? drawn.write(to: folder.appendingPathComponent(file))
         saved.append(Picture(file: file, caption: scene.caption, merchant: pick.merchant,
-                             date: pick.date.map { DateParsing.iso.string(from: $0) }, seen: false, model: used, style: style.id))
+                             date: pick.date.map { DateParsing.iso.string(from: $0) }, seen: false, model: used, style: style.id, who: who, amount: pick.amount))
         // Keep the last thirty; older ones go, with their files.
         while saved.count > 30 { try? FileManager.default.removeItem(at: folder.appendingPathComponent(saved.removeFirst().file)) }
         gallery = saved
         if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil {
-            print("DEBUG PICTURE next: \(pick.merchant) [\(used), \(style.id)] \(scene.caption)\n  scene: \(scene.scene)")
+            print("DEBUG PICTURE next: \(pick.merchant) [\(used), \(style.id), \(who)] \(scene.caption)\n  scene: \(scene.scene)")
         }
     }
 }

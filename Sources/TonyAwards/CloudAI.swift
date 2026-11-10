@@ -692,7 +692,7 @@ enum CloudImage {
     }
 
     /// One sentence saying what Tony is doing, and the nomination line that goes with it.
-    static func scene(merchant: String, category: String, amount: Double) async -> Scene? {
+    static func scene(merchant: String, category: String, amount: Double, cast: [String] = ["Tony"]) async -> Scene? {
         let system = """
         You design the picture at the top of The Tony Awards, a playful personal budgeting app made for Tony. \
         Each picture is a cartoon of Tony in a Walter Mitty daydream: an ordinary purchase he really made, \
@@ -722,7 +722,10 @@ enum CloudImage {
                       "an Olympic final", "a superhero comic", "a jungle expedition", "a rock concert", "a fairy tale", "a heist movie",
                       "a western", "a monster movie", "an old Hollywood musical", "a polar expedition", "a magic show",
                       "a samurai epic", "a circus", "a pirate adventure", "a deep sea voyage"].randomElement()!
-        let user = "Purchase: \(merchant) (\(category)), \(Money.format(amount)). This time, make the daydream \(flavor)."
+        let who = cast.count > 1
+            ? " This picture stars two friends, \(cast.joined(separator: " and ")), together: start the scene with \"they are\" and give each of them something to do. In the caption, say \"a Duo\" or name them both."
+            : cast.first == "Tony" ? "" : " This picture stars \(cast[0]) (not Tony): the scene still starts with \"he is\"."
+        let user = "Purchase: \(merchant) (\(category)), \(Money.format(amount)). This time, make the daydream \(flavor).\(who) Hats, helmets and masks stay off his head so the whole face shows."
         let reply = await Timeout.run(40) {
             try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 3_000, temperature: 1.0, timeout: 35)
         }
@@ -735,43 +738,52 @@ enum CloudImage {
 
     /// Draws the scene as a wide cartoon, with Tony's photo as the model for his face. Nil if it couldn't be drawn.
     /// Every picture is drawn in a different manner, so opening the app is a small surprise each time.
-    /// (Each was tried with Tony's photo: he stays recognizable in all of them.)
+    /// Only manners that can carry a real face: each was tried with the photos, and flatter ones
+    /// (pixel art, paper cut, woodblock) lost the likeness.
     static let styles: [(id: String, look: String)] = [
         ("3d", "a modern 3D animated feature film: soft rounded shapes, rich lighting, expressive faces"),
-        ("strip", "a classic mid-century newspaper comic strip: simple figures with big round heads, a slightly wobbly hand-inked black line, flat muted colors, very little shading, gentle deadpan humor"),
-        ("print", "a bold Scandinavian textile print: big flat shapes, a few strong saturated colors, oversized flowers and stripes as pattern, no outlines, no shading, graphic and joyful"),
+        ("strip", "a classic mid-century newspaper comic strip: a slightly wobbly hand-inked black line, flat muted colors, very little shading, gentle deadpan humor"),
         ("clay", "stop-motion claymation: everything sculpted from modelling clay with visible thumbprints, miniature handmade sets, warm studio lighting"),
         ("anime", "a hand-painted Japanese animated film: lush painted backgrounds, soft clean line work, gentle colors, a sense of wonder"),
         ("popart", "a 1960s pop-art comic book panel: thick black ink outlines, halftone dots, flat primary colors, dramatic action lines"),
         ("poster", "a vintage 1930s travel poster: flat screen-printed color blocks, strong geometric composition, a limited warm palette, subtle paper grain"),
-        ("papercut", "a layered cut-paper collage: shapes cut from colored and textured paper, visible soft shadows between the layers, handmade and cheerful"),
         ("watercolor", "a loose ink-and-watercolor magazine cartoon: quick confident pen lines, soft washes of color, plenty of white paper, dry wit"),
-        ("pixel", "detailed 16-bit pixel art from a classic video game: crisp pixels, a bright limited palette, a side-on scene full of tiny details"),
         ("saturday", "a 1960s Saturday-morning television cartoon: flat cel colors, thick clean outlines, stylized angular backgrounds, big goofy energy"),
-        ("woodblock", "a Japanese woodblock print: flowing outlines, flat areas of indigo, vermilion and cream, stylized waves and clouds, visible wood grain"),
     ]
 
-    static func draw(scene: String, photo: Data, model: String, style: String) async -> Data? {
-        guard let key = CloudKey.load() else { return nil }
+    /// Draws the scene with the real photos as the reference for each face. Likeness comes first:
+    /// the head is a faithful, detailed caricature portrait, and only the rest takes on the style.
+    static func draw(scene: String, cast: [(name: String, photo: Data)], model: String, style: String) async -> Data? {
+        guard let key = CloudKey.load(), !cast.isEmpty else { return nil }
+        let intro = cast.count == 1
+            ? "The attached photo is \(cast[0].name), a real person. Make a picture starring him."
+            : "The first attached photo is \(cast[0].name) and the second is \(cast[1].name), two real people who are friends. Make a picture starring both of them together, each clearly himself."
+        let star = cast.count == 1 ? "\(cast[0].name) is the star" : "\(cast[0].name) and \(cast[1].name) are the stars, side by side"
         let prompt = """
-        The attached photo is Tony. Draw a fun, richly detailed picture starring him, drawn entirely in this \
-        style: \(style).
-        Whatever the style, it must be unmistakably the man in the photo, translated into that style: the same \
-        face shape, the same short dark hair and hairline, the same dark eyebrows, the same short dark beard and \
-        the same big warm smile. Anyone who knows him should recognize him at once.
+        \(intro)
+        Likeness comes first. Treat each photo as the reference for that man's head and reproduce it faithfully: \
+        the exact face shape and proportions, hairline and hair, eyebrows, eyes, nose, mouth and smile, any beard or \
+        stubble exactly as it is, and glasses if and only if he wears them in his photo, in the same frame shape. Do \
+        not simplify, beautify, slim, age or generalize the face into a generic cartoon character. A colleague \
+        glancing at the picture must know instantly who it is. Render the head as a detailed caricature portrait: \
+        slightly larger than life, the face fully recognizable, three-quarter or front view, well lit, nothing covering it.
+        Everything else (the body, costume, props, other characters and the setting) is drawn in this style: \(style). \
+        The head is finished in the same medium so it belongs in the picture, but it keeps the full detail and true \
+        likeness of the photo.
         The scene, a Walter Mitty daydream: \(scene)
-        Very wide cinematic landscape picture (21:9). Tony is the star: large in the frame, his face clearly \
-        visible, full of joy and swagger. Keep the bottom edge of the picture free of anything important. \
-        Playful, full of funny details. No words, letters, numbers, logos, captions or watermarks anywhere.
+        Very wide cinematic landscape picture (21:9). \(star): in the foreground, shown from about the waist up or \
+        closer so the face is large, full of joy and swagger. Keep the bottom edge of the picture free of anything \
+        important. Playful, full of funny details. No words, letters, numbers, logos, captions or watermarks anywhere.
         """
+        var content: [[String: Any]] = [["type": "text", "text": prompt]]
+        for member in cast {
+            content.append(["type": "image_url", "image_url": ["url": "data:image/jpeg;base64," + member.photo.base64EncodedString()]])
+        }
         let body: [String: Any] = [
             "model": model,
             "modalities": ["image", "text"],
             "image_config": ["aspect_ratio": "21:9"],
-            "messages": [["role": "user", "content": [
-                ["type": "text", "text": prompt],
-                ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64," + photo.base64EncodedString()]],
-            ]]],
+            "messages": [["role": "user", "content": content]],
         ]
         var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, timeoutInterval: 150)
         request.httpMethod = "POST"

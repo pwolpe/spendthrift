@@ -7,6 +7,8 @@ struct ParsedStatement {
     var signature: String
     var suggestedName: String
     var check: StatementCheck = .none
+    /// Months the statement covers by its own printed dates, when it prints them.
+    var months: [String] = []
 }
 
 /// Reads whatever a bank lets you download: CSV/TSV exports, PDF statements, and
@@ -55,7 +57,7 @@ enum StatementReader {
             let rows = Normalizer.rows(from: table, mapping: PDFStatement.mapping).rows
             guard !rows.isEmpty else { throw ReadError.noTransactions }
             return .ready(ParsedStatement(rows: rows, signature: table.signature,
-                                          suggestedName: table.suggestedName ?? accountName(for: url), check: table.check))
+                                          suggestedName: table.suggestedName ?? accountName(for: url), check: table.check, months: table.months))
         case "ofx", "qfx", "qbo":
             return .ready(try OFX.parse(data, fallbackName: accountName(for: url)))
         default:

@@ -146,14 +146,26 @@ struct OverviewView: View {
         let month = store.transactions.filter { $0.month == m }
         let salary = month.filter(\.isIncome).reduce(0) { $0 - $1.amount }
         let taxes = month.filter { $0.lane == .taxes }.reduce(0) { $0 + $1.amount }
-        let investments = month.filter { $0.lane == .investments }.reduce(0) { $0 - $1.amount }
+        // Investing is not spending: money put to work is still his. It gets its own gold figure,
+        // apart from the month's total above, and what came back from investments gets another.
+        let invested = month.filter { $0.lane == .investments && $0.amount > 0 }.reduce(0) { $0 + $1.amount }
+        let returned = month.filter { $0.lane == .investments && $0.amount < 0 }.reduce(0) { $0 - $1.amount }
+        let investments = invested + returned
         if salary != 0 || taxes != 0 || investments != 0 {
             Button { store.selection = .cashflow } label: {
                 HStack(spacing: 22) {
-                    Text("Also this month").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                    Text("Not counted as spending").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                    if invested > 0 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.up.forward.circle.fill").font(.callout).foregroundStyle(Theme.goldDeep)
+                            Text("Invested").font(.callout.weight(.semibold))
+                            Text(Money.format(invested, cents: false)).font(.callout.weight(.bold)).monospacedDigit().foregroundStyle(Theme.goldDeep)
+                        }
+                        .help("Money put into investments this month. It isn't spending: it's still yours.")
+                    }
+                    if returned > 0 { aside("From investments", returned, Category.investmentIncome) }
                     if salary != 0 { aside("Salary & income", salary, Category.income) }
                     if taxes != 0 { aside("Income taxes", -taxes, Category.taxes) }
-                    if investments != 0 { aside("Investments, net", investments, Category.investmentIncome) }
                     Spacer()
                     Label("Cash Flow", systemImage: "chevron.right")
                         .labelStyle(.titleAndIcon)

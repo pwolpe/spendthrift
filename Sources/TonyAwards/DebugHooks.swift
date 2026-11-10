@@ -100,6 +100,10 @@ enum DebugHooks {
             print("DEBUG STORY \(s.kind.rawValue) | \(s.name) | \(s.place ?? "-") | \(s.start)…\(s.end) | \(t.count) charges | \(Int(t.reduce(0) { $0 + $1.amount })) | \(s.summary)")
         }
         await snap("06-stories", outDir) { StoriesView(scrolls: false) }
+        await snap("11-coverage", outDir) { CoverageCard().padding(28).frame(width: 1000) }
+        if let busiest = Dictionary(grouping: store.transactions.filter(\.countsAsSpending), by: \.merchant).max(by: { $0.value.count < $1.value.count })?.key {
+            await snap("12-place", outDir) { PlaceView(name: busiest).frame(width: 1000) }
+        }
         await snap("09-allcaughtup", outDir) { ReviewView(scrolls: false) }
         await snap("10-new-category", outDir) {
             CategoryEditorSheet(request: CategoryEditorRequest(editing: CustomCategory(name: "Pets", symbol: "pawprint.fill", color: "teal")))

@@ -150,7 +150,10 @@ struct SidebarView: View {
                         .badge(store.reviewItems.count)
                         .tag(SidebarItem.review)
                 }
+                // The badge counts statements that seem to be missing: the thing most worth noticing.
                 Label("Setup", systemImage: "slider.horizontal.3")
+                    .badge(store.missingStatements.reduce(0) { $0 + $1.months.count }
+                           + store.cardCoverage.filter { $0.accounts.isEmpty && $0.uncoveredPayments > 0 }.count)
                     .tag(SidebarItem.accounts)
             }
         }

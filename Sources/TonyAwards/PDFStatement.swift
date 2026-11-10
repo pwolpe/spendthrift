@@ -120,6 +120,7 @@ enum PDFStatement {
                              rows: rows.map { [$0.date, $0.description, String(format: "%.2f", $0.amount)] },
                              signature: signature,
                              suggestedName: name.isEmpty ? nil : name)
+        table.months = statementMonths(text)
         if let cloudCheck {
             table.check = cloudCheck
         } else if !best.mismatched.isEmpty {
@@ -226,6 +227,39 @@ enum PDFStatement {
             return nil
         }
         return String(text[r].suffix(4))
+    }
+
+    /// The billing period a statement prints ("Sep 13 – Oct 12, 2026", "09/26/26 - 10/25/26"), as the
+    /// months it touches. A month with a statement but no purchases is covered, not missing.
+    static func statementMonths(_ text: String) -> [String] {
+        let head = String(text.prefix(8000))
+        let cal = Calendar.current
+        func result(_ start: Date, _ end: Date) -> [String]? {
+            let days = cal.dateComponents([.day], from: start, to: end).day ?? 0
+            guard (20...40).contains(days) else { return nil }
+            return Array(Set([Month(date: start).key, Month(date: end).key])).sorted()
+        }
+        let named = #"\b([A-Z][a-z]{2})[a-z]*\.? (\d{1,2})(?:, (\d{4}))? ?[–—-] ?([A-Z][a-z]{2})[a-z]*\.? (\d{1,2}), (\d{4})"#
+        if let re = try? NSRegularExpression(pattern: named) {
+            for m in re.matches(in: head, range: NSRange(head.startIndex..., in: head)) {
+                func group(_ i: Int) -> String? { Range(m.range(at: i), in: head).map { String(head[$0]) } }
+                guard let m1 = group(1).flatMap({ monthNames.firstIndex(of: $0.lowercased()) }), let d1 = group(2).flatMap(Int.init),
+                      let m2 = group(4).flatMap({ monthNames.firstIndex(of: $0.lowercased()) }), let d2 = group(5).flatMap(Int.init),
+                      let y2 = group(6).flatMap(Int.init) else { continue }
+                let y1 = group(3).flatMap(Int.init) ?? (m1 > m2 ? y2 - 1 : y2)
+                if let start = cal.date(from: DateComponents(year: y1, month: m1 + 1, day: d1)),
+                   let end = cal.date(from: DateComponents(year: y2, month: m2 + 1, day: d2)), let months = result(start, end) { return months }
+            }
+        }
+        let slashed = #"(\d{1,2}/\d{1,2}/\d{2,4}) ?(?:[–—-]|through|to) ?(\d{1,2}/\d{1,2}/\d{2,4})"#
+        if let re = try? NSRegularExpression(pattern: slashed) {
+            for m in re.matches(in: head, range: NSRange(head.startIndex..., in: head)) {
+                guard let a = Range(m.range(at: 1), in: head), let b = Range(m.range(at: 2), in: head),
+                      let start = slashDate(String(head[a])), let end = slashDate(String(head[b])), let months = result(start, end) else { continue }
+                return months
+            }
+        }
+        return []
     }
 
     /// The latest full date printed on the statement, used to fill in missing years.

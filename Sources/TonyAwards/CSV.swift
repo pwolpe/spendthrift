@@ -76,6 +76,8 @@ struct CSVTable {
     var suggestedName: String?
     /// For PDFs: whether the rows add up to the totals printed on the statement.
     var check: StatementCheck = .none
+    /// The months a statement says it covers ("2026-05", "2026-06"), even if nothing was bought in one of them.
+    var months: [String] = []
 
     init(header: [String]?, rows: [[String]], signature: String?, suggestedName: String?) {
         self.header = header

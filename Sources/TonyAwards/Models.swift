@@ -219,6 +219,8 @@ struct Account: Codable, Identifiable, Hashable {
     var lastImport: Date?
     /// Set by "Amounts Look Backwards": this bank's files have purchases and payments swapped.
     var invertAmounts: Bool?
+    /// Months some statement of this account says it covers, whether or not anything was bought then.
+    var statementMonths: Set<String>?
 
     init(name: String, signature: String) { self.name = name; self.signature = signature }
 
@@ -229,6 +231,7 @@ struct Account: Codable, Identifiable, Hashable {
         signature = (try? c.decodeIfPresent(String.self, forKey: .signature)) ?? ""
         lastImport = try? c.decodeIfPresent(Date.self, forKey: .lastImport)
         invertAmounts = try? c.decodeIfPresent(Bool.self, forKey: .invertAmounts)
+        statementMonths = try? c.decodeIfPresent(Set<String>.self, forKey: .statementMonths)
     }
 }
 

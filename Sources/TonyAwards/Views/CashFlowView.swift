@@ -36,13 +36,29 @@ struct CashFlowData {
     let taxLines: [Line]
     let byInvestmentCategory: [(category: Category, moneyIn: Double, moneyOut: Double)]
 
+    // What each dollar did. Money that went out is not all one thing: some was lived on, some was
+    // owed, and some was put to work and is still his. The page keeps those apart.
+    private func flow(_ category: Category) -> (moneyIn: Double, moneyOut: Double) {
+        byInvestmentCategory.first { $0.category == category }.map { ($0.moneyIn, $0.moneyOut) } ?? (0, 0)
+    }
+    /// Interest on a loan used for investing: a cost, not something built.
+    var loanInterest: Double {
+        investmentLines.filter { $0.category == .investmentLoan && $0.name.localizedCaseInsensitiveContains("interest") }.reduce(0) { $0 + $1.moneyOut }
+    }
+    /// Money put to work: capital calls, purchases, and principal paid down on the investment loan.
+    var built: Double { max(0, investmentOut - loanInterest) }
+    var fromInvestments: Double { flow(.investmentIncome).moneyIn }
+    var soldOrRedeemed: Double { flow(.investing).moneyIn }
+    var borrowed: Double { flow(.investmentLoan).moneyIn }
+    var earned: Double { income + unsortedIn }
+
     var everydayResult: Double { income + unsortedIn - spending - taxes }
     var investmentNet: Double { investmentIn - investmentOut }
     var netCash: Double { everydayResult + investmentNet }
     var isEmpty: Bool { months.isEmpty }
 
-    static let laneOrder = ["Salary & income", "Everyday spending", "Income taxes", "Investments in", "Investments out"]
-    static let laneColors: [Color] = [Category.income.color, .pink, Category.taxes.color, Theme.goldDeep, Category.investing.color]
+    static let laneOrder = ["Salary & income", "Lived on", "Income taxes", "Back from investments", "Invested"]
+    static let laneColors: [Color] = [Category.income.color, .pink, Category.taxes.color, Category.investmentIncome.color, Theme.goldDeep]
 
     @MainActor init(store: BudgetStore, period: ReportPeriod) {
         self.period = period
@@ -157,18 +173,14 @@ struct CashFlowContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            HStack(alignment: .center, spacing: 16) {
-                TonyAvatar(size: 56)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("The whole picture")
-                        .font(.system(size: 30, weight: .bold, design: .serif))
-                    Text("Everyday life on one side, investments on the other, taxes on their own line. \(data.period.title).")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Cash Flow")
+                    .font(.system(size: 30, weight: .bold, design: .serif))
+                Text("Where the money came from and what it did. \(data.period.title).")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
             }
+            PurposeCard(data: data)
             HStack(alignment: .top, spacing: 22) {
                 StatementCard(data: data, open: interactive ? open : nil)
                 VStack(spacing: 22) {
@@ -192,6 +204,120 @@ struct CashFlowContent: View {
     private func openPlace(_ key: String) {
         store.transactionFilter = TransactionFilter(merchantKey: key)
         store.selection = .transactions
+    }
+}
+
+// MARK: - What the money did
+
+/// Two bars on one scale: where the money came from, and what it did. The second bar is the point
+/// of the page. Money lived on is gone; money invested is not. They must never look the same.
+private struct PurposeCard: View {
+    let data: CashFlowData
+
+    private struct Part: Identifiable {
+        var id: String { name }
+        let name: String
+        let amount: Double
+        let color: Color
+        var note: String? = nil
+        var kept = false
+    }
+
+    var body: some View {
+        let sources = [
+            Part(name: "Salary & income", amount: data.earned, color: Category.income.color),
+            Part(name: "Paid out by investments", amount: data.fromInvestments, color: Category.investmentIncome.color),
+            Part(name: "Sold or redeemed", amount: data.soldOrRedeemed, color: Category.investing.color.opacity(0.7)),
+            Part(name: "Borrowed", amount: data.borrowed, color: Category.investmentLoan.color),
+        ].filter { $0.amount > 0.5 }
+        let uses = [
+            Part(name: "Invested", amount: data.built, color: Theme.goldDeep, note: "still yours", kept: true),
+            Part(name: "Lived on", amount: data.spending, color: .pink),
+            Part(name: "Income taxes", amount: data.taxes, color: Category.taxes.color),
+            Part(name: "Loan interest", amount: data.loanInterest, color: Category.investmentLoan.color.opacity(0.7)),
+        ].filter { $0.amount > 0.5 }
+        let totalIn = sources.reduce(0) { $0 + $1.amount }, totalOut = uses.reduce(0) { $0 + $1.amount }
+        let scale = max(totalIn, totalOut, 1)
+        let consumed = data.spending + data.taxes + data.loanInterest
+
+        Card {
+            VStack(alignment: .leading, spacing: 20) {
+                // The sentence that says what the picture means.
+                VStack(alignment: .leading, spacing: 6) {
+                    if data.built > 0.5 {
+                        (Text(Money.format(data.built, cents: false)).foregroundStyle(Theme.goldDeep).fontWeight(.bold)
+                         + Text(" was invested for the future. ")
+                         + Text(Money.format(consumed, cents: false)).fontWeight(.bold)
+                         + Text(" was spent: lived on, paid in taxes\(data.loanInterest > 0.5 ? " or paid in interest" : "")."))
+                            .font(.system(size: 22, weight: .regular, design: .serif))
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        (Text(Money.format(consumed, cents: false)).fontWeight(.bold) + Text(" went out: lived on or paid in taxes."))
+                            .font(.system(size: 22, weight: .regular, design: .serif))
+                    }
+                    Text(explanation(totalIn: totalIn, consumed: consumed))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                bar("Where it came from", sources, total: totalIn, scale: scale)
+                bar("What it did", uses, total: totalOut, scale: scale)
+            }
+        }
+    }
+
+    private func explanation(totalIn: Double, consumed: Double) -> String {
+        let cash = data.netCash
+        let change = "Cash in these accounts went \(cash >= 0 ? "up" : "down") by \(Money.format(abs(cash), cents: false))"
+        if data.built > 0.5, cash < 0 {
+            return change + ", but not because that much was spent: money moved into investments is counted here as going out, and it is still yours."
+        }
+        if data.built > 0.5 { return change + ", after putting \(Money.format(data.built, cents: false)) to work." }
+        return change + "."
+    }
+
+    private func bar(_ title: String, _ parts: [Part], total: Double, scale: Double) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title.uppercased()).font(.caption.weight(.bold)).tracking(1.1).foregroundStyle(.secondary)
+                Spacer()
+                Text(Money.format(total, cents: false)).font(.callout.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            GeometryReader { geo in
+                let gaps = CGFloat(max(parts.count - 1, 0)) * 3
+                let usable = max(0, geo.size.width * CGFloat(total / scale) - gaps)
+                HStack(spacing: 3) {
+                    ForEach(parts) { part in
+                        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        shape.fill(part.color.gradient)
+                            // What was kept gets a gold rim: the one piece of the bar that isn't gone.
+                            .overlay(shape.strokeBorder(Theme.gold, lineWidth: part.kept ? 2 : 0))
+                            .frame(width: max(4, usable * CGFloat(part.amount / max(total, 1))))
+                    }
+                }
+            }
+            .frame(height: 30)
+            FlowLayout(spacing: 18) {
+                ForEach(parts) { part in
+                    HStack(spacing: 6) {
+                        if part.kept {
+                            Image(systemName: "arrow.up.forward.circle.fill").foregroundStyle(Theme.goldDeep).font(.callout)
+                        } else {
+                            Circle().fill(part.color).frame(width: 9, height: 9)
+                        }
+                        Text(part.name).font(.callout.weight(part.kept ? .semibold : .regular))
+                        Text(Money.format(part.amount, cents: false)).font(.callout.weight(.semibold)).monospacedDigit()
+                        Text("\(Int((part.amount / max(total, 1) * 100).rounded()))%").font(.caption).foregroundStyle(.secondary)
+                        if let note = part.note {
+                            Text(note).font(.caption.weight(.semibold)).foregroundStyle(Theme.goldDeep)
+                                .lineLimit(1).fixedSize()
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background(Theme.goldDeep.opacity(0.12), in: .capsule)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -221,19 +347,27 @@ private struct StatementCard: View {
                 ForEach(data.byInvestmentCategory, id: \.category) { item in
                     if item.moneyIn > 0 || item.moneyOut > 0 {
                         row(item.category.displayName, item.moneyIn - item.moneyOut, sign: 0, category: item.category,
-                            note: "\(Money.format(item.moneyIn, cents: false)) in · \(Money.format(item.moneyOut, cents: false)) out")
+                            note: item.category == .investing
+                                ? "\(Money.format(item.moneyOut, cents: false)) invested · \(Money.format(item.moneyIn, cents: false)) came back"
+                                : "\(Money.format(item.moneyIn, cents: false)) in · \(Money.format(item.moneyOut, cents: false)) out",
+                            invested: true)
                     }
                 }
-                total("Investments, net", data.investmentNet, note: nil)
+                total("Investments, net", data.investmentNet,
+                      note: data.investmentNet < 0 ? "More went into investments than came out. That is money put to work, not money spent." : nil,
+                      invested: true)
 
                 Divider().padding(.vertical, 4)
                 HStack(alignment: .firstTextBaseline) {
-                    Text("Net cash flow").font(.title3.weight(.bold))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Change in cash").font(.headline)
+                        Text("Not a score: investing lowers it, and that's a good thing.").font(.caption).foregroundStyle(.secondary)
+                    }
                     Spacer()
                     Text(signed(data.netCash))
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
                         .monospacedDigit()
-                        .foregroundStyle(data.netCash >= 0 ? Theme.good : Color.primary)
+                        .foregroundStyle(data.netCash >= 0 ? Theme.good : Color.secondary)
                 }
             }
         }
@@ -251,7 +385,7 @@ private struct StatementCard: View {
     }
 
     /// - sign: +1 always shown as money in, -1 as money out, 0 = `amount` is already signed.
-    private func row(_ title: String, _ amount: Double, sign: Int, category: Category?, note: String? = nil) -> some View {
+    private func row(_ title: String, _ amount: Double, sign: Int, category: Category?, note: String? = nil, invested: Bool = false) -> some View {
         let value = sign == 0 ? amount : Double(sign) * amount
         return HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 1) {
@@ -259,7 +393,8 @@ private struct StatementCard: View {
                 if let note { Text(note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
             Spacer()
-            Text(signed(value)).monospacedDigit().foregroundStyle(value > 0 ? Theme.good : Color.primary)
+            // Money going into investments is gold, never the color of spending.
+            Text(signed(value)).monospacedDigit().foregroundStyle(value > 0 ? Theme.good : invested ? Theme.goldDeep : Color.primary)
             if open != nil, category != nil {
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
             }
@@ -268,12 +403,12 @@ private struct StatementCard: View {
         .onTapGesture { if let category { open?(category) } }
     }
 
-    private func total(_ title: String, _ amount: Double, note: String?) -> some View {
+    private func total(_ title: String, _ amount: Double, note: String?, invested: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(title).font(.headline)
                 Spacer()
-                Text(signed(amount)).font(.headline).monospacedDigit().foregroundStyle(amount >= 0 ? Theme.good : Color.primary)
+                Text(signed(amount)).font(.headline).monospacedDigit().foregroundStyle(amount >= 0 ? Theme.good : invested ? Theme.goldDeep : Color.primary)
             }
             if let note { Text(note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         }

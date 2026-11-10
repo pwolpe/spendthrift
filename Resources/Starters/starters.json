@@ -1,50 +1,62 @@
 [
  {
   "id": "astronaut",
-  "caption": "Nominated for Best Out-of-This-World Expense Report"
- },
- {
-  "id": "cart",
-  "caption": "Nominated for Best Grocery Run at Unsafe Speeds"
- },
- {
-  "id": "conductor",
-  "caption": "Nominated for Best Original Score, Cash Register Section"
+  "caption": "Nominated for Best Out-of-This-World Expense Report",
+  "who": "tony"
  },
  {
   "id": "sheriff",
-  "caption": "Nominated for Best Showdown With a Dinner Check"
+  "caption": "Nominated for Best Showdown With a Dinner Check",
+  "who": "tony"
  },
  {
-  "id": "diver",
-  "caption": "Nominated for Best Deep Dive Into the Receipts"
- },
- {
-  "id": "racer",
-  "caption": "Nominated for Best Pit Stop in a Leading Role"
- },
- {
-  "id": "kong",
-  "caption": "Nominated for Best Delivery Order, Skyscraper Division"
- },
- {
-  "id": "summit",
-  "caption": "Nominated for Best Ascent of Mount Online Shopping"
- },
- {
-  "id": "pirate",
-  "caption": "Nominated for Best Plunder of a Farmers Market"
- },
- {
-  "id": "gameshow",
-  "caption": "Nominated for Best Reaction to a Fully Reconciled Month"
- },
- {
-  "id": "gondola",
-  "caption": "Nominated for Best Travel Splurge, Foreign Language Category"
+  "id": "conductor",
+  "caption": "Nominated for Best Original Score, Cash Register Section",
+  "who": "tony"
  },
  {
   "id": "chef",
-  "caption": "Nominated for Best Dining Performance, With Extra Parmesan"
+  "caption": "Nominated for Best Dining Performance, With Extra Parmesan",
+  "who": "tony"
+ },
+ {
+  "id": "kong",
+  "caption": "Nominated for Best Delivery Order, Skyscraper Division",
+  "who": "tony"
+ },
+ {
+  "id": "cart",
+  "caption": "Nominated for Best Grocery Run at Unsafe Speeds",
+  "who": "paul"
+ },
+ {
+  "id": "diver",
+  "caption": "Nominated for Best Deep Dive Into the Receipts",
+  "who": "paul"
+ },
+ {
+  "id": "gondola",
+  "caption": "Nominated for Best Travel Splurge, Foreign Language Category",
+  "who": "paul"
+ },
+ {
+  "id": "summit",
+  "caption": "Nominated for Best Ascent of Mount Online Shopping",
+  "who": "paul"
+ },
+ {
+  "id": "racers",
+  "caption": "Nominated for Best Pit Stop by a Duo in a Leading Role",
+  "who": "both"
+ },
+ {
+  "id": "pirates",
+  "caption": "Nominated for Best Plunder of a Farmers Market, Ensemble Cast",
+  "who": "both"
+ },
+ {
+  "id": "gameshow",
+  "caption": "Nominated for Best Reaction to a Fully Reconciled Month",
+  "who": "both"
  }
 ]
