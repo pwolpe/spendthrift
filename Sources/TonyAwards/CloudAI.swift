@@ -401,6 +401,11 @@ enum CloudSorter {
         robo-advisor, crypto exchange, private fund or other investment is "Investing & Capital Calls", never an \
         everyday spending category, even though the money left the bank account. Getting this right matters more \
         than anything else here: the app tells the person whether they spent more than they earned.
+        - But living costs are spending, however they are paid: a mortgage, rent, a car loan, a student loan, \
+        insurance and property tax are never investing. Only "Investment Loan" is for a loan taken out to invest.
+        - "Payments & Transfers" is only for paying one's own credit card or moving money between one's own accounts. \
+        Money sent to another person or a business by Zelle, Venmo, PayPal, wire or check is spending: choose the \
+        category it most likely is, or Other, and set confident to false so the person can say what it was.
         - "notes", when present, are what the person wrote about these charges in their own words. They know what \
         happened: let a note decide the category and whether you are confident.
         - If "bank_category" is given it is the bank's own guess, and "app_guess" is this app's: useful hints, often too \
