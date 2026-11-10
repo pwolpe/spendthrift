@@ -16,6 +16,8 @@ struct SpendingQuery: Hashable {
 enum QueryParser {
     static func parse(_ question: String, months: [Month]) async -> SpendingQuery {
         let first = months.first ?? Month(date: .now), last = months.last ?? Month(date: .now)
+        // With a cloud key, the powerful model understands the whole question, dates included.
+        if let cloud = await CloudWriter.query(question, first: first, last: last) { return cloud }
         var query = keywordParse(question, first: first, last: last)
         if SystemLanguageModel.default.isAvailable, let ai = await Timeout.run(25, { await aiParse(question, first: first, last: last) }) {
             query.metric = ai.metric

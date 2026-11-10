@@ -89,6 +89,7 @@ struct SidebarView: View {
     @Environment(BudgetStore.self) private var store
 
     private var status: String? {
+        if let progress = store.importProgress { return "Reading statements… \(progress.done) of \(progress.total)" }
         if store.isImporting { return "Reading your statement…" }
         if store.isSuggesting { return "Sorting new places…" }
         return nil

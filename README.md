@@ -1,9 +1,12 @@
 # The Tony Awards
 
 A Mac app made for Tony, honoring excellence in spending. Tony drops in statements from any bank or
-card and sees where his money goes. No terminal, no Finder, no cloud, no accounts to link: everything
-runs on his Mac, including the AI. The only thing it ever asks the internet is whether a newer
-version of the app exists.
+card and sees where his money goes. No terminal, no Finder, no accounts to link.
+
+Out of the box everything runs on his Mac, including the AI (Apple Intelligence), and the only thing
+it asks the internet is whether a newer version exists. With an OpenRouter key entered in
+**Settings** it also uses a powerful cloud model, which is what makes it feel like it just knows
+(see *Smarter AI* below).
 
 The idea started from [davidfowl/tally](https://github.com/davidfowl/tally); the app is now written
 entirely in Swift with Apple's own frameworks (SwiftUI, Swift Charts, PDFKit, Vision, Foundation Models,
@@ -29,6 +32,33 @@ Image Playground) and has no dependencies.
 - **Change anything by hand.** Click any category pill to change it for that place, every time.
   Right-click for "only this charge". The inspector in Transactions renames places and shows the
   history at each one.
+
+## Smarter AI (optional, recommended)
+
+**The Tony Awards → Settings…** takes an OpenRouter key (stored in the Mac's keychain, never in the
+app, its data, or this repository). Make Tony his own key at openrouter.ai with a spending limit.
+With a key:
+
+- **Sorting**: the cloud model decides every place that isn't Tony's own choice or a business the
+  app knows for certain, names it properly ("Dickson's Farmstand Meats"), and says whether it is sure.
+  Sure ones are filed silently; only real guesses (a Zelle to a person, a bare "Withdrawal") go to
+  Double-Check. When Tony corrects something, the remaining guesses are re-evaluated with his choice
+  as an example.
+- **Statements**: any PDF or scan that doesn't add up to its own printed totals is also read by the
+  model, after name, address, email and account numbers are blanked. Its reading is accepted when it
+  matches the statement's printed summary or agrees with the app's own reading.
+- **Odd spreadsheets**: it works out the columns before Tony is ever asked.
+- **Questions and writing**: Ask the Academy, the monthly recap, the daily nomination line. Totals
+  are always computed in code.
+
+Measured in Nov 2026 on a year of real statements (48 files, 2,213 transactions, 645 places): read
+and sorted in under two minutes; 45 of 47 PDFs verified against their printed totals; 94% of
+cloud-sorted places filed with no review. The default model is Claude Sonnet 5.5. Haiku 5.5 was the
+same speed, 20× cheaper, and agreed with it on 88% of places; Cloudflare's Clef decision model was
+twice as fast but agreed on only 64%, so it isn't offered. If the key is missing, wrong or out of
+credit, or there's no internet, everything falls back to the on-device paths.
+
+`statements/` (git-ignored) holds Paul's own statements, used for testing.
 
 ## Screens
 

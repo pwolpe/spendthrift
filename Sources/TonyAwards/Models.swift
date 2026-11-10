@@ -181,7 +181,10 @@ struct LedgerEntry: Codable, Identifiable, Hashable {
 
 /// What the app knows about a place: its tidy name and its category, and who decided.
 struct MerchantInfo: Codable, Hashable {
-    enum Source: String, Codable { case user, known, bank, generic, ai }
+    /// `cloud` = the powerful model was sure; `cloudGuess` = it said it was guessing.
+    enum Source: String, Codable { case user, known, bank, generic, ai, cloud, cloudGuess }
+    /// Guesses nobody has confirmed: these are what Double-Check lists.
+    var isUnconfirmedGuess: Bool { !confirmed && (source == .ai || source == .cloudGuess || category == nil) }
     var name: String
     var category: Category?
     var source: Source

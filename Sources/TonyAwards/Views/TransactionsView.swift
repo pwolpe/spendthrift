@@ -224,6 +224,8 @@ private struct TransactionInspector: View {
         case .bank: return ("Your bank's own category.", "building.columns.fill")
         case .generic: return ("Guessed from the name.", "text.magnifyingglass")
         case .ai: return (transaction.isUnknown ? "Not sorted yet." : "Sorted by Apple Intelligence, on this Mac.", "apple.intelligence")
+        case .cloud: return ("Sorted by AI.", "sparkles")
+        case .cloudGuess: return ("AI's best guess. Change it if it's wrong.", "sparkles")
         }
     }
 

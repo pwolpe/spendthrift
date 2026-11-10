@@ -250,12 +250,28 @@ enum RecapWriter {
         let fallback = fallbackText(month: month, total: total, previous: previous, awards: awards)
         let key = "\(month.key)|\(Int(total))|\(awards.map(\.winner).joined())|\(insights.count)"
         if let cached = cache[key] { return cached }
-        guard SystemLanguageModel.default.isAvailable else { return fallback }
+        guard SystemLanguageModel.default.isAvailable || CloudAI.isEnabled else { return fallback }
 
         var facts = ["Month: \(month.title)", "Total spent: \(Money.format(total, cents: false))"]
         if let previous, previous > 0 { facts.append("Previous month: \(Money.format(previous, cents: false))") }
         for a in awards.prefix(5) { facts.append("\(a.title): \(a.winner) (\(a.value))") }
         if !insights.isEmpty { facts.append("Notable: " + insights.prefix(3).map(\.title).joined(separator: "; ")) }
+
+        // Same check for either model: every number in the text must be one we supplied.
+        func numbersAreReal(_ text: String) -> Bool {
+            let digits = CharacterSet(charactersIn: "0123456789,").inverted
+            let allowed = Set(facts.joined(separator: " ").components(separatedBy: digits).filter { $0.count >= 2 })
+            return !text.isEmpty && text.components(separatedBy: digits).filter { $0.count >= 2 }.allSatisfy(allowed.contains)
+        }
+        if let written = await CloudWriter.line(system: """
+            You are the host of The Tony Awards, a playful awards show that honors Tony's monthly spending. Tony is a CPA.
+            Write a 2-sentence opening for this month's ceremony using ONLY the facts given. Copy dollar amounts exactly as written.
+            Use theater and awards-show language. Be warm, witty and specific, never judgmental. No lists, no quotes, no stage directions.
+            """, facts: facts.joined(separator: "\n"), maxTokens: 120, temperature: 0.8), numbersAreReal(written) {
+            cache[key] = written
+            return written
+        }
+        guard SystemLanguageModel.default.isAvailable else { return fallback }
 
         let session = LanguageModelSession(instructions: """
         You are the host of The Tony Awards, a playful awards show that honors Tony's monthly spending. Tony is a CPA.

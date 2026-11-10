@@ -74,6 +74,11 @@ enum StatementReader {
             // Only offer "pick the columns" for something that is actually a table with dates in it.
             let hasDates = (0..<table.columnCount).contains { DateParsing.guessFormat(for: table.values($0)) != nil }
             guard hasDates, table.columnCount >= 2 else { throw ReadError.notAStatement }
+            // Before asking Tony to pick columns, let the powerful model work them out.
+            if CloudAI.isEnabled, let mapping = await CloudColumnMapper.mapping(for: table) {
+                let rows = Normalizer.rows(from: table, mapping: mapping).rows
+                if !rows.isEmpty { return .ready(ParsedStatement(rows: rows, signature: signature, suggestedName: name)) }
+            }
             return .needsMapping(table, signature: signature, suggestedName: name)
         }
     }

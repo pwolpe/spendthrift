@@ -193,6 +193,19 @@ final class DailyTony {
 
     private func makeCaption(_ plan: Plan) async -> String {
         let fallback = plan.highlight.map { "Nominated for Best Supporting Role at \($0.merchant)." } ?? greeting
+        if CloudAI.isEnabled {
+            var facts = "Today's picture: Tony holding \(plan.prop) in \(plan.backdrop)."
+            if let h = plan.highlight { facts += " It celebrates his recent purchase at \(h.merchant) (\(h.category.displayName))." }
+            if let line = await CloudWriter.line(system: """
+                You write today's nomination for The Tony Awards, a playful budgeting app made for Tony, a CPA.
+                Write one witty awards-show nomination about what Tony is holding, at most 14 words. It must start with "Nominated for Best".
+                Examples: Nominated for Best Coffee Run in a Leading Role. Nominated for Best Grocery Haul, Produce Division.
+                Light accounting puns are welcome. Never be negative about spending. Reply with the nomination only, no quotes.
+                """, facts: facts, maxTokens: 60, temperature: 1.0)?.replacingOccurrences(of: "*", with: "")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\" \n")), line.hasPrefix("Nominated"), line.count < 140 {
+                return line
+            }
+        }
         guard SystemLanguageModel.default.isAvailable else { return fallback }
         let session = LanguageModelSession(instructions: """
         You write today's nomination for The Tony Awards, a playful budgeting app made for Tony, a CPA.

@@ -37,6 +37,12 @@ struct TonyAwardsApp: App {
                 Button("Accounts") { BudgetStore.shared.selection = .accounts }.keyboardShortcut("8")
             }
         }
+
+        // The Tony Awards → Settings… (⌘,)
+        Settings {
+            SettingsView()
+                .environment(BudgetStore.shared)
+        }
     }
 }
 

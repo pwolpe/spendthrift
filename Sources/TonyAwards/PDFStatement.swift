@@ -47,7 +47,11 @@ enum PDFStatement {
     private static func table(fromText text: String, pages: [String], positional positionalText: String?, url: URL) async throws -> CSVTable {
 
         let knownIssuer = detectIssuer(text)
-        let last4 = detectLast4(text) ?? StatementReader.cardDigits(in: url)
+        // Chase names its files "20260125-statements-4090-.pdf" after the account as it is today, even
+        // when an older statement inside still prints a replaced card's number. Trust the file name there.
+        let fromFileName = url.lastPathComponent.range(of: #"statements-\d{4}-"#, options: .regularExpression)
+            .map { String(url.lastPathComponent[$0].filter(\.isNumber)) }
+        let last4 = fromFileName ?? detectLast4(text) ?? StatementReader.cardDigits(in: url)
         let closing = detectClosingDate(text) ?? .now
 
         // PDFs store text in whatever order the bank's software wrote it. Usually that's reading
@@ -63,7 +67,28 @@ enum PDFStatement {
             }
         }
         var rows = best.rows
-        // Only when pattern matching found nothing: a quiet month can have just one or two charges.
+        var cloudCheck: StatementCheck?
+        // Card statements print an account summary ("Purchases +$346.81, Payments/Credits -$1,818.04")
+        // rather than section totals: that's just as good a check.
+        if best.matched == 0, best.mismatched.isEmpty, matchesAccountSummary(text, rows: rows) { best.matched = 1 }
+        // Unless our own reading already adds up to the statement's printed totals, let the powerful
+        // model read it too (when Tony's Mac has a key). It copes with layouts and scans the patterns
+        // don't, and two independent readings that agree are as good as a printed total.
+        let selfVerified = best.matched > 0 && best.mismatched.isEmpty
+        if !selfVerified, CloudAI.canReadStatements,
+           let cloud = await CloudStatementReader.read(text: positionalText ?? text, closing: closing) {
+            let total = { (list: [CanonicalRow]) in (list.reduce(0) { $0 + $1.amount } * 100).rounded() / 100 }
+            let agree = cloud.rows.count == rows.count && total(cloud.rows) == total(rows)
+            if cloud.verified || agree || matchesAccountSummary(text, rows: cloud.rows) {
+                if !agree { rows = cloud.rows }
+                cloudCheck = .verified
+            } else if rows.isEmpty || !best.mismatched.isEmpty || positionalText == nil || cloud.rows.count >= rows.count {
+                // Ours was empty, wrong, read off a picture, or less complete: take the model's.
+                rows = cloud.rows
+                cloudCheck = positionalText == nil ? .scanned : StatementCheck.none
+            }
+        }
+        // Without the cloud, and only when pattern matching found nothing, try the on-device model.
         if rows.isEmpty, CategorySuggester.isAvailable {
             // Slow (several seconds a page), so only read pages that look like they list transactions.
             let candidates = pages.filter(looksLikeTransactions)
@@ -72,10 +97,14 @@ enum PDFStatement {
         guard !rows.isEmpty else { throw PDFError.noTransactions }
 
         let head = String(text.prefix(1500))
-        let kind = text.range(of: #"(?i)checking account summary|checking summary"#, options: .regularExpression) != nil
+        // A card statement mentions "savings" and "checking" in passing (rewards, payment instructions),
+        // so only call it a bank account when it doesn't look like a card.
+        let isCard = text.range(of: #"(?i)minimum payment due|credit (?:access )?line|credit limit|card ?member|pay over time"#, options: .regularExpression) != nil
+        let kind: String? = isCard ? nil
+            : text.range(of: #"(?i)checking account summary|checking summary"#, options: .regularExpression) != nil
             || head.range(of: #"(?i)\bchecking\b"#, options: .regularExpression) != nil ? "Checking"
             : text.range(of: #"(?i)savings account summary|savings summary"#, options: .regularExpression) != nil
-            || head.range(of: #"(?i)\bsavings\b"#, options: .regularExpression) != nil ? "Savings" : nil
+            || head.range(of: #"(?i)\bsavings account\b"#, options: .regularExpression) != nil ? "Savings" : nil
         // A bank we've never heard of usually prints its name near the top.
         let issuer = knownIssuer ?? head.components(separatedBy: .newlines).prefix(8).map { $0.trimmingCharacters(in: .whitespaces) }.first { line in
             line.count <= 40 && line.range(of: #"(?i)\b(bank|credit union|financial|trust|savings & loan)\b"#, options: .regularExpression) != nil
@@ -87,7 +116,9 @@ enum PDFStatement {
                              rows: rows.map { [$0.date, $0.description, String(format: "%.2f", $0.amount)] },
                              signature: signature,
                              suggestedName: name.isEmpty ? nil : name)
-        if !best.mismatched.isEmpty {
+        if let cloudCheck {
+            table.check = cloudCheck
+        } else if !best.mismatched.isEmpty {
             table.check = .mismatch(best.mismatched.joined(separator: ", "))
         } else if best.matched > 0 {
             table.check = .verified
@@ -95,6 +126,31 @@ enum PDFStatement {
             table.check = .scanned
         }
         return table
+    }
+
+    /// Do the rows add up to the card's printed account summary? Money out must equal purchases plus
+    /// cash advances, balance transfers, fees and interest; money in must equal payments and credits.
+    static func matchesAccountSummary(_ text: String, rows: [CanonicalRow]) -> Bool {
+        // Every amount printed after a label, anywhere on a line. A statement can print several
+        // summaries (Amex: Pay In Full, Pay Over Time, Account Total); any one that fits will do.
+        func amounts(_ label: String) -> [Double] {
+            let pattern = "(?i)(?:^|\\s)(?:" + label + ")\\s+[-+]?\\$?([\\d,]+\\.\\d{2})\\b"
+            guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
+            return re.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { m in
+                Range(m.range(at: 1), in: text).flatMap { MoneyParsing.parse(String(text[$0])) }
+            }
+        }
+        let spent = rows.filter { $0.amount > 0 }.reduce(0) { $0 + $1.amount }
+        let received = rows.filter { $0.amount < 0 }.reduce(0) { $0 - $1.amount }
+        guard spent > 0 || received > 0 else { return false }
+        let extras = (amounts("Cash Advances").first ?? 0) + (amounts("Balance Transfers").first ?? 0)
+            + (amounts("Fees(?: Charged)?").first ?? 0) + (amounts("Interest(?: Charged)?").first ?? 0)
+        let purchases = amounts("Purchases") + amounts("New Charges") + amounts("Total New Charges")
+        var credits = amounts("Payments?,? ?(?:and |& |/ ?)?(?:Other )?Credits") + amounts("Total Payments and Credits")
+        if let payments = amounts("Payments").first { credits.append(payments + (amounts("Credits").first ?? 0)) }
+        let outMatches = purchases.contains { abs($0 + extras - spent) < 0.005 || abs($0 - spent) < 0.005 }
+        let inMatches = credits.contains { abs($0 - received) < 0.005 }
+        return outMatches && inMatches
     }
 
     /// Rebuilds the visual rows of a page: text fragments at the same height are one row, read left to right.
@@ -262,7 +318,9 @@ enum PDFStatement {
             if t.contains("payments & transfers") || t.contains("payments and transfers") || t.contains("atm & debit") || t.contains("debit card") {
                 sectionIsCredit = false
             } else if ["payments", "credits", "deposits", "additions", "refunds"].contains(where: t.contains) { sectionIsCredit = true }
-            else if ["purchases", "withdrawals", "debits", "charges", "checks paid", "fees"].contains(where: t.contains) { sectionIsCredit = false }
+            // "PURCHASE" (Chase cards print it in the singular), "CASH ADVANCES", "BALANCE TRANSFERS"…
+            else if ["purchase", "withdrawals", "debits", "charges", "checks paid", "fees", "cash advance", "balance transfer", "interest charged"]
+                .contains(where: t.contains) { sectionIsCredit = false }
             else { recognized = false }
             if recognized {
                 let title = text.replacingOccurrences(of: "(continued)", with: "", options: .caseInsensitive).trimmingCharacters(in: .whitespaces)

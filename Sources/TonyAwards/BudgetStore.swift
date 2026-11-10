@@ -37,6 +37,8 @@ final class BudgetStore {
     var aiAvailable: Bool { CategorySuggester.isAvailable }
     /// Files from the last import that couldn't be added.
     var importIssues: [ImportIssue] = []
+    /// "Reading 5 of 18" while several statements are being read.
+    private(set) var importProgress: (done: Int, total: Int)?
     /// Kept for views that wait on the first load; the library loads instantly at launch.
     let hasLoadedTransactions = true
 
@@ -44,6 +46,9 @@ final class BudgetStore {
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var aiAttempted: Set<String> = []
+    @ObservationIgnored private var cloudAttempted: Set<String> = []
+    @ObservationIgnored private var relearnKeys: Set<String> = []
+    @ObservationIgnored private var relearnTask: Task<Void, Never>?
     @ObservationIgnored private var lastImport: (entries: Set<UUID>, accounts: Set<UUID>, hashes: Set<String>)?
 
     private init() {
@@ -132,7 +137,7 @@ final class BudgetStore {
         for e in library.entries {
             guard let date = date(e.date) else { continue }
             let info = library.merchants[e.merchantKey]
-            let unchecked = info.map { !$0.confirmed && ($0.source == .ai || $0.category == nil) } ?? true
+            let unchecked = info?.isUnconfirmedGuess ?? true
             var category = e.override ?? info?.category ?? .unsorted
             if category == .transfer, e.override == nil, e.amount > 0, cardAccount[e.accountID] == nil,
                let name = info?.name, name.hasSuffix("Card Payment") {
@@ -179,9 +184,12 @@ final class BudgetStore {
     /// Places the instant rules couldn't sort go to the on-device model, a few at a time.
     /// Results are applied automatically; Double-Check lets Tony glance over them later.
     private func sortRemaining() async {
-        guard aiAvailable, !isSuggesting else { return }
+        guard !isSuggesting else { return }
         isSuggesting = true
         defer { isSuggesting = false }
+        // With a cloud key, the powerful model decides everything the built-in list doesn't know.
+        if CloudAI.isEnabled { await sortWithCloud() }
+        guard aiAvailable else { return }
         while true {
             let used = Dictionary(grouping: library.entries, by: \.merchantKey)
             let waiting = library.merchants
@@ -211,6 +219,71 @@ final class BudgetStore {
         }
     }
 
+    /// The cloud model reviews every place that isn't Tony's own choice or a business the app knows
+    /// for certain: unsorted places, on-device guesses, the bank's broad categories and word matches.
+    /// What it's sure of is simply filed; only what it calls a guess goes to Double-Check.
+    private func sortWithCloud() async {
+        while true {
+            let used = Dictionary(grouping: library.entries, by: \.merchantKey)
+            var waiting: [(item: CloudItem, weight: Double)] = []
+            for (key, info) in library.merchants {
+                guard !info.confirmed, [.ai, .bank, .generic].contains(info.source) || relearnKeys.contains(key), !cloudAttempted.contains(key),
+                      let entries = used[key], !entries.isEmpty else { continue }
+                let total = entries.reduce(0) { $0 + $1.amount }
+                var item = CloudItem(key: key, description: info.sample, averageAmount: total / Double(entries.count),
+                                     count: entries.count, bankCategory: entries.compactMap(\.bankCategory).first)
+                item.amounts = Array(entries.suffix(8).map { abs($0.amount) })
+                if let guess = info.category { item.appGuess = "\(info.name): \(guess.rawValue)" }
+                waiting.append((item, abs(total)))
+            }
+            guard !waiting.isEmpty else { relearnKeys.removeAll(); return }
+            waiting.sort { $0.weight > $1.weight }
+            let examples = library.merchants.values
+                .filter { $0.confirmed && $0.category != nil }
+                .map { MerchantRule(name: $0.name, category: $0.category!) }
+            // Several batches at once, biggest places first. A batch that fails is retried in halves;
+            // only if nothing at all gets through do we assume the cloud is unreachable and stop.
+            var batches = waiting.map(\.item).chunked(into: 30)
+            cloudAttempted.formUnion(waiting.map(\.item.key))
+            var anySucceeded = false
+            await withTaskGroup(of: ([CloudItem], [String: CloudVerdict]?).self) { group in
+                var running = 0
+                func start() {
+                    while running < 5, !batches.isEmpty {
+                        let batch = batches.removeFirst()
+                        running += 1
+                        group.addTask { (batch, await CloudSorter.sort(batch, examples: examples)) }
+                    }
+                }
+                start()
+                for await (batch, verdicts) in group {
+                    running -= 1
+                    if let verdicts {
+                        anySucceeded = true
+                        for (key, verdict) in verdicts where library.merchants[key]?.confirmed == false {
+                            library.merchants[key]?.category = verdict.category
+                            library.merchants[key]?.name = verdict.name
+                            library.merchants[key]?.source = verdict.confident ? .cloud : .cloudGuess
+                        }
+                        if !verdicts.isEmpty { withAnimation(.snappy) { changed() } }
+                    } else if batch.count > 4, anySucceeded || batch.count > 15 {
+                        // Too big a bite, or a hiccup: try again in two halves.
+                        let half = batch.count / 2
+                        batches.append(Array(batch[..<half])); batches.append(Array(batch[half...]))
+                    }
+                    start()
+                }
+            }
+            if !anySucceeded { return }
+        }
+    }
+
+    /// Called when a key is added in Settings: everything uncertain gets a second, better look.
+    func cloudBecameAvailable() {
+        cloudAttempted.removeAll()
+        Task { await sortRemaining() }
+    }
+
     // MARK: - Changing categories by hand
 
     /// - wholePlace: true changes every charge from that place, now and in future (the usual case).
@@ -227,6 +300,7 @@ final class BudgetStore {
             for i in library.entries.indices where keys.contains(library.entries[i].merchantKey) { library.entries[i].override = nil }
             let name = keys.count == 1 ? chosen[0].merchant : "\(keys.count) places"
             showToast("\(name) is now \(category.displayName), every time.", symbol: category.symbol)
+            learnFromCorrection()
         } else {
             for i in library.entries.indices where ids.contains(library.entries[i].id) { library.entries[i].override = category }
             showToast(ids.count == 1 ? "Just this one is now \(category.displayName)." : "\(ids.count) charges are now \(category.displayName).",
@@ -242,6 +316,23 @@ final class BudgetStore {
         library.merchants[key]?.confirmed = true
         for i in library.entries.indices where library.entries[i].merchantKey == key { library.entries[i].override = nil }
         withAnimation(.snappy) { changed() }
+        learnFromCorrection()
+    }
+
+    /// Tony just taught the app something. A few seconds later (in case he's changing several),
+    /// the model takes another look at its remaining guesses with his choices as fresh examples.
+    private func learnFromCorrection() {
+        guard CloudAI.isEnabled else { return }
+        relearnTask?.cancel()
+        relearnTask = Task {
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            let guesses = library.merchants.filter { !$0.value.confirmed && $0.value.source == .cloudGuess }.map(\.key)
+            guard !guesses.isEmpty else { return }
+            relearnKeys.formUnion(guesses)
+            cloudAttempted.subtract(guesses)
+            await sortRemaining()
+        }
     }
 
     /// "Looks right": keeps the AI's guess and stops asking about it.
@@ -340,8 +431,11 @@ final class BudgetStore {
 
     /// Called when the app comes to the front: Apple Intelligence may have become available since.
     func retrySorting() {
-        guard !isSuggesting, aiAvailable, library.merchants.values.contains(where: { $0.category == nil }) else { return }
+        let unsorted = library.merchants.values.contains { $0.category == nil }
+        let forCloud = CloudAI.isEnabled && library.merchants.values.contains { !$0.confirmed && [.ai, .bank, .generic].contains($0.source) }
+        guard !isSuggesting, (aiAvailable && unsorted) || forCloud else { return }
         aiAttempted.removeAll()
+        cloudAttempted.removeAll()
         Task { await sortRemaining() }
     }
 
@@ -393,22 +487,26 @@ final class BudgetStore {
         var added = 0, touched: [String] = [], verified = 0, mismatches: [String] = [], scanned = 0
         var batch: (entries: Set<UUID>, accounts: Set<UUID>, hashes: Set<String>) = ([], [], [])
         isImporting = true
-        for url in urls {
-            guard StatementReader.extensions.contains(url.pathExtension.lowercased()) else {
-                issues.append(ImportIssue(file: url.lastPathComponent, reason: StatementReader.adviceForUnsupported(url)))
-                continue
-            }
+        // Read every file first, several at a time: a statement that needs the cloud model takes
+        // 10 to 40 seconds, and a year of them shouldn't queue up one behind another.
+        typealias Reading = Result<(hash: String, data: Data, outcome: StatementReader.Outcome), Error>
+        let readable = urls.enumerated().filter { StatementReader.extensions.contains($0.element.pathExtension.lowercased()) }
+        for url in urls where !StatementReader.extensions.contains(url.pathExtension.lowercased()) {
+            issues.append(ImportIssue(file: url.lastPathComponent, reason: StatementReader.adviceForUnsupported(url)))
+        }
+        importProgress = readable.count > 1 ? (0, readable.count) : nil
+
+        /// Files go in the moment they're read, so the screens fill up while the rest are still coming.
+        func apply(_ url: URL, _ first: Reading) async {
+            var reading = first
             do {
-                let data = try Data(contentsOf: url)
-                let hash = Self.hash(data)
-                var outcome: StatementReader.Outcome
-                do {
-                    outcome = try await StatementReader.read(url, data: data)
-                } catch PDFStatement.PDFError.locked {
-                    // Some banks lock statements with a password (often part of an ID number). Ask for it.
+                // Some banks lock statements with a password (often part of an ID number). Ask for it.
+                if case .failure(PDFStatement.PDFError.locked) = reading {
                     guard let password = askPassword(for: url) else { throw PDFStatement.PDFError.lockedAndSkipped }
-                    outcome = try await StatementReader.read(url, data: data, password: password)
+                    let data = try Data(contentsOf: url)
+                    reading = .success((Self.hash(data), data, try await StatementReader.read(url, data: data, password: password)))
                 }
+                let (hash, _, outcome) = try reading.get()
                 switch outcome {
                 case .ready(let statement):
                     let (accountID, isNew) = account(for: statement.signature, name: statement.suggestedName)
@@ -425,6 +523,11 @@ final class BudgetStore {
                     if isNew { batch.accounts.insert(accountID) }
                     added += ids.count
                     if let name = accounts.first(where: { $0.id == accountID })?.name, !touched.contains(name) { touched.append(name) }
+                    if !ids.isEmpty {
+                        withAnimation(.snappy) { changed() }
+                        if selection == nil { selection = .overview }
+                        Task { await sortRemaining() }
+                    }
                 case .needsMapping(let table, let signature, let name):
                     pendingImports.append(PendingImport(fileURL: url, fileHash: hash, table: table, mapping: nil,
                                                         candidates: accounts.filter { $0.signature == signature },
@@ -437,11 +540,39 @@ final class BudgetStore {
                 }
             }
         }
+
+        await withTaskGroup(of: (Int, Reading).self) { group in
+            var next = 0
+            func startNext() {
+                guard next < readable.count else { return }
+                let (index, url) = readable[next]
+                next += 1
+                group.addTask {
+                    do {
+                        let data = try Data(contentsOf: url)
+                        let outcome = try await StatementReader.read(url, data: data)
+                        return (index, .success((Self.hash(data), data, outcome)))
+                    } catch {
+                        return (index, .failure(error))
+                    }
+                }
+            }
+            for _ in 0..<8 { startNext() }
+            for await (index, reading) in group {
+                if let progress = importProgress { importProgress = (progress.done + 1, progress.total) }
+                await apply(urls[index], reading)
+                startNext()
+            }
+        }
+        importProgress = nil
         isImporting = false
         if dropped.count > 0, urls.isEmpty {
             issues.append(ImportIssue(file: dropped[0].lastPathComponent, reason: "There were no statements in that folder."))
         }
         if !issues.isEmpty { importIssues = issues }
+        if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil {
+            print("DEBUG IMPORT files \(urls.count) added \(added) verified \(verified) scanned \(scanned) mismatched \(mismatches) issues \(issues.count)")
+        }
         if !touched.isEmpty {
             lastImport = batch
             withAnimation(.snappy) { changed() }

@@ -28,6 +28,15 @@ enum Entry {
             }
             exit(0)
         }
+        if let i = args.firstIndex(of: "--blanked") {
+            // Test aid: print exactly what would be sent to the cloud for a statement, without sending it.
+            for path in args[(i + 1)...] {
+                guard let doc = PDFDocument(url: URL(fileURLWithPath: path)) else { continue }
+                let text = (0..<doc.pageCount).compactMap { doc.page(at: $0) }.map(PDFStatement.positionalText).joined(separator: "\n")
+                print(Redactor.blank(text))
+            }
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--check") {
             // Test aid: one line per file saying how it was read.
             Task { @MainActor in
