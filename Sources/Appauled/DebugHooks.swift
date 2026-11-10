@@ -131,6 +131,14 @@ enum DebugHooks {
     private static func selfTest(files: [URL]) async {
         let store = BudgetStore.shared
         func check(_ name: String, _ ok: Bool) { print("SELFTEST \(ok ? "PASS" : "FAIL") \(name)") }
+        // APPAULED_EXPLAIN="Whitfield|my accountant, for tax prep": say what a place was and print what happened.
+        if let spec = ProcessInfo.processInfo.environment["APPAULED_EXPLAIN"]?.split(separator: "|", maxSplits: 1).map(String.init), spec.count == 2,
+           let t = store.transactions.first(where: { $0.merchant.localizedCaseInsensitiveContains(spec[0]) }) {
+            let before = "\(t.merchant) | \(t.category.displayName)"
+            let ok = await store.explain(t.merchantKey, said: spec[1])
+            let after = store.transactions.first { $0.id == t.id }
+            print("EXPLAIN \(ok ? "ok" : "failed"): \(before)  →  \(after?.merchant ?? "?") | \(after?.category.displayName ?? "?") | note: \(after?.note ?? "-") | needs check: \(after?.needsCheck ?? true)")
+        }
         if store.stories.count >= 2, let moving = store.transactions(in: store.stories[0]).first?.id {
             let from = store.stories[0], to = store.stories[1]
             let before = store.transactions(in: to).count

@@ -516,6 +516,43 @@ final class BudgetStore {
         withAnimation(.snappy) { changed() }
     }
 
+    /// Places being worked out from what the person said about them.
+    private(set) var explaining: Set<String> = []
+
+    /// "It was my accountant, for tax prep": in one step, files the place where that belongs (making
+    /// a category if none fits), gives it a name that says what it is, and keeps the words as a note.
+    /// Returns false if it couldn't be worked out, so the caller can fall back to the category menu.
+    @discardableResult
+    func explain(_ key: String, said text: String) async -> Bool {
+        let said = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !said.isEmpty, let info = library.merchants[key], !explaining.contains(key) else { return false }
+        // The words are kept either way.
+        for i in library.entries.indices where library.entries[i].merchantKey == key && (library.entries[i].note ?? "").isEmpty {
+            library.entries[i].note = said
+        }
+        changed()
+        guard CloudAI.isEnabled else { return false }
+        explaining.insert(key)
+        defer { explaining.remove(key) }
+        let amounts = library.entries.filter { $0.merchantKey == key }.map(\.amount)
+        let typical = amounts.isEmpty ? 0 : amounts.reduce(0, +) / Double(amounts.count)
+        guard let verdict = await Explainer.decide(statementText: info.sample, currentName: info.name, amount: typical, said: said) else { return false }
+        var category = Category.pickable.first { $0.rawValue == verdict.category }
+        var made = false
+        if category == nil {
+            let symbol = verdict.symbol.flatMap { CustomCategory.symbols.contains($0) ? $0 : nil } ?? "tag.fill"
+            let color = CustomCategory.palette[(customCategories.count * 5 + 3) % CustomCategory.palette.count].name
+            category = saveCategory(CustomCategory(name: verdict.category, symbol: symbol, color: color))
+            made = category != nil
+        }
+        guard let category else { return false }
+        library.merchants[key]?.name = verdict.name
+        setCategory(category, forPlace: key)
+        showToast(made ? "Filed \(verdict.name) under a new category, \(category.displayName)." : "Filed \(verdict.name) under \(category.displayName).",
+                  symbol: "checkmark.circle.fill")
+        return true
+    }
+
     func renamePlace(_ key: String, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, library.merchants[key] != nil, library.merchants[key]?.name != trimmed else { return }
@@ -534,10 +571,9 @@ final class BudgetStore {
         library.entries[i].note = trimmed.isEmpty ? nil : trimmed
         let key = library.entries[i].merchantKey
         changed()
+        // A note on a place that is still a guess is the person telling us what it was: act on it.
         if !trimmed.isEmpty, library.merchants[key]?.confirmed == false, CloudAI.isEnabled {
-            relearnKeys.insert(key)
-            cloudAttempted.remove(key)
-            Task { await sortRemaining() }
+            Task { await explain(key, said: trimmed) }
         }
     }
 

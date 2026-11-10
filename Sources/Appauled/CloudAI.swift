@@ -817,6 +817,50 @@ enum CloudImage {
     }
 }
 
+// MARK: - "It was my accountant"
+
+/// The person says in their own words what a payee was. The model turns that into a tidy name and
+/// a category, making a new category when their words name something the list doesn't have.
+enum Explainer {
+    struct Verdict: Sendable {
+        let name: String
+        let category: String
+        let isNew: Bool
+        let symbol: String?
+    }
+
+    static func decide(statementText: String, currentName: String, amount: Double, said: String) async -> Verdict? {
+        let existing = Category.pickable.map(\.rawValue)
+        let system = """
+        A person is telling a budgeting app what one payee on their statement really was. From their words, decide:
+
+        category: the category it belongs in. Use one from this list exactly when it truly fits:
+        \(existing.joined(separator: "; "))
+        If their words name a kind of spending the list has no real home for (tax preparation, childcare, a pet, \
+        tuition, a hobby, a housekeeper), make a new category instead: 1 to 3 plain words in title case, the kind of \
+        heading a person would choose ("Tax Preparation", "Childcare"). Do not put something in "Other" or "Fees & \
+        Interest" just because nothing fits. Money moved into savings or investments is "Investing & Capital Calls"; \
+        money moved between their own accounts is "Payments & Transfers". "Income Taxes" is only for payments to \
+        the government, not for an accountant's fee.
+        new_category: true only if you made a new one.
+        symbol: for a new category, the best fit from this list: \(CustomCategory.symbols.joined(separator: ", ")). Otherwise null.
+        name: a tidy name for the payee that includes what the person told you, under 40 characters \
+        ("Dana Whitfield, Tax Preparer"; "Maria, Housekeeper").
+
+        Reply with JSON only: {"name": "…", "category": "…", "new_category": false, "symbol": null}
+        """
+        let user = "Statement text: \(Redactor.scrub(statementText))\nCurrently called: \(currentName)\nTypical amount: \(Money.format(abs(amount)))\nThe person says: \(said)"
+        let reply = await Timeout.run(30) {
+            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 2_000, timeout: 25)
+        }
+        guard let reply, let o = CloudAI.object(from: reply), let category = (o["category"] as? String)?.trimmingCharacters(in: .whitespaces),
+              !category.isEmpty else { return nil }
+        let name = ((o["name"] as? String) ?? currentName).trimmingCharacters(in: .whitespaces)
+        let isNew = !existing.contains(category)
+        return Verdict(name: name.isEmpty ? currentName : String(name.prefix(48)), category: category, isNew: isNew, symbol: o["symbol"] as? String)
+    }
+}
+
 // MARK: - Noticing trips and events
 
 /// Nothing in a statement says "trip". But a flight, then a week of charges in another country,

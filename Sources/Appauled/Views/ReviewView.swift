@@ -83,9 +83,24 @@ struct ReviewView: View {
 private struct ReviewRow: View {
     @Environment(BudgetStore.self) private var store
     let item: ReviewItem
+    @State private var said = ""
+    @State private var failed = false
+    @FocusState private var typing: Bool
+
+    private func submit() {
+        let text = said
+        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        failed = false
+        Task {
+            // When it works, this row leaves the list by itself.
+            if await store.explain(item.key, said: text) == false { failed = true }
+        }
+    }
 
     var body: some View {
+        let busy = store.explaining.contains(item.key)
         Card(padding: 14) {
+          VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
                 MerchantIcon(name: item.info.name, category: item.info.category ?? .unsorted, size: 42)
                 VStack(alignment: .leading, spacing: 3) {
@@ -111,6 +126,30 @@ private struct ReviewRow: View {
                 .disabled(item.info.category == nil)
                 .help("Looks right")
             }
+            // The fast way: say what it was, in your own words. No menu, no new-category sheet.
+            HStack(spacing: 8) {
+                Image(systemName: "text.bubble").foregroundStyle(.secondary)
+                TextField("Or just tell me what this was: “my accountant, for tax prep”", text: $said)
+                    .textFieldStyle(.plain)
+                    .focused($typing)
+                    .onSubmit(submit)
+                    .disabled(busy)
+                if busy {
+                    ProgressView().controlSize(.small)
+                } else if !said.isEmpty {
+                    Button("File It", action: submit).buttonStyle(.bordered).controlSize(.small)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(0.04), in: .rect(cornerRadius: 9, style: .continuous))
+            if failed {
+                Text(CloudAI.isEnabled ? "I couldn't work that out. I saved your note; choose a category from the menu above."
+                                       : "I saved your note. Without Smarter AI, choose the category from the menu above.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+          }
         }
     }
 }
