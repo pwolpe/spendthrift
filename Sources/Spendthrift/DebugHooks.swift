@@ -181,6 +181,9 @@ enum DebugHooks {
             await snap("30-masthead", outDir, width: 230) { Masthead().padding(16) }
             await snap("35-story", outDir, width: 700) { StoryView(scrolls: false) }
             await snap("36-statements", outDir) { StatementsView(scrolls: false) }
+            store.placeSearch = env["SPENDTHRIFT_FIND"] ?? "pastis"
+            await snap("38-places", outDir, width: 900) { PlacesView(scrolls: false) }
+            store.placeSearch = ""
             await store.notePeriodsIfNeeded()
             await snap("37-tieout", outDir, width: 944) { CardCoverageCard(coverage: store.cardCoverage).padding(20) }
             let q = "Where did most of my money go in October?"

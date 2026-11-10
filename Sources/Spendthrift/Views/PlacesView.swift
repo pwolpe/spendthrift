@@ -1,0 +1,186 @@
+import SwiftUI
+
+/// Every place money went, with a box to find one by name: "barrys", "pastis".
+/// Click a place for everything ever spent there.
+struct PlacesView: View {
+    @Environment(BudgetStore.self) private var store
+    @FocusState private var searching: Bool
+    /// False when rendered for a test snapshot.
+    var scrolls = true
+
+    enum Span: String, CaseIterable, Identifiable {
+        case all = "All Time", year = "This Year", last12 = "Last 12 Months"
+        var id: String { rawValue }
+    }
+
+    struct Place: Identifiable {
+        var id: String { name }
+        let name: String
+        let category: Category
+        var total = 0.0
+        var visits = 0
+        var last = Date.distantPast
+        var first = Date.distantFuture
+        /// The name and every way statements spell it, squeezed to letters and digits for matching.
+        var haystack = ""
+    }
+
+    /// Letters and digits only, so "barrys" finds "Barry's" and "wholefoods" finds "Whole Foods".
+    static func squeeze(_ text: String) -> String {
+        String(text.lowercased().folding(options: .diacriticInsensitive, locale: nil).filter { $0.isLetter || $0.isNumber })
+    }
+
+    private func places() -> [Place] {
+        let latest = store.months.last ?? Month(date: .now)
+        let from: Month? = switch store.placeSpan {
+        case .all: nil
+        case .year: Month(year: latest.year, month: 1)
+        case .last12: latest.adding(-11)
+        }
+        var byName: [String: Place] = [:]
+        var spellings: [String: Set<String>] = [:]
+        for t in store.transactions where !t.isTransfer {
+            if let from, t.month < from { continue }
+            var place = byName[t.merchant] ?? Place(name: t.merchant, category: t.category)
+            place.total += t.amount
+            place.visits += 1
+            place.last = max(place.last, t.date)
+            place.first = min(place.first, t.date)
+            byName[t.merchant] = place
+            spellings[t.merchant, default: []].insert(t.description)
+        }
+        let query = Self.squeeze(store.placeSearch)
+        var list = byName.values.map { place -> Place in
+            var p = place
+            p.haystack = Self.squeeze(place.name) + " " + (spellings[place.name] ?? []).map(Self.squeeze).joined(separator: " ")
+            return p
+        }
+        if !query.isEmpty { list = list.filter { $0.haystack.contains(query) } }
+        // A name that starts with what was typed comes first; then the most money.
+        return list.sorted { a, b in
+            if !query.isEmpty {
+                let (pa, pb) = (Self.squeeze(a.name).hasPrefix(query), Self.squeeze(b.name).hasPrefix(query))
+                if pa != pb { return pa }
+            }
+            return abs(a.total) > abs(b.total)
+        }
+    }
+
+    var body: some View {
+        @Bindable var store = store
+        let list = places()
+        let finding = !store.placeSearch.trimmingCharacters(in: .whitespaces).isEmpty
+        MaybeScroll(scrolls: scrolls) {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Places").font(.system(size: 30, weight: .bold, design: .serif))
+                    Text("Everywhere your money went. Type a name to see what you spent there.")
+                        .font(.title3).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 12) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Find a place: Pastis, Barry's, Amazon…", text: $store.placeSearch)
+                            .textFieldStyle(.plain)
+                            .font(.title3)
+                            .focused($searching)
+                            .onSubmit { if let first = list.first { store.showPlace(first.name) } }
+                        if finding {
+                            Button { store.placeSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
+                                .buttonStyle(.plain).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Theme.sheet, in: .rect(cornerRadius: 12, style: .continuous))
+                    .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(searching ? Theme.accent.opacity(0.55) : Theme.hairline) }
+                    Picker("When", selection: $store.placeSpan) {
+                        ForEach(Span.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+
+                if list.isEmpty {
+                    TonySays(title: "No place by that name",
+                             message: "Nothing matches “\(store.placeSearch)”\(store.placeSpan == .all ? "" : " in \(store.placeSpan.rawValue.lowercased())"). Try part of the name, or how it's spelled on your statement.",
+                             art: "nothing")
+                } else {
+                    // What was asked for, added up: the answer before the list.
+                    if finding {
+                        let spent = list.reduce(0) { $0 + $1.total }, visits = list.reduce(0) { $0 + $1.visits }
+                        ReceiptPaper(padding: 16) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("“\(store.placeSearch.trimmingCharacters(in: .whitespaces))” · \(store.placeSpan.rawValue)".uppercased())
+                                    .font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
+                                ReceiptRule()
+                                ForEach(list.prefix(6)) { p in
+                                    ReceiptLine(value: Money.format(abs(p.total))) { Text(p.name).lineLimit(1) }
+                                }
+                                if list.count > 6 { Text("and \(list.count - 6) more below").font(.caption).foregroundStyle(.tertiary) }
+                                ReceiptRule()
+                                ReceiptLine(value: Money.format(abs(spent)), bold: true) {
+                                    Text("TOTAL · \(visits) \(visits == 1 ? "CHARGE" : "CHARGES")").font(Theme.mono(13, .bold))
+                                }
+                            }
+                        }
+                        .frame(maxWidth: 520)
+                    }
+                    Card(padding: 8) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(list.prefix(finding ? 200 : 300).enumerated()), id: \.element.id) { index, p in
+                                if index > 0 { Divider().padding(.leading, 56) }
+                                PlaceRow(place: p) { store.showPlace(p.name) }
+                            }
+                        }
+                    }
+                    if list.count > 300, !finding {
+                        Text("Showing the 300 biggest of \(list.count) places. Type a name to find any of the rest.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: 900, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .navigationTitle("Places")
+        .navigationSubtitle(list.count == 1 ? "1 place" : "\(list.count) places")
+        .onAppear { searching = true }
+    }
+}
+
+private struct PlaceRow: View {
+    let place: PlacesView.Place
+    let open: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 12) {
+                MerchantIcon(name: place.name, category: place.category, size: 36)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(place.name).font(.body.weight(.medium)).lineLimit(1)
+                    Text("\(place.category.displayName) · \(place.visits == 1 ? "once" : "\(place.visits) times") · \(when)")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 12)
+                Text(Money.format(abs(place.total)))
+                    .font(Theme.mono(14, .semibold))
+                    .foregroundStyle(place.total < 0 ? Theme.good : .primary)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(hovering ? Theme.accent : Color.secondary.opacity(0.4))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(hovering ? Theme.accent.opacity(0.06) : .clear, in: .rect(cornerRadius: 9, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+
+    private var when: String {
+        let f = Date.FormatStyle.dateTime.month(.abbreviated).year()
+        let (a, b) = (place.first.formatted(f), place.last.formatted(f))
+        return a == b ? "last in \(b)" : "\(a) to \(b)"
+    }
+}

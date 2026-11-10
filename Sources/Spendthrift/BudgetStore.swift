@@ -30,6 +30,9 @@ final class BudgetStore {
     var chargesFocus: TransactionFilter?
     /// Non-nil while one place's page is open over whatever page was showing.
     var placeFocus: String?
+    /// What is typed in the box on the Places page, and the stretch of time it looks at (kept while a place is open).
+    var placeSearch = ""
+    var placeSpan = PlacesView.Span.all
     /// True while the story of how the app came to be is open.
     var showsStory = false
     /// Non-nil while a charge's original statement is open over the window.

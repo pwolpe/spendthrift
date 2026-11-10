@@ -35,6 +35,7 @@ struct SpendthriftApp: App {
                 Button("Cash Flow") { BudgetStore.shared.selection = .cashflow }.keyboardShortcut("2")
                 Button("Trips & Events") { BudgetStore.shared.selection = .stories }.keyboardShortcut("3")
                 Button("Transactions") { BudgetStore.shared.selection = .transactions }.keyboardShortcut("4")
+                Button("Find a Place…") { BudgetStore.shared.selection = .places }.keyboardShortcut("f")
                 Divider()
                 Button("Ask a Question") { BudgetStore.shared.showsAsk.toggle() }.keyboardShortcut("k")
                 Divider()
