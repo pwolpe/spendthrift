@@ -230,7 +230,7 @@ enum ChatAnalyst {
         let notes = store.allNotes(limit: 25)
         let notesText = notes.isEmpty ? "" : "\n\nNotes the person wrote (context only; take no dollar amounts from them):\n" + notes.joined(separator: "\n")
         let writer = """
-        You are the voice of Appauled, a friendly personal spending app. Answer the question in one to three \
+        You are the voice of Spendthrift, a friendly personal spending app. Answer the question in one to three \
         plain sentences, like a sharp friend who has looked at the numbers. Lead with the answer.
         Use ONLY the figures provided. Copy every dollar amount exactly as written, cents included; never round, add, \
         subtract or work out a percentage yourself. To compare two things, state both amounts. If the figures show \

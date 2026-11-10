@@ -361,14 +361,14 @@ enum PlaceLinker {
 
     static func url(for name: String) -> URL? {
         var parts = URLComponents()
-        parts.scheme = "appauled-place"
+        parts.scheme = "spendthrift-place"
         parts.host = "open"
         parts.queryItems = [URLQueryItem(name: "name", value: name)]
         return parts.url
     }
 
     static func name(from url: URL) -> String? {
-        guard url.scheme == "appauled-place" else { return nil }
+        guard url.scheme == "spendthrift-place" else { return nil }
         return URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "name" }?.value
     }
 

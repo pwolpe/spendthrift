@@ -1,4 +1,4 @@
-# Appauled
+# Spendthrift
 
 A Mac app made for Tony, honoring excellence in spending. Tony drops in statements from any bank or
 card and sees where his money goes. No terminal, no Finder, no accounts to link.
@@ -35,7 +35,7 @@ Image Playground) and has no dependencies.
 
 ## Smarter AI (optional, recommended)
 
-**Appauled → Settings…** takes an OpenRouter key (stored in a private file only his account can read, never in the
+**Spendthrift → Settings…** takes an OpenRouter key (stored in a private file only his account can read, never in the
 app, its data, or this repository). Make Tony his own key at openrouter.ai with a spending limit.
 With a key:
 
@@ -100,6 +100,27 @@ credit, or there's no internet, everything falls back to the on-device paths.
   about custom categories and sorts new places into them.
 - **Accounts**: rename, remove, or fix an account whose amounts came in backwards.
 
+### Statements, and "Show in Statement"
+
+Every statement added is kept as it came. **Statements** in the sidebar lists them by account, and
+opens any of them: PDFs as they are, CSV and Excel files as a table, Quicken files as their list of
+transactions. From any charge (right-click → **Show in Statement**, the button in the details pane,
+the small magnifier at the end of a row, or the Space bar in Transactions) the original opens at the
+line the charge was read from, with the line washed yellow and the amount marked. Nothing about
+position is stored at import: `SourceLocator` finds the amount afresh and checks the date and
+merchant beside it, so it works for statements read by pattern and by the model alike.
+
+A library from before originals were kept: drop the statements in again. They are re-read without
+the model, nothing is added twice, and each charge is pointed at its file.
+
+### The banner picture
+
+A cartoon of Tony, Paul or both (a third of the time each) in a daydream about a real recent
+purchase, one of them holding the receipt: the place, what it sells and the real total. Each drawing
+is checked by a second model that reads the receipt back; a picture whose receipt is wrong or hard
+to read is redrawn (up to three tries). Pictures are drawn and kept on that person's Mac only. The
+starter pictures that ship with the app have no receipts.
+
 ## The look
 
 Japanese in sensibility: paper and ink (an unbleached-paper background by day, sumi by night), cards
@@ -114,7 +135,7 @@ space left empty on purpose. It is all in `Theme` (Components.swift) and the cat
 - European exports (semicolons, 31.12.2026, 1.234,56) are understood.
 - If the model can't be used (bad key, no credit, no connection), the import still finishes with
   what the app can do by itself, and a banner says what happened and that nothing was lost.
-- `APPAULED_FAIL_CLOUD=credit|key|offline` simulates that; `APPAULED_WIDTH` and `APPAULED_DARK`
+- `SPENDTHRIFT_FAIL_CLOUD=credit|key|offline` simulates that; `SPENDTHRIFT_WIDTH` and `SPENDTHRIFT_DARK`
   render the test pictures at a given width and in Dark Mode.
 
 ## Build (on your Mac)
@@ -125,15 +146,15 @@ Requires Command Line Tools or Xcode for macOS 26, on an Apple Silicon Mac.
 scripts/build.sh
 ```
 
-Output: `build/Appauled.app` and `build/Appauled.zip`. The build briefly opens a small
+Output: `build/Spendthrift.app` and `build/Spendthrift.zip`. The build briefly opens a small
 window to draw the icon (Tony in a gold medallion on stage).
 
 ## Sending it to Tony, and sending updates
 
 **First time**
 
-1. Run `scripts/build.sh` and AirDrop `build/Appauled.zip` to Tony (or share it by iCloud/Messages).
-2. He double-clicks the zip, drags **Appauled** into **Applications**, then onto the **Dock**.
+1. Run `scripts/build.sh` and AirDrop `build/Spendthrift.zip` to Tony (or share it by iCloud/Messages).
+2. He double-clicks the zip, drags **Spendthrift** into **Applications**, then onto the **Dock**.
 3. The app isn't notarized, so the first launch is blocked: double-click it once, click **Done**, then
    **System Settings → Privacy & Security → Open Anyway**.
 4. When asked, **Allow** access to the Downloads folder (so new statements are offered automatically).
@@ -154,7 +175,7 @@ import of about 130 statements costs roughly $3 on the key.
 
 That builds, signs and publishes the zip to the public repository
 [pwolpe/appauled-releases](https://github.com/pwolpe/appauled-releases). Tony's app checks it
-once a day (or from **Appauled → Check for Updates…**), shows a "Version 1.1 is ready" button,
+once a day (or from **Spendthrift → Check for Updates…**), shows a "Version 1.1 is ready" button,
 and on one click downloads it, checks the signature, replaces itself and reopens. The check sends
 nothing about Tony; it only asks GitHub for the latest version number.
 
@@ -184,11 +205,14 @@ notarizing the app; `notarytool` and `stapler` are already in the Command Line T
 
 ## Where the data lives
 
-`~/Library/Application Support/Appauled/`
+`~/Library/Application Support/Spendthrift/`
 
 - `library.json`: accounts, every statement line, and what the app has learned about each place
 - `Backups/`: one copy per day, two weeks' worth (**Help → Save a Backup to the Desktop** makes one on demand)
 - `Pictures/`: the last thirty banner pictures and `gallery.json`, which says what each is about
+- `Statements/`: every statement exactly as it was added, so any charge can be shown in its original
+
+Data kept under the app's earlier name (`Appauled`) is moved here the first time Spendthrift opens.
 
 To back up or move Tony to a new Mac, copy that folder.
 
@@ -208,14 +232,14 @@ To back up or move Tony to a new Mac, copy that folder.
 A self-driving test mode, enabled only through environment variables:
 
 ```sh
-open -W -n "build/Appauled.app" --stdout run.log \
-  --env APPAULED_HOME=/tmp/tony-test \
-  --env APPAULED_SNAPSHOT=/tmp/tony-test/snaps \
-  --env "APPAULED_IMPORT=a.csv:b.pdf:c.qfx"
+open -W -n "build/Spendthrift.app" --stdout run.log \
+  --env SPENDTHRIFT_HOME=/tmp/tony-test \
+  --env SPENDTHRIFT_SNAPSHOT=/tmp/tony-test/snaps \
+  --env "SPENDTHRIFT_IMPORT=a.csv:b.pdf:c.qfx"
 ```
 
 It imports the files, logs how every place was sorted, the awards, notes and sample Ask answers,
-and saves pictures of the main screens. Add `--env APPAULED_SELFTEST=1` to exercise category
-changes, re-import, undo-style removal and saving (prints PASS/FAIL lines). `APPAULED_HOME`
+and saves pictures of the main screens. Add `--env SPENDTHRIFT_SELFTEST=1` to exercise category
+changes, re-import, undo-style removal and saving (prints PASS/FAIL lines). `SPENDTHRIFT_HOME`
 alone runs the app against a scratch folder. To preview how a statement will be read:
-`"build/Appauled.app/Contents/MacOS/Appauled" --inspect file.pdf`
+`"build/Spendthrift.app/Contents/MacOS/Spendthrift" --inspect file.pdf`

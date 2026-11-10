@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Appauled → Settings…  One pane: the optional cloud AI key.
+/// Spendthrift → Settings…  One pane: the optional cloud AI key.
 struct SettingsView: View {
     @Environment(BudgetStore.self) private var store
     @State private var status = CloudStatus.shared

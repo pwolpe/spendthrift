@@ -1,22 +1,23 @@
 import SwiftUI
 import AppKit
+import PDFKit
 
-/// Test automation, active only when APPAULED_SNAPSHOT is set (never for Tony).
-///   APPAULED_HOME=<dir>      use a scratch data folder
-///   APPAULED_IMPORT=a:b:c    files to import
-///   APPAULED_SNAPSHOT=<dir>  save a PNG of each screen there, log results, then quit
-///   APPAULED_ASK=<question>  question to ask on the Ask screen
-///   APPAULED_SUGGEST_ONLY=1  log how every place was sorted, then quit
+/// Test automation, active only when SPENDTHRIFT_SNAPSHOT is set (never for Tony).
+///   SPENDTHRIFT_HOME=<dir>      use a scratch data folder
+///   SPENDTHRIFT_IMPORT=a:b:c    files to import
+///   SPENDTHRIFT_SNAPSHOT=<dir>  save a PNG of each screen there, log results, then quit
+///   SPENDTHRIFT_ASK=<question>  question to ask on the Ask screen
+///   SPENDTHRIFT_SUGGEST_ONLY=1  log how every place was sorted, then quit
 @MainActor
 enum DebugHooks {
     static let env = ProcessInfo.processInfo.environment
-    static var askQuestion: String? { env["APPAULED_ASK"] }
+    static var askQuestion: String? { env["SPENDTHRIFT_ASK"] }
     private static var storiesWaited = false
-    /// APPAULED_OFF="donut,trend": leave parts of the Overview out, to track down a drawing problem.
-    private static let offParts = Set((env["APPAULED_OFF"] ?? "").split(separator: ",").map(String.init))
+    /// SPENDTHRIFT_OFF="donut,trend": leave parts of the Overview out, to track down a drawing problem.
+    private static let offParts = Set((env["SPENDTHRIFT_OFF"] ?? "").split(separator: ",").map(String.init))
     static func off(_ part: String) -> Bool { offParts.contains(part) }
 
-    /// APPAULED_WINDOW=<folder>: photograph the real window in each of its states (the live
+    /// SPENDTHRIFT_WINDOW=<folder>: photograph the real window in each of its states (the live
     /// controls, sidebar and panes, which a rendered view can't show), then quit.
     private static func windowTour(_ folder: URL) async {
         let store = BudgetStore.shared
@@ -68,7 +69,7 @@ enum DebugHooks {
         await shot("10-doublecheck")
         store.selection = .accounts
         await shot("11-setup")
-        if env["APPAULED_WINDOW_SHOW"] != nil {
+        if env["SPENDTHRIFT_WINDOW_SHOW"] != nil {
             store.stage = .premiere
             await shot("12-premiere", wait: 2.0)
             store.stage = .working
@@ -78,10 +79,10 @@ enum DebugHooks {
     }
 
     static func startIfRequested() {
-        if let folder = env["APPAULED_WINDOW"] { Task { await windowTour(URL(fileURLWithPath: folder)) }; return }
-        guard let outDir = env["APPAULED_SNAPSHOT"] else { return }
-        // APPAULED_ENRICH=1: only do the catch-up work (web lookups, things noticed), print it and quit.
-        if env["APPAULED_ENRICH"] != nil {
+        if let folder = env["SPENDTHRIFT_WINDOW"] { Task { await windowTour(URL(fileURLWithPath: folder)) }; return }
+        guard let outDir = env["SPENDTHRIFT_SNAPSHOT"] else { return }
+        // SPENDTHRIFT_ENRICH=1: only do the catch-up work (web lookups, things noticed), print it and quit.
+        if env["SPENDTHRIFT_ENRICH"] != nil {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1))
                 let store = BudgetStore.shared
@@ -116,7 +117,7 @@ enum DebugHooks {
         try? await Task.sleep(for: .seconds(2))
         if store.accounts.isEmpty { await snap("01-welcome", outDir) { WelcomeView(isDropTargeted: false, scrolls: false) } }
 
-        let files = (env["APPAULED_IMPORT"] ?? "").split(separator: ":").map { URL(fileURLWithPath: String($0)) }
+        let files = (env["SPENDTHRIFT_IMPORT"] ?? "").split(separator: ":").map { URL(fileURLWithPath: String($0)) }
         let started = Date.now
         if !files.isEmpty {
             store.importFiles(files)
@@ -143,9 +144,20 @@ enum DebugHooks {
             let t = txns[0]
             print("DEBUG SUGGEST \(t.description) → \(t.merchant) | \(t.category.rawValue) | \(t.source.rawValue)\(t.needsCheck ? " ?" : "") [\(key)] x\(txns.count)")
         }
-        if env["APPAULED_SUGGEST_ONLY"] != nil { NSApp.terminate(nil); return }
-        // APPAULED_CHAT="first question|a follow-up|another": a conversation with Ask the Academy.
-        if let chat = env["APPAULED_CHAT"] {
+        // SPENDTHRIFT_PICTURES=tony,paul,both: draw one banner picture for each, then quit.
+        if let casts = env["SPENDTHRIFT_PICTURES"] {
+            for who in casts.split(separator: ",").map(String.init) {
+                DailyPicture.shared.allowAnother()
+                DailyPicture.shared.forcedCast = who
+                print("DEBUG PICTURE asking for \(who): cloud \(CloudAI.isEnabled), highlights \(store.recentHighlights().count), busy \(DailyPicture.shared.isGenerating), photo \(DailyPicture.shared.headshot != nil)")
+                await DailyPicture.shared.prepareNext(highlights: store.recentHighlights())
+            }
+            NSApp.terminate(nil); return
+        }
+        if let out = env["SPENDTHRIFT_LOCATE"] { locateEverything(URL(fileURLWithPath: out)); NSApp.terminate(nil); return }
+        if env["SPENDTHRIFT_SUGGEST_ONLY"] != nil { NSApp.terminate(nil); return }
+        // SPENDTHRIFT_CHAT="first question|a follow-up|another": a conversation with Ask the Academy.
+        if let chat = env["SPENDTHRIFT_CHAT"] {
             var turns: [ChatAnalyst.Turn] = []
             for q in chat.split(separator: "|").map(String.init) {
                 let started = Date.now
@@ -157,7 +169,7 @@ enum DebugHooks {
             }
             NSApp.terminate(nil); return
         }
-        if env["APPAULED_SELFTEST"] != nil { await selfTest(files: files); NSApp.terminate(nil); return }
+        if env["SPENDTHRIFT_SELFTEST"] != nil { await selfTest(files: files); NSApp.terminate(nil); return }
 
         await snap("03-review", outDir) { ReviewView(scrolls: false) }
         let confirmedForThePicture = store.reviewItems.map(\.key)
@@ -188,8 +200,8 @@ enum DebugHooks {
         }
         await snap("06-stories", outDir) { StoriesView(scrolls: false) }
         await snap("11-coverage", outDir) { CoverageCard().padding(28).frame(width: 1000) }
-        // APPAULED_FORECAST=1 (optionally "Place|note" first): print the estimate for next month.
-        if let spec = ProcessInfo.processInfo.environment["APPAULED_FORECAST"], let next = store.months.last?.adding(1) {
+        // SPENDTHRIFT_FORECAST=1 (optionally "Place|note" first): print the estimate for next month.
+        if let spec = ProcessInfo.processInfo.environment["SPENDTHRIFT_FORECAST"], let next = store.months.last?.adding(1) {
             let parts = spec.split(separator: "|", maxSplits: 1).map(String.init)
             if parts.count == 2 { store.setNote(parts[1], forPlace: store.transactions.first { $0.merchant.localizedCaseInsensitiveContains(parts[0]) }?.merchant ?? parts[0]) }
             let history = store.months.suffix(12).map { m -> String in
@@ -236,12 +248,72 @@ enum DebugHooks {
         NSApp.terminate(nil)
     }
 
+    /// SPENDTHRIFT_LOCATE=<folder>: look every charge up in its original, count how many are pinpointed,
+    /// and save pictures of a few pages with the line marked.
+    private static func locateEverything(_ folder: URL) {
+        let store = BudgetStore.shared
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var docs: [String: PDFDocument] = [:], sheets: [String: SourceLocator.Sheet] = [:]
+        var tally: [String: (sure: Int, close: Int, none: Int, unlinked: Int)] = [:]
+        var pictures: [String: Int] = [:]
+        let started = Date.now
+        for t in store.transactions {
+            guard let entry = store.entry(t.id) else { continue }
+            var row = tally[t.account] ?? (0, 0, 0, 0)
+            defer { tally[t.account] = row }
+            let candidates = store.sourceCandidates(for: entry)
+            if entry.sourceID == nil { row.unlinked += 1 }
+            guard let source = OriginalChooser.best(for: entry, among: candidates, store: store) else { row.none += 1; continue }
+            let target = SourceLocator.Target(entry)
+            if source.isPDF {
+                if docs[source.id] == nil { docs[source.id] = PDFDocument(url: store.sourceURL(source)) }
+                guard let doc = docs[source.id], let hit = SourceLocator.locate(target, in: doc) else {
+                    row.none += 1; print("LOCATE none | \(t.account) | \(entry.date) \(entry.description) \(entry.amount) | \(source.name)"); continue
+                }
+                if hit.isSure { row.sure += 1 } else { row.close += 1; print("LOCATE close \(String(format: "%.1f", hit.score)) | \(t.account) | \(entry.date) \(entry.description) \(entry.amount) | \(source.name) p\(hit.pageIndex + 1)") }
+                let kind = t.account + (hit.isSure ? "" : "-close")
+                if pictures[kind, default: 0] < 2, let page = doc.page(at: hit.pageIndex) {
+                    pictures[kind, default: 0] += 1
+                    let box = page.bounds(for: .mediaBox), scale: CGFloat = 1.6
+                    let image = NSImage(size: NSSize(width: box.width * scale, height: box.height * scale), flipped: false) { _ in
+                        guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+                        ctx.setFillColor(.white); ctx.fill(CGRect(x: 0, y: 0, width: box.width * scale, height: box.height * scale))
+                        ctx.scaleBy(x: scale, y: scale)
+                        page.draw(with: .mediaBox, to: ctx)
+                        ctx.setFillColor(NSColor.systemYellow.withAlphaComponent(0.3).cgColor)
+                        if let r = hit.row?.bounds(for: page) { ctx.fill(CGRect(x: 0, y: r.minY, width: box.width, height: r.height)) }
+                        ctx.setStrokeColor(NSColor.systemRed.cgColor); ctx.setLineWidth(1.5)
+                        ctx.stroke(hit.amount.bounds(for: page).insetBy(dx: -3, dy: -2))
+                        return true
+                    }
+                    let name = "\(kind.filter { $0.isLetter || $0.isNumber || $0 == "-" })-\(pictures[kind]!).png"
+                    try? IconRenderer.png(image)?.write(to: folder.appendingPathComponent(name))
+                    print("LOCATE PICTURE \(name): \(entry.date) \(entry.description) \(entry.amount)")
+                }
+            } else if !source.isPicture {
+                if sheets[source.id] == nil { sheets[source.id] = SourceLocator.sheet(at: store.sourceURL(source), ext: source.ext) }
+                guard let sheet = sheets[source.id], let hit = SourceLocator.locate(target, in: sheet) else {
+                    row.none += 1; print("LOCATE none | \(t.account) | \(entry.date) \(entry.description) \(entry.amount) | \(source.name)"); continue
+                }
+                if hit.isSure { row.sure += 1 } else { row.close += 1; print("LOCATE close | \(t.account) | \(entry.date) \(entry.description) \(entry.amount) | row \(hit.row + 1): \(sheet.rows[hit.row])") }
+                if pictures["table", default: 0] < 1 {
+                    pictures["table", default: 0] += 1
+                    print("LOCATE TABLE \(source.name) row \(hit.row + 1) col \(hit.column ?? -1): \(sheet.header) / \(sheet.rows[hit.row])")
+                }
+            } else { row.none += 1 }
+        }
+        for (account, r) in tally.sorted(by: { $0.key < $1.key }) {
+            print("LOCATE TALLY \(account): pinpointed \(r.sure), closest \(r.close), not found \(r.none) (not linked at import: \(r.unlinked))")
+        }
+        print("LOCATE DONE \(store.transactions.count) charges, \(store.sourceFiles.count) originals, \(String(format: "%.1f", Date.now.timeIntervalSince(started)))s")
+    }
+
     /// Exercises the things Tony does by clicking: changing categories, undoing an import, re-importing.
     private static func selfTest(files: [URL]) async {
         let store = BudgetStore.shared
         func check(_ name: String, _ ok: Bool) { print("SELFTEST \(ok ? "PASS" : "FAIL") \(name)") }
-        // APPAULED_EXPLAIN="Whitfield|my accountant, for tax prep": say what a place was and print what happened.
-        if let spec = ProcessInfo.processInfo.environment["APPAULED_EXPLAIN"]?.split(separator: "|", maxSplits: 1).map(String.init), spec.count == 2,
+        // SPENDTHRIFT_EXPLAIN="Whitfield|my accountant, for tax prep": say what a place was and print what happened.
+        if let spec = ProcessInfo.processInfo.environment["SPENDTHRIFT_EXPLAIN"]?.split(separator: "|", maxSplits: 1).map(String.init), spec.count == 2,
            let t = store.transactions.first(where: { $0.merchant.localizedCaseInsensitiveContains(spec[0]) }) {
             let before = "\(t.merchant) | \(t.category.displayName)"
             let ok = await store.explain(t.merchantKey, said: spec[1])
@@ -323,10 +395,10 @@ enum DebugHooks {
     /// Renders a screen's content to a PNG. (ImageRenderer can't draw scroll views, tables or
     /// AppKit-backed controls such as menus and text fields; those show as blank or yellow boxes.)
     private static func snap(_ name: String, _ dir: URL, @ViewBuilder _ view: () -> some View) async {
-        // APPAULED_WIDTH: the width a page really gets (about 870 beside the question pane).
-        // APPAULED_DARK: the same pages in Dark Mode.
-        let width = env["APPAULED_WIDTH"].flatMap(Double.init).map { CGFloat($0) } ?? 1000
-        let dark = env["APPAULED_DARK"] != nil
+        // SPENDTHRIFT_WIDTH: the width a page really gets (about 870 beside the question pane).
+        // SPENDTHRIFT_DARK: the same pages in Dark Mode.
+        let width = env["SPENDTHRIFT_WIDTH"].flatMap(Double.init).map { CGFloat($0) } ?? 1000
+        let dark = env["SPENDTHRIFT_DARK"] != nil
         let content = view()
             .environment(BudgetStore.shared)
             .tint(Theme.accent)

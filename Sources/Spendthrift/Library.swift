@@ -5,17 +5,34 @@ struct BudgetPaths {
     let root: URL
 
     init() {
-        if let override = ProcessInfo.processInfo.environment["APPAULED_HOME"] {
+        if let override = ProcessInfo.processInfo.environment["SPENDTHRIFT_HOME"] {
             root = URL(fileURLWithPath: override, isDirectory: true)   // for testing with sample data
         } else {
-            let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            root = support.appendingPathComponent("Appauled", isDirectory: true)
+            root = Self.realRoot
         }
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
+    /// The real data folder. The first time it is asked for, data kept under the app's earlier
+    /// name is brought along (unless there is already something under the new one).
+    static let realRoot: URL = {
+        let fm = FileManager.default
+        let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let root = support.appendingPathComponent("Spendthrift", isDirectory: true)
+        let earlier = support.appendingPathComponent("Appauled", isDirectory: true)
+        if fm.fileExists(atPath: earlier.path), ((try? fm.contentsOfDirectory(atPath: root.path)) ?? []).filter({ !$0.hasPrefix(".") }).isEmpty {
+            try? fm.removeItem(at: root)
+            try? fm.moveItem(at: earlier, to: root)
+        }
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }()
+
     var libraryFile: URL { root.appendingPathComponent("library.json") }
     var backupFolder: URL { root.appendingPathComponent("Backups", isDirectory: true) }
+    /// Every statement exactly as it was added, so a charge can be shown in its original.
+    var statementsFolder: URL { root.appendingPathComponent("Statements", isDirectory: true) }
+    func statementFile(_ source: SourceFile) -> URL { statementsFolder.appendingPathComponent("\(source.id).\(source.ext)") }
 
     /// Daily backups, newest first.
     func backups() -> [URL] {
@@ -52,6 +69,8 @@ struct Library: Codable {
     var discoveries: [Discovery]?
     var discoveriesBasis: String?
     var dismissedDiscoveries: Set<String>?
+    /// The original statement files that were kept (see `BudgetPaths.statementsFolder`).
+    var sources: [SourceFile]?
 
     init() {}
 
@@ -72,6 +91,7 @@ struct Library: Codable {
         discoveries = (try? c.decodeIfPresent(Lossy<Discovery>.self, forKey: .discoveries))?.values
         discoveriesBasis = try? c.decodeIfPresent(String.self, forKey: .discoveriesBasis)
         dismissedDiscoveries = try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedDiscoveries)
+        sources = (try? c.decodeIfPresent(Lossy<SourceFile>.self, forKey: .sources))?.values
         // Every line must belong to an account that still exists.
         let known = Set(accounts.map(\.id))
         entries.removeAll { !known.contains($0.accountID) }

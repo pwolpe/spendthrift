@@ -454,7 +454,7 @@ enum CategorySuggester {
                                                category: category, source: .appleIntelligence)
             }
         } catch {
-            if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil { print("DEBUG AI suggest error: \(error)") }
+            if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG AI suggest error: \(error)") }
         }
         return out
     }

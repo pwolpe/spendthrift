@@ -24,6 +24,7 @@ struct ContentView: View {
                         case .cashflow: CashFlowView()
                         case .stories: StoriesView()
                         case .transactions: TransactionsView()
+                        case .statements: StatementsView()
                         case .review: ReviewView()
                         case .categories, .accounts: SetupView()
                         }
@@ -96,6 +97,10 @@ struct ContentView: View {
             CategoryEditorSheet(request: request)
                 .tint(Theme.accent)
         }
+        .sheet(item: Binding(get: { store.originalPeek }, set: { store.originalPeek = $0 })) { peek in
+            OriginalPeekSheet(peek: peek)
+                .tint(Theme.accent)
+        }
         .alert("A heads-up about your data", isPresented: Binding(get: { store.startupNotice != nil }, set: { if !$0 { store.startupNotice = nil } })) {
             Button("OK") { store.startupNotice = nil }
         } message: {
@@ -155,6 +160,9 @@ struct SidebarView: View {
                     .tag(SidebarItem.stories)
                 Label("Transactions", systemImage: "list.bullet.rectangle.portrait.fill")
                     .tag(SidebarItem.transactions)
+                Label("Statements", systemImage: "doc.text.magnifyingglass")
+                    .badge(Text(store.sourceFiles.isEmpty ? "" : "\(store.sourceFiles.count)").foregroundStyle(.tertiary))
+                    .tag(SidebarItem.statements)
             }
             Section("Fine-Tune") {
                 // Only there when there is something to look at.
@@ -175,7 +183,7 @@ struct SidebarView: View {
             HStack(spacing: 10) {
                 CastAvatars(size: 36)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Appauled").font(.system(.headline, design: .serif))
+                    Text("Spendthrift").font(.system(.headline, design: .serif))
                     Text("Excellence in spending").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()

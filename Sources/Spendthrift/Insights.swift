@@ -264,7 +264,7 @@ enum RecapWriter {
             return !text.isEmpty && text.components(separatedBy: digits).filter { $0.count >= 2 }.allSatisfy(allowed.contains)
         }
         if let written = await CloudWriter.line(system: """
-            You host the monthly awards ceremony in Appauled, a playful app that honors a person's monthly spending. Speak to them as \"you\"; never name them or guess their job.
+            You host the monthly awards ceremony in Spendthrift, a playful app that honors a person's monthly spending. Speak to them as \"you\"; never name them or guess their job.
             Write a 2-sentence opening for this month's ceremony using ONLY the facts given. Copy dollar amounts exactly as written.
             Use theater and awards-show language. Be warm, witty and specific, never judgmental. No lists, no quotes, no stage directions.
             """, facts: facts.joined(separator: "\n"), maxTokens: 3_000, temperature: 0.8), numbersAreReal(written) {
@@ -274,7 +274,7 @@ enum RecapWriter {
         guard SystemLanguageModel.default.isAvailable else { return fallback }
 
         let session = LanguageModelSession(instructions: """
-        You host the monthly awards ceremony in Appauled, a playful app that honors a person's monthly spending. Speak to them as \"you\"; never name them or guess their job.
+        You host the monthly awards ceremony in Spendthrift, a playful app that honors a person's monthly spending. Speak to them as \"you\"; never name them or guess their job.
         Write a 2-sentence opening for this month's ceremony using ONLY the facts given. Copy dollar amounts exactly as written.
         Use theater and awards-show language. Be warm and funny, never judgmental. No lists, no quotes, no stage directions.
         """)

@@ -30,6 +30,11 @@ final class BudgetStore {
     var chargesFocus: TransactionFilter?
     /// Non-nil while one place's page is open over whatever page was showing.
     var placeFocus: String?
+    /// Non-nil while a charge's original statement is open over the window.
+    var originalPeek: OriginalPeek?
+    /// Which file the Statements page shows, and the charge to point at in it.
+    var statementFocus: StatementFocus?
+    @ObservationIgnored private var linkedByLastAdd = 0
     /// The question pane on the right, available from every page.
     var showsAsk = false
     /// The show that plays over the window during a big import: the work, then the premiere.
@@ -37,7 +42,7 @@ final class BudgetStore {
     var stage: Stage?
     var transactionFilter = TransactionFilter()
     /// The Overview looks at one month or at a whole year; the same page either way.
-    var overviewShowsYear = ProcessInfo.processInfo.environment["APPAULED_YEAR"] != nil
+    var overviewShowsYear = ProcessInfo.processInfo.environment["SPENDTHRIFT_YEAR"] != nil
     var pendingImports: [PendingImport] = []
     /// Something Tony must be told at launch (e.g. data restored from a backup).
     var startupNotice: String?
@@ -464,7 +469,7 @@ final class BudgetStore {
             waiting.append((item, abs(total)))
         }
         guard !waiting.isEmpty else { return }
-        let cap = ProcessInfo.processInfo.environment["APPAULED_LOOKUP_CAP"].flatMap(Int.init) ?? 40
+        let cap = ProcessInfo.processInfo.environment["SPENDTHRIFT_LOOKUP_CAP"].flatMap(Int.init) ?? 40
         let chosen = waiting.sorted { $0.weight > $1.weight }.prefix(cap).map(\.item)
         isLookingUp = true
         defer { isLookingUp = false }
@@ -474,7 +479,7 @@ final class BudgetStore {
             for await (batch, verdicts) in group {
                 for item in batch { library.merchants[item.key]?.lookedUp = true }
                 for (key, verdict) in verdicts where library.merchants[key]?.confirmed == false {
-                    if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil {
+                    if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
                         print("DEBUG LOOKUP \(library.merchants[key]?.sample ?? "") → \(verdict.name) | \(verdict.category.rawValue) | \(verdict.domain ?? "-")")
                     }
                     library.merchants[key]?.name = verdict.name
@@ -544,7 +549,7 @@ final class BudgetStore {
         }
         library.discoveriesBasis = basis
         withAnimation(.snappy) { changed() }
-        if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil {
+        if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
             for d in discoveries {
                 let list = transactions(in: d)
                 print("DEBUG NOTICED [\(d.kind)] \(d.title) | \(list.count) charges | \(Int(list.reduce(0) { $0 + $1.amount })) | \(d.detail)")
@@ -878,7 +883,7 @@ final class BudgetStore {
 
         /// Banks often hand over a year of statements as one zip. Opens it; nil if it isn't one.
         func unzipped(_ url: URL) -> URL? {
-            let unpacked = fm.temporaryDirectory.appendingPathComponent("AppauledZip-\(UUID().uuidString)", isDirectory: true)
+            let unpacked = fm.temporaryDirectory.appendingPathComponent("SpendthriftZip-\(UUID().uuidString)", isDirectory: true)
             let unzip = Process()
             unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
             unzip.arguments = ["-x", "-k", url.path, unpacked.path]
@@ -920,7 +925,7 @@ final class BudgetStore {
 
     /// Asks for a locked PDF's password. Nothing is stored: it's used once to open the file.
     private func askPassword(for url: URL) -> String? {
-        guard ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] == nil else { return nil }
+        guard ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] == nil else { return nil }
         let alert = NSAlert()
         alert.messageText = "“\(url.lastPathComponent)” is locked"
         alert.informativeText = "Your bank protected this statement with a password. Type it to open the file. It isn't saved anywhere."
@@ -949,11 +954,18 @@ final class BudgetStore {
         var issues: [ImportIssue] = []
         var added = 0, touched: [String] = [], verified = 0, mismatches: [String] = [], scanned = 0
         var batch: (entries: Set<UUID>, accounts: Set<UUID>, hashes: Set<String>) = ([], [], [])
+        var attached = 0
+        // Statements already read, whose originals were never kept: re-read without the model, only to link them.
+        let relink = library.entries.isEmpty ? [] : library.importedHashes.subtracting((library.sources ?? []).map(\.id))
         isImporting = true
-        // A pile of statements (or the very first one) gets the full show; one new statement doesn't.
+        // A pile of statements (or the very first one) gets the full show; one new statement doesn't,
+        // and neither do statements that are only coming back so their originals can be kept.
         let fresh = library.entries.isEmpty
-        if !automatic, ProcessInfo.processInfo.environment["APPAULED_NO_SHOW"] == nil,
-           urls.filter({ StatementReader.extensions.contains($0.pathExtension.lowercased()) }).count >= (fresh ? 1 : 4) {
+        let candidates = urls.filter { StatementReader.extensions.contains($0.pathExtension.lowercased()) }
+        let new = relink.isEmpty ? candidates.count : await Task.detached {
+            candidates.filter { url in (try? Data(contentsOf: url)).map { !relink.contains(Self.hash($0)) } ?? true }.count
+        }.value
+        if !automatic, ProcessInfo.processInfo.environment["SPENDTHRIFT_NO_SHOW"] == nil, new >= (fresh ? 1 : 4) {
             stage = .working
         }
         // Read every file first, several at a time: a statement that needs the cloud model takes
@@ -975,11 +987,28 @@ final class BudgetStore {
                     let data = try Data(contentsOf: url)
                     reading = .success((Self.hash(data), data, try await StatementReader.read(url, data: data, password: password)))
                 }
-                let (hash, _, outcome) = try reading.get()
+                var (hash, data, outcome) = try reading.get()
+                // A statement added before the app kept originals: keep it now and point its charges
+                // at it, adding nothing. (If none of its charges are here any more, it's simply new.)
+                if relink.contains(hash), case .ready(let statement) = outcome {
+                    let (accountID, isNew) = account(for: statement.signature, name: statement.suggestedName)
+                    if !isNew {
+                        _ = add(statement.rows, to: accountID, source: hash, linkOnly: true)
+                        if linkedByLastAdd > 0 {
+                            keep(data, hash: hash, url: url, accountID: accountID, rows: statement.rows, check: statement.check)
+                            attached += 1
+                            return
+                        }
+                    } else {
+                        library.accounts.removeAll { $0.id == accountID }
+                    }
+                    outcome = try await StatementReader.read(url, data: data)
+                }
                 switch outcome {
                 case .ready(let statement):
                     let (accountID, isNew) = account(for: statement.signature, name: statement.suggestedName)
-                    let ids = add(statement.rows, to: accountID)
+                    let ids = add(statement.rows, to: accountID, source: hash)
+                    keep(data, hash: hash, url: url, accountID: accountID, rows: statement.rows, check: statement.check)
                     if !statement.months.isEmpty, let a = library.accounts.firstIndex(where: { $0.id == accountID }) {
                         library.accounts[a].statementMonths = (library.accounts[a].statementMonths ?? []).union(statement.months)
                     }
@@ -1023,8 +1052,12 @@ final class BudgetStore {
                 group.addTask {
                     do {
                         let data = try Data(contentsOf: url)
+                        let hash = Self.hash(data)
+                        if relink.contains(hash), let outcome = try? await CloudAI.$offline.withValue(true, operation: { try await StatementReader.read(url, data: data) }) {
+                            return (index, .success((hash, data, outcome)))
+                        }
                         let outcome = try await StatementReader.read(url, data: data)
-                        return (index, .success((Self.hash(data), data, outcome)))
+                        return (index, .success((hash, data, outcome)))
                     } catch {
                         return (index, .failure(error))
                     }
@@ -1046,7 +1079,7 @@ final class BudgetStore {
             issues.append(ImportIssue(file: dropped[0].lastPathComponent, reason: "There were no statements in that folder."))
         }
         if !issues.isEmpty, !automatic { importIssues = issues }
-        if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil {
+        if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
             print("DEBUG IMPORT files \(urls.count) added \(added) verified \(verified) scanned \(scanned) mismatched \(mismatches) issues \(issues.count)")
         }
         if !touched.isEmpty, added > 0 || !automatic {
@@ -1062,6 +1095,13 @@ final class BudgetStore {
             }
         } else if !touched.isEmpty {
             changed()   // nothing new in them, but remember we've seen these files
+        }
+        if attached > 0 {
+            changed()
+            if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG ATTACHED \(attached) originals; charges without one: \(chargesWithoutOriginal)") }
+            if added == 0, !automatic {
+                showToast("Kept \(attached == 1 ? "the original" : "\(attached) originals"). Any charge can now be shown in its statement.", symbol: "doc.text.magnifyingglass")
+            }
         }
         refreshDownloads()
     }
@@ -1081,7 +1121,8 @@ final class BudgetStore {
             accountID = account.id
             isNew = true
         }
-        let ids = add(rows, to: accountID)
+        let ids = add(rows, to: accountID, source: pending.fileHash)
+        if let data = try? Data(contentsOf: pending.fileURL) { keep(data, hash: pending.fileHash, url: pending.fileURL, accountID: accountID, rows: rows) }
         library.importedHashes.insert(pending.fileHash)
         lastImport = (ids, isNew ? [accountID] : [], [pending.fileHash])
         withAnimation(.snappy) { changed() }
@@ -1100,6 +1141,7 @@ final class BudgetStore {
         library.entries.removeAll { last.entries.contains($0.id) }
         library.accounts.removeAll { id in last.accounts.contains(id.id) && !library.entries.contains { $0.accountID == id.id } }
         library.importedHashes.subtract(last.hashes)
+        forgetSources { last.hashes.contains($0.id) }
         // He took it back out: don't quietly add it again from Downloads.
         library.dismissedDownloads.formUnion(last.hashes)
         pruneUnusedPlaces()
@@ -1139,6 +1181,7 @@ final class BudgetStore {
             }
             guard let pair, let keep = library.accounts.firstIndex(where: { $0.id == pair.new.id }) else { break }
             for i in library.entries.indices where library.entries[i].accountID == pair.old.id { library.entries[i].accountID = pair.new.id }
+            for i in (library.sources ?? []).indices where library.sources![i].accountID == pair.old.id { library.sources![i].accountID = pair.new.id }
             library.accounts[keep].formerSignatures = (library.accounts[keep].formerSignatures ?? []) + [pair.old.signature] + (pair.old.formerSignatures ?? [])
             library.accounts[keep].statementMonths = (library.accounts[keep].statementMonths ?? []).union(pair.old.statementMonths ?? [])
             library.accounts.removeAll { $0.id == pair.old.id }
@@ -1186,20 +1229,24 @@ final class BudgetStore {
     /// Adds lines the account doesn't already have, and sorts each one on the spot.
     /// Identical lines that legitimately repeat (two $5 coffees in a day) are kept:
     /// only as many copies are skipped as the account already holds.
-    private func add(_ rows: [CanonicalRow], to accountID: UUID) -> Set<UUID> {
+    /// - source: the kept original these rows were read from; lines already held are pointed at it too.
+    /// - linkOnly: add nothing; only point the lines already held at their original.
+    private func add(_ rows: [CanonicalRow], to accountID: UUID, source: String? = nil, linkOnly: Bool = false) -> Set<UUID> {
+        linkedByLastAdd = 0
         guard let a = library.accounts.firstIndex(where: { $0.id == accountID }) else { return [] }
+        let kept = Set((library.sources ?? []).map(\.id)).union(source.map { [$0] } ?? [])
         // What the account already holds, by day and amount. A line counts as already there if the
         // text matches exactly, or closely: the same charge reads "AMAZON MKTPL*AB12" in a CSV and
         // "AMAZON MKTPL*AB12 SEATTLE WA" in the PDF of the same statement.
-        struct Held { let exact: String; let loose: String; var used = false }
+        struct Held { let index: Int; let exact: String; let loose: String; var used = false }
         let loose = { (d: String) in String(d.uppercased().filter { $0.isLetter || $0.isNumber }) }
         var held: [String: [Held]] = [:]
-        for e in library.entries where e.accountID == accountID {
-            held["\(e.date)|\(String(format: "%.2f", e.amount))", default: []].append(Held(exact: e.description.uppercased(), loose: loose(e.description)))
+        for (i, e) in library.entries.enumerated() where e.accountID == accountID {
+            held["\(e.date)|\(String(format: "%.2f", e.amount))", default: []].append(Held(index: i, exact: e.description.uppercased(), loose: loose(e.description)))
         }
-        func alreadyHeld(_ entry: LedgerEntry) -> Bool {
+        func alreadyHeld(_ entry: LedgerEntry) -> Int? {
             let bucket = "\(entry.date)|\(String(format: "%.2f", entry.amount))"
-            guard var list = held[bucket] else { return false }
+            guard var list = held[bucket] else { return nil }
             let exact = entry.description.uppercased(), mine = loose(entry.description)
             let index = list.firstIndex { !$0.used && $0.exact == exact }
                 ?? list.firstIndex { other in
@@ -1207,10 +1254,10 @@ final class BudgetStore {
                     return other.loose.hasPrefix(mine.prefix(10)) || mine.hasPrefix(other.loose.prefix(10))
                         || other.loose.contains(mine) || mine.contains(other.loose)
                 }
-            guard let index else { return false }
+            guard let index else { return nil }
             list[index].used = true
             held[bucket] = list
-            return true
+            return list[index].index
         }
         var keyCache: [String: String] = [:]
         var ids: Set<UUID> = []
@@ -1224,9 +1271,18 @@ final class BudgetStore {
                 key = MerchantResolver.key(for: row.description, amount: amount, existingKeys: library.merchants.keys)
                 keyCache[cacheKey] = key
             }
-            let entry = LedgerEntry(accountID: accountID, date: row.date, description: row.description, amount: amount,
+            var entry = LedgerEntry(accountID: accountID, date: row.date, description: row.description, amount: amount,
                                     bankCategory: row.bankCategory, merchantKey: key)
-            if alreadyHeld(entry) { continue }
+            entry.sourceID = source
+            if let existing = alreadyHeld(entry) {
+                // Already here: remember which original it can be seen in, unless it has one.
+                if let source, library.entries[existing].sourceID.map({ !kept.contains($0) }) ?? true {
+                    library.entries[existing].sourceID = source
+                    linkedByLastAdd += 1
+                }
+                continue
+            }
+            if linkOnly { continue }
             if library.merchants[key] == nil {
                 library.merchants[key] = MerchantResolver.instant(description: row.description, amount: amount,
                                                                   bankCategory: row.bankCategory)
@@ -1234,8 +1290,86 @@ final class BudgetStore {
             library.entries.append(entry)
             ids.insert(entry.id)
         }
-        library.accounts[a].lastImport = .now
+        if !linkOnly { library.accounts[a].lastImport = .now }
         return ids
+    }
+
+    /// Keeps the file itself, so its charges can be shown in the original later.
+    private func keep(_ data: Data, hash: String, url: URL, accountID: UUID, rows: [CanonicalRow], check: StatementCheck = .none) {
+        let ext = url.pathExtension.lowercased()
+        var source = SourceFile(id: hash, name: url.lastPathComponent, ext: ext.isEmpty ? "txt" : ext, accountID: accountID, added: .now,
+                                rows: rows.count, firstDate: rows.map(\.date).min(), lastDate: rows.map(\.date).max(), check: nil)
+        switch check {
+        case .verified: source.check = "verified"
+        case .mismatch: source.check = "mismatch"
+        case .scanned: source.check = "scanned"
+        case .none: break
+        }
+        try? FileManager.default.createDirectory(at: paths.statementsFolder, withIntermediateDirectories: true)
+        let target = paths.statementFile(source)
+        if !FileManager.default.fileExists(atPath: target.path) {
+            guard (try? data.write(to: target, options: .atomic)) != nil else { return }
+        }
+        var list = library.sources ?? []
+        list.removeAll { $0.id == hash }
+        list.append(source)
+        library.sources = list
+    }
+
+    private func forgetSources(_ gone: (SourceFile) -> Bool) {
+        for source in (library.sources ?? []).filter(gone) { try? FileManager.default.removeItem(at: paths.statementFile(source)) }
+        library.sources?.removeAll(where: gone)
+    }
+
+    // MARK: - Originals
+
+    /// Every kept statement, newest period first.
+    var sourceFiles: [SourceFile] { (library.sources ?? []).sorted { ($0.lastDate ?? "", $0.name) > ($1.lastDate ?? "", $1.name) } }
+    func sourceURL(_ source: SourceFile) -> URL { paths.statementFile(source) }
+    /// Charges that came into the app before originals were kept, and have nothing to show yet.
+    var chargesWithoutOriginal: Int {
+        let all = library.sources ?? []
+        let kept = Set(all.map(\.id))
+        // A charge not tied to one file still counts as covered when a kept statement of its account spans its day.
+        var spans: [UUID: [(String, String)]] = [:]
+        for s in all { if let a = s.accountID, let f = s.firstDate, let l = s.lastDate { spans[a, default: []].append((f, l)) } }
+        return library.entries.filter { e in
+            if let id = e.sourceID, kept.contains(id) { return false }
+            return !(spans[e.accountID] ?? []).contains { $0.0 <= e.date && e.date <= $0.1 }
+        }.count
+    }
+    func entry(_ id: UUID) -> LedgerEntry? { library.entries.first { $0.id == id } }
+    func entries(in source: SourceFile) -> [LedgerEntry] { library.entries.filter { $0.sourceID == source.id } }
+
+    /// The originals a charge might be in: the one it was read from, else every statement of its
+    /// account that spans its date (the finder then looks for the charge in each).
+    func sourceCandidates(for entry: LedgerEntry) -> [SourceFile] {
+        let all = library.sources ?? []
+        if let id = entry.sourceID, let exact = all.first(where: { $0.id == id }) { return [exact] }
+        guard let day = DateParsing.parse(entry.date, format: "yyyy-MM-dd") else { return [] }
+        let iso = { (d: Date) in DateParsing.iso.string(from: d) }
+        let early = iso(day.addingTimeInterval(-6 * 86_400)), late = iso(day.addingTimeInterval(6 * 86_400))
+        return all.filter { $0.accountID == entry.accountID && ($0.firstDate ?? "9") <= late && ($0.lastDate ?? "0") >= early }
+            .sorted { $0.isPDF && !$1.isPDF }
+    }
+
+    /// Opens the original over the window, at the line this charge was read from.
+    func showOriginal(of id: Transaction.ID) {
+        guard let entry = entry(id) else { return }
+        if sourceCandidates(for: entry).isEmpty {
+            showToast((library.sources ?? []).isEmpty
+                      ? "This was added before the app kept originals. Drop your statements in again and every charge will link to its statement."
+                      : "The statement this came from isn't here. Drop it in again and the link appears.", symbol: "doc.questionmark")
+            return
+        }
+        originalPeek = OriginalPeek(entryID: id)
+    }
+
+    /// Opens the Statements page on one file (and, optionally, one charge in it).
+    func browse(_ source: SourceFile, charge: UUID? = nil) {
+        originalPeek = nil
+        statementFocus = StatementFocus(sourceID: source.id, entryID: charge)
+        selection = .statements
     }
 
     private func showImportToast(added: Int, accounts names: [String], verified: Int = 0, mismatches: [String] = [], scanned: Int = 0,
@@ -1287,7 +1421,7 @@ final class BudgetStore {
     func backUpToDesktop() {
         saveNow()
         let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
-        let target = desktop.appendingPathComponent("Appauled Backup \(DateParsing.iso.string(from: .now)).json")
+        let target = desktop.appendingPathComponent("Spendthrift Backup \(DateParsing.iso.string(from: .now)).json")
         try? FileManager.default.removeItem(at: target)
         do {
             try FileManager.default.copyItem(at: paths.libraryFile, to: target)
@@ -1310,6 +1444,9 @@ final class BudgetStore {
         guard let account = accounts.first(where: { $0.id == id }) else { return }
         library.entries.removeAll { $0.accountID == id }
         library.accounts.removeAll { $0.id == id }
+        // Its statements go too, and may be added again later as if never seen.
+        library.importedHashes.subtract((library.sources ?? []).filter { $0.accountID == id }.map(\.id))
+        forgetSources { $0.accountID == id }
         pruneUnusedPlaces()
         withAnimation(.snappy) { changed() }
         showToast("Removed \(account.name).", symbol: "trash.fill")
@@ -1344,7 +1481,7 @@ final class BudgetStore {
     /// Looks for new statements in Downloads, off the main thread (the first look may wait
     /// on macOS's "allow access to Downloads?" prompt, and reading files takes a moment).
     func refreshDownloads() {
-        guard ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] == nil else { return }
+        guard ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] == nil else { return }
         let known = library.importedHashes.union(library.dismissedDownloads)
         Task.detached(priority: .utility) {
             let found = Self.scanDownloads(excluding: known)
@@ -1371,7 +1508,7 @@ final class BudgetStore {
     /// Watches the Downloads folder while the app is open, so a statement saved from the bank's
     /// website shows up in the app a few seconds later without Tony doing anything.
     func watchDownloads() {
-        guard downloadsWatcher == nil, ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] == nil,
+        guard downloadsWatcher == nil, ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] == nil,
               let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }
         let descriptor = open(folder.path, O_EVTONLY)
         guard descriptor >= 0 else { return }

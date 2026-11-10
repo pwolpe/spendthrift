@@ -169,6 +169,8 @@ struct LedgerEntry: Codable, Identifiable, Hashable {
     var override: Category?
     /// Anything the person remembers about this charge ("deposit for the Mongolia trip"). Optional; the AI reads it.
     var note: String?
+    /// The statement file this line was read from (a `SourceFile` id), when the original was kept.
+    var sourceID: String?
 
     var dedupeKey: String { "\(date)|\(description.uppercased())|\(String(format: "%.2f", amount))" }
 
@@ -191,6 +193,44 @@ struct LedgerEntry: Codable, Identifiable, Hashable {
             ?? MerchantResolver.key(for: description, amount: amount, existingKeys: [String]())
         override = try? c.decodeIfPresent(Category.self, forKey: .override)
         note = try? c.decodeIfPresent(String.self, forKey: .note)
+        sourceID = try? c.decodeIfPresent(String.self, forKey: .sourceID)
+    }
+}
+
+/// A statement file exactly as it was dropped in, kept so any charge can be traced back to it.
+struct SourceFile: Codable, Identifiable, Hashable {
+    /// The file's fingerprint; the kept copy is named after it.
+    var id: String
+    /// The name the file had when it was added.
+    var name: String
+    var ext: String
+    var accountID: UUID?
+    var added: Date
+    /// How many lines were read from it, and the days they span (yyyy-MM-dd).
+    var rows: Int
+    var firstDate: String?
+    var lastDate: String?
+    /// "verified" when its lines add up to the totals it prints, "mismatch", "scanned", or nil.
+    var check: String?
+
+    var isPDF: Bool { ext == "pdf" }
+    var isPicture: Bool { Scans.imageExtensions.contains(ext) }
+    /// "Oct 4 – Nov 3, 2026", from the first and last charge in the file.
+    var period: String {
+        guard let a = firstDate.flatMap({ DateParsing.parse($0, format: "yyyy-MM-dd") }),
+              let b = lastDate.flatMap({ DateParsing.parse($0, format: "yyyy-MM-dd") }) else { return name }
+        let sameYear = Calendar.current.component(.year, from: a) == Calendar.current.component(.year, from: b)
+        let start = a.formatted(sameYear ? .dateTime.month(.abbreviated).day() : .dateTime.month(.abbreviated).day().year())
+        return "\(start) – \(b.formatted(.dateTime.month(.abbreviated).day().year()))"
+    }
+    var kind: String {
+        switch ext {
+        case "pdf": "PDF"
+        case "csv", "tsv", "txt": "CSV"
+        case "xlsx": "Excel"
+        case "ofx", "qfx", "qbo": "Quicken"
+        default: isPicture ? "Picture" : ext.uppercased()
+        }
     }
 }
 
@@ -418,7 +458,18 @@ struct Toast: Identifiable, Equatable {
 }
 
 enum SidebarItem: Hashable {
-    case overview, cashflow, stories, transactions, report, ask, review, categories, accounts
+    case overview, cashflow, stories, transactions, statements, report, ask, review, categories, accounts
+}
+
+/// A charge whose original statement is being shown.
+struct OriginalPeek: Identifiable, Hashable {
+    var entryID: UUID
+    var id: UUID { entryID }
+}
+
+struct StatementFocus: Hashable {
+    var sourceID: String
+    var entryID: UUID?
 }
 
 /// "New Category…" was chosen somewhere; `then` receives the category once it's made.

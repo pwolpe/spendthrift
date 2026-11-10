@@ -229,7 +229,7 @@ struct VerdictCard: View {
             VStack(alignment: .leading, spacing: compact ? 8 : 14) {
                 HStack(alignment: compact ? .firstTextBaseline : .center, spacing: compact ? 10 : 18) {
                     // On the full card the two of them deliver the verdict: proud when it went well,
-                    // appalled (the app's namesake) when it didn't.
+                    // appalled when it didn't.
                     if !compact, income > 0 {
                         SpotArt(name: within ? "within" : "over", height: 104)
                     } else {

@@ -426,7 +426,7 @@ struct KeyEntry: View {
                     .foregroundStyle(Theme.good)
             } else {
                 Label("First, turn on the magic", systemImage: "wand.and.stars").font(.headline)
-                Text("Appauled uses a powerful AI model to read any statement, recognize every place, find your trips and draw the pictures. Paste an OpenRouter key and it does the rest. It costs a few cents per statement.")
+                Text("Spendthrift uses a powerful AI model to read any statement, recognize every place, find your trips and draw the pictures. Paste an OpenRouter key and it does the rest. It costs a few cents per statement.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

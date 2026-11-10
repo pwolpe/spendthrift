@@ -209,6 +209,7 @@ struct PlaceView: View {
                         }
                         Spacer()
                         AmountText(transaction: t).monospacedDigit()
+                        OriginalButton(id: t.id)
                     }
                     .padding(.vertical, 7)
                     if i < all.count - 1 { Divider() }
@@ -287,19 +288,22 @@ struct ChargesView: View {
                         VStack(alignment: .leading, spacing: 0) {
                             SectionHeader(title: "Every charge").padding(.bottom, 8)
                             ForEach(Array(all.prefix(400).enumerated()), id: \.element.id) { i, t in
-                                Button { store.showPlace(t.merchant) } label: {
-                                    HStack(spacing: 12) {
-                                        Text(t.date.formatted(.dateTime.month(.abbreviated).day().year()))
-                                            .monospacedDigit().foregroundStyle(.secondary)
-                                            .frame(width: 110, alignment: .leading)
-                                        Text(t.merchant).lineLimit(1)
-                                        Spacer()
-                                        AmountText(transaction: t).monospacedDigit()
+                                HStack(spacing: 12) {
+                                    Button { store.showPlace(t.merchant) } label: {
+                                        HStack(spacing: 12) {
+                                            Text(t.date.formatted(.dateTime.month(.abbreviated).day().year()))
+                                                .monospacedDigit().foregroundStyle(.secondary)
+                                                .frame(width: 110, alignment: .leading)
+                                            Text(t.merchant).lineLimit(1)
+                                            Spacer()
+                                            AmountText(transaction: t).monospacedDigit()
+                                        }
+                                        .padding(.vertical, 6)
+                                        .contentShape(Rectangle())
                                     }
-                                    .padding(.vertical, 6)
-                                    .contentShape(Rectangle())
+                                    .buttonStyle(.plain)
+                                    OriginalButton(id: t.id)
                                 }
-                                .buttonStyle(.plain)
                                 if i < min(all.count, 400) - 1 { Divider() }
                             }
                             if all.count > 400 {
@@ -351,5 +355,17 @@ struct MaybeScroll<Content: View>: View {
 
     var body: some View {
         if scrolls { ScrollView { content } } else { content }
+    }
+}
+
+/// The small button at the end of a charge's row: open the original statement at this line.
+struct OriginalButton: View {
+    let id: Transaction.ID
+
+    var body: some View {
+        Button { BudgetStore.shared.showOriginal(of: id) } label: { Image(systemName: "doc.text.magnifyingglass") }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.tertiary)
+            .help("Show this charge in its original statement")
     }
 }

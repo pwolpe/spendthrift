@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Appauled",
+    name: "Spendthrift",
     platforms: [.macOS(.v26)],
     targets: [
         .executableTarget(
-            name: "Appauled",
-            path: "Sources/Appauled",
+            name: "Spendthrift",
+            path: "Sources/Spendthrift",
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]

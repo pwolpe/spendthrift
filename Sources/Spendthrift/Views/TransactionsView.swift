@@ -134,10 +134,19 @@ struct TransactionsView: View {
                     Divider()
                     Button("Everything at \(first.merchant)") { store.showPlace(first.merchant) }
                 }
+                if chosen.count == 1 {
+                    Button("Show in Statement", systemImage: "doc.text.magnifyingglass") { store.showOriginal(of: first.id) }
+                }
             }
         } primaryAction: { ids in
             // Double-click a charge: everything ever spent at that place.
             if let t = store.transactions.first(where: { ids.contains($0.id) }) { store.showPlace(t.merchant) }
+        }
+        // Space bar, as in Finder: a quick look at the charge in its original statement.
+        .onKeyPress(.space) {
+            guard selection.count == 1, let id = selection.first else { return .ignored }
+            store.showOriginal(of: id)
+            return .handled
         }
     }
 }
@@ -333,6 +342,8 @@ private struct TransactionInspector: View {
                         .font(.callout.monospaced())
                         .textSelection(.enabled)
                     Label(t.account, systemImage: "creditcard").font(.callout).foregroundStyle(.secondary)
+                    Button("Show in Statement", systemImage: "doc.text.magnifyingglass") { store.showOriginal(of: t.id) }
+                        .help("Open the original statement at this line (or press Space)")
                 }
 
                 if place.count > 1 {

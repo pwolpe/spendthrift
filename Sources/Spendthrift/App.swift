@@ -2,11 +2,11 @@ import SwiftUI
 import AppKit
 
 
-struct AppauledApp: App {
+struct SpendthriftApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Window("Appauled", id: "main") {
+        Window("Spendthrift", id: "main") {
             ContentView()
                 .environment(BudgetStore.shared)
                 .frame(minWidth: 920, minHeight: 620)
@@ -40,7 +40,7 @@ struct AppauledApp: App {
             }
         }
 
-        // Appauled → Settings… (⌘,)
+        // Spendthrift → Settings… (⌘,)
         Settings {
             SettingsView()
                 .environment(BudgetStore.shared)

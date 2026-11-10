@@ -1,10 +1,10 @@
 #!/bin/bash
-# Builds build/Appauled.app and build/Appauled.zip. No downloads, no dependencies.
+# Builds build/Spendthrift.app and build/Spendthrift.zip. No downloads, no dependencies.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$ROOT/build"
-APP="$BUILD/Appauled.app"
+APP="$BUILD/Spendthrift.app"
 CARTOON="$ROOT/Resources/tony-cartoon.png"   # made once by Image Playground, then reused
 
 mkdir -p "$BUILD"
@@ -18,13 +18,13 @@ if security find-certificate -c "$SIGN_NAME" >/dev/null 2>&1; then SIGN="$SIGN_N
 # 1. Compile.
 echo "→ Building app"
 swift build -c release --package-path "$ROOT" --arch arm64
-BIN="$(swift build -c release --package-path "$ROOT" --arch arm64 --show-bin-path)/Appauled"
+BIN="$(swift build -c release --package-path "$ROOT" --arch arm64 --show-bin-path)/Spendthrift"
 
 # 2. Assemble the bundle.
-echo "→ Assembling Appauled.app"
+echo "→ Assembling Spendthrift.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/Appauled"
+cp "$BIN" "$APP/Contents/MacOS/Spendthrift"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 # Version: the number in the VERSION file (what Tony sees in About), plus a build number from the clock.
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
@@ -64,11 +64,11 @@ xattr -cr "$APP"
 codesign --force --sign "$SIGN" --timestamp=none "$APP"
 
 # 5. Zip for AirDrop / USB.
-rm -f "$BUILD/Appauled.zip"
-ditto -c -k --keepParent --norsrc --noextattr "$APP" "$BUILD/Appauled.zip"
+rm -f "$BUILD/Spendthrift.zip"
+ditto -c -k --keepParent --norsrc --noextattr "$APP" "$BUILD/Spendthrift.zip"
 
 echo "✓ Built $APP (signed: $SIGN)"
-echo "✓ Zipped $BUILD/Appauled.zip (version $VERSION)"
+echo "✓ Zipped $BUILD/Spendthrift.zip (version $VERSION)"
 if [ ! -f "$CARTOON" ]; then
   echo "ℹ︎ No cartoon yet (Apple Intelligence unavailable here). The app will make one on first launch."
 fi

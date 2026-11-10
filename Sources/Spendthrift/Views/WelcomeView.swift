@@ -15,7 +15,7 @@ struct WelcomeView: View {
             Spacer(minLength: 24)
             VStack(spacing: 12) {
                 SpotArt(name: "welcome", height: 250)
-                Text("Welcome to Appauled")
+                Text("Welcome to Spendthrift")
                     .font(.system(size: 42, weight: .bold, design: .serif))
                 Text("Drop in your bank and card statements. In about a minute you'll see where the money went, what it did, and whether you lived within your income.")
                     .font(.title3)

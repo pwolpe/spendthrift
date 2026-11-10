@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Appauled</string>
+    <string>Spendthrift</string>
     <key>CFBundleDisplayName</key>
-    <string>Appauled</string>
+    <string>Spendthrift</string>
     <key>CFBundleIdentifier</key>
-    <string>com.pwolpe.appauled</string>
+    <string>com.pwolpe.spendthrift</string>
     <key>CFBundleExecutable</key>
-    <string>Appauled</string>
+    <string>Spendthrift</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>
@@ -27,7 +27,7 @@
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSDownloadsFolderUsageDescription</key>
-    <string>Appauled looks in your Downloads folder for new bank statements so you can add them with one click.</string>
+    <string>Spendthrift looks in your Downloads folder for new bank statements so you can add them with one click.</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>

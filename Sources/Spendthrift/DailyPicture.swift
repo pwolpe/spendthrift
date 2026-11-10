@@ -3,8 +3,8 @@ import AppKit
 import ImagePlayground
 import FoundationModels
 
-/// The banner across the top of the Overview: a cartoon of Tony living out a daydream about
-/// something he really bought. There is never a wait. What shows on opening is already on disk:
+/// The banner across the top of the Overview: a cartoon of Tony, Paul or both living out a daydream
+/// about something really bought, one of them holding the receipt with the real place and total. There is never a wait. What shows on opening is already on disk:
 /// the picture prepared during the last visit, or one of the starters that ship with the app.
 /// Meanwhile, out of sight, the next one is drawn from his real photo for the next time he opens it.
 @MainActor @Observable
@@ -126,12 +126,18 @@ final class DailyPicture {
         var who: String?
         /// What the purchase cost: the real number is what makes the picture land.
         var amount: Double?
+        /// True when someone in the picture holds the receipt. Pictures drawn before that was the rule
+        /// stay on disk but are no longer shown.
+        var receipt: Bool?
     }
 
     /// What the picture is about ("Dunkin' · Nov 7"), shown under it. Nil for a starter.
     private(set) var source: String?
     private(set) var current: Picture?
     @ObservationIgnored private var preparedThisLaunch = false
+    /// For tests: who the next picture stars, and permission to draw another in the same launch.
+    @ObservationIgnored var forcedCast: String?
+    func allowAnother() { preparedThisLaunch = false }
 
     private init() { showOnOpen() }
 
@@ -176,7 +182,7 @@ final class DailyPicture {
     /// On opening: the picture made last time if it hasn't been seen, otherwise a random one.
     private func showOnOpen() {
         var saved = gallery
-        if let index = saved.lastIndex(where: { !$0.seen }), show(saved[index], animated: false) {
+        if let index = saved.lastIndex(where: { !$0.seen && $0.receipt == true }), show(saved[index], animated: false) {
             for i in saved.indices { saved[i].seen = true }
             gallery = saved
             return
@@ -186,7 +192,7 @@ final class DailyPicture {
 
     /// Any other picture, at once: the starters and everything drawn so far.
     func showRandom(animated: Bool = true) {
-        let pool = (Self.starters + gallery.filter(\.seen)).filter { $0.file != current?.file }.shuffled()
+        let pool = (Self.starters + gallery.filter { $0.seen && $0.receipt == true }).filter { $0.file != current?.file }.shuffled()
         for picture in pool where show(picture, animated: animated) { return }
     }
 
@@ -205,11 +211,19 @@ final class DailyPicture {
     func prepareNext(highlights: [Highlight]) async {
         lastHighlights = highlights
         guard CloudAI.isEnabled, !preparedThisLaunch, !isGenerating, !highlights.isEmpty, let photo = Self.photo else { return }
-        // Who stars this time: Tony, Paul, or the two of them, never the same as last time.
+        // Who stars this time: Tony, Paul, or the two of them, a third of the time each. Whoever has
+        // appeared least in the recent pictures goes next, and never the same as last time.
         var cast: [(name: String, photo: Data)] = [("Tony", photo)]
         var who = "tony"
         if let paul = Self.paulPhoto {
-            who = ["tony", "paul", "both"].filter { $0 != gallery.last?.who }.randomElement() ?? "tony"
+            let lately = gallery.suffix(9).compactMap(\.who)
+            let last: String = lately.last ?? ""
+            let all: [String] = ["tony", "paul", "both"]
+            let options: [String] = all.filter { $0 != last }
+            let times = { (o: String) -> Int in lately.filter { $0 == o }.count }
+            let fewest = options.map(times).min() ?? 0
+            let fair: String = options.filter { times($0) == fewest }.randomElement() ?? "tony"
+            if let forcedCast { who = forcedCast } else { who = fair }
             cast = who == "tony" ? [("Tony", photo)] : who == "paul" ? [("Paul", paul)] : [("Tony", photo), ("Paul", paul)]
         }
         preparedThisLaunch = true
@@ -224,24 +238,40 @@ final class DailyPicture {
         let names = cast.map(\.name)
         async let planned = CloudImage.scene(merchant: pick.merchant, category: pick.category.displayName, amount: pick.amount, cast: names)
         let model = await chosen
-        guard let scene = await planned else { preparedThisLaunch = false; return }
+        guard let scene = await planned else {
+            if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG PICTURE no scene came back for \(pick.merchant)") }
+            preparedThisLaunch = false; return
+        }
         // A style none of the last several pictures used.
         let usedLately = Set(saved.suffix(7).compactMap(\.style))
         let style = CloudImage.styles.filter { !usedLately.contains($0.id) }.randomElement() ?? CloudImage.styles.randomElement()!
-        var drawn = await CloudImage.draw(scene: scene.scene, cast: cast, model: model, style: style.look), used = model
-        if drawn == nil, model != CloudImage.defaultModel {
-            drawn = await CloudImage.draw(scene: scene.scene, cast: cast, model: CloudImage.defaultModel, style: style.look); used = CloudImage.defaultModel
+        // The receipt in his hand is the point of the picture: the real place, what it sells, the real total.
+        let receipt = CloudImage.Receipt(merchant: pick.merchant, what: scene.what, total: Money.format(pick.amount))
+        var drawn: Data?, used = model, bestMarks = Int.min
+        // Drawn up to three times, keeping the best: a picture whose receipt can't be read, reads
+        // wrong or isn't in anyone's hand is tried again.
+        for attempt in 0..<3 {
+            let with = attempt == 2 && model != CloudImage.defaultModel ? CloudImage.defaultModel : model
+            guard let candidate = await CloudImage.draw(scene: scene.scene, cast: cast, model: with, style: style.look, receipt: receipt),
+                  NSImage(data: candidate) != nil else { continue }
+            let marks = await CloudImage.receiptReads(candidate, receipt: receipt)
+            if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG PICTURE attempt \(attempt + 1) receipt marks: \(marks.map(String.init) ?? "unknown") of 4") }
+            if (marks ?? 4) > bestMarks { drawn = candidate; used = with; bestMarks = marks ?? 4 }
+            if bestMarks >= 4 { break }
         }
-        guard let drawn, NSImage(data: drawn) != nil else { preparedThisLaunch = false; return }
+        guard let drawn else {
+            if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG PICTURE nothing was drawn (model \(model))") }
+            preparedThisLaunch = false; return
+        }
 
         let file = "tony-\(Int(Date.now.timeIntervalSince1970)).png"
         try? drawn.write(to: folder.appendingPathComponent(file))
         saved.append(Picture(file: file, caption: scene.caption, merchant: pick.merchant,
-                             date: pick.date.map { DateParsing.iso.string(from: $0) }, seen: false, model: used, style: style.id, who: who, amount: pick.amount))
+                             date: pick.date.map { DateParsing.iso.string(from: $0) }, seen: false, model: used, style: style.id, who: who, amount: pick.amount, receipt: true))
         // Keep the last thirty; older ones go, with their files.
         while saved.count > 30 { try? FileManager.default.removeItem(at: folder.appendingPathComponent(saved.removeFirst().file)) }
         gallery = saved
-        if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil {
+        if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
             print("DEBUG PICTURE next: \(pick.merchant) [\(used), \(style.id), \(who)] \(scene.caption)\n  scene: \(scene.scene)")
         }
     }
