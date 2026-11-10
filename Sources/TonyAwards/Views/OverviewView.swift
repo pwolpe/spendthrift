@@ -21,22 +21,25 @@ struct OverviewView: View {
 
     private var content: some View {
             VStack(alignment: .leading, spacing: 20) {
-                DailyTonyCard()
+                if !DebugHooks.off("daily") { DailyTonyCard() }
                 DownloadsBanner()
                 if !store.reviewItems.isEmpty, !store.isSuggesting { reviewBanner }
+                if !store.missingStatements.isEmpty, !store.isImporting { missingBanner }
 
                 if let m = currentMonth {
                     header(m)
                     beyondEveryday(m)
                     HStack(alignment: .top, spacing: 20) {
-                        breakdownCard(m)
+                        if !DebugHooks.off("donut") { breakdownCard(m) }
                         VStack(spacing: 20) {
-                            trendCard(m)
-                            topPlacesCard(m)
+                            if !DebugHooks.off("trend") { trendCard(m) }
+                            if !DebugHooks.off("places") { topPlacesCard(m) }
+                            if !DebugHooks.off("coming") { comingUpCard }
                         }
                         .frame(minWidth: 300, maxWidth: 420)
                     }
-                    CeremonyCard(month: m)
+                    if !DebugHooks.off("stories") { storiesThisMonth(m) }
+                    if !DebugHooks.off("ceremony") { CeremonyCard(month: m) }
                 } else {
                     TonySays(title: "Nothing here yet", message: "Drop a statement into this window and the show begins.")
                 }
@@ -132,6 +135,92 @@ struct OverviewView: View {
         }
     }
 
+    /// Charges that repeat every month, and when each is due next: no surprises.
+    @ViewBuilder
+    private var comingUpCard: some View {
+        let today = Calendar.current.startOfDay(for: .now)
+        let horizon = today.addingTimeInterval(31 * 24 * 3600)
+        let upcoming: [(sub: Subscription, due: Date)] = store.subscriptions().compactMap { sub in
+            var due = sub.lastCharge
+            // Step forward a month at a time until the date is today or later.
+            for _ in 0..<24 where due < today { due = Calendar.current.date(byAdding: .month, value: 1, to: due) ?? horizon.addingTimeInterval(1) }
+            return due <= horizon ? (sub, due) : nil
+        }.sorted { $0.due < $1.due }
+        if !upcoming.isEmpty {
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionHeader(title: "Coming up", subtitle: "Charges that repeat, due in the next month")
+                    ForEach(Array(upcoming.prefix(7).enumerated()), id: \.offset) { _, item in
+                        HStack(spacing: 12) {
+                            MerchantIcon(name: item.sub.merchant, category: item.sub.category, size: 30)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.sub.merchant).font(.body.weight(.medium)).lineLimit(1)
+                                Text(Calendar.current.isDateInToday(item.due) ? "Today"
+                                     : Calendar.current.isDateInTomorrow(item.due) ? "Tomorrow"
+                                     : item.due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(Money.format(item.sub.monthlyAmount)).monospacedDigit()
+                        }
+                    }
+                    Divider()
+                    HStack {
+                        Text("About").foregroundStyle(.secondary)
+                        Spacer()
+                        Text(Money.format(upcoming.reduce(0) { $0 + $1.sub.monthlyAmount }, cents: false)).font(.headline).monospacedDigit()
+                    }
+                    .font(.callout)
+                }
+            }
+        }
+    }
+
+    /// Trips and events that touch this month, so a big month explains itself.
+    @ViewBuilder
+    private func storiesThisMonth(_ m: Month) -> some View {
+        let key = m.key
+        let stories = store.stories.filter { $0.start.prefix(7) <= key && $0.end.prefix(7) >= key }
+        if !stories.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    SectionHeader(title: stories.count == 1 ? "This month's story" : "This month's stories")
+                    Spacer()
+                    Button("All Trips & Events") { store.selection = .stories }.buttonStyle(.borderless)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 14, alignment: .top)], alignment: .leading, spacing: 14) {
+                    ForEach(stories) { StoryCard(story: $0, compact: true) }
+                }
+            }
+        }
+    }
+
+    /// The picture is only as complete as the statements in it: say what's missing, in one line.
+    private var missingBanner: some View {
+        let missing = store.missingStatements
+        let count = missing.reduce(0) { $0 + $1.months.count }
+        return Button { store.selection = .accounts } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "calendar.badge.exclamationmark").font(.title3).foregroundStyle(Theme.caution)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(count == 1 ? "One statement seems to be missing" : "\(count) statements seem to be missing")
+                        .font(.callout.weight(.semibold))
+                    Text(missing.prefix(2).map(\.summary).joined(separator: ". ") + (missing.count > 2 ? ", and \(missing.count - 2) more accounts." : "."))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Theme.caution.opacity(0.08), in: .rect(cornerRadius: 12, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private var reviewBanner: some View {
         let n = store.reviewItems.count
         return Card(padding: 14) {
@@ -168,7 +257,8 @@ struct OverviewView: View {
                 if totals.isEmpty {
                     Text("No spending this month.").foregroundStyle(.secondary)
                 } else {
-                    Chart(totals, id: \.category) { item in
+                    // Slivers too thin to see are left out of the ring (they're still in the list below).
+                    Chart(totals.filter { $0.total >= sum * 0.004 }, id: \.category) { item in
                         SectorMark(angle: .value("Amount", item.total),
                                    innerRadius: .ratio(0.64),
                                    outerRadius: hovered == item.category ? .ratio(1) : .ratio(0.94),
@@ -196,6 +286,11 @@ struct OverviewView: View {
                     }
                     .frame(height: 240)
                     .animation(.snappy, value: hovered)
+                    // While statements are arriving and being sorted the totals change many times a
+                    // second. Animating the ring between those states crashes Swift Charts, so the
+                    // ring redraws at once when the data changes and only animates on hover.
+                    .transaction(value: sum) { $0.animation = nil }
+                    .transaction(value: totals.count) { $0.animation = nil }
 
                     VStack(spacing: 4) {
                         ForEach(totals, id: \.category) { item in
@@ -263,7 +358,7 @@ struct OverviewView: View {
                         store.selection = .transactions
                     } label: {
                     HStack(spacing: 12) {
-                        CategoryIcon(category: item.category, size: 30)
+                        MerchantIcon(name: item.name, category: item.category, size: 30)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(item.name).font(.body.weight(.medium)).lineLimit(1)
                             Text(item.count == 1 ? "1 visit" : "\(item.count) visits")

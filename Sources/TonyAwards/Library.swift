@@ -41,6 +41,10 @@ struct Library: Codable {
     var dismissedDownloads: Set<String> = []
     var dismissedInsights: Set<String> = []
     var customCategories: [CustomCategory]?
+    /// Trips and events the app noticed, and which data they were worked out from.
+    var stories: [Story]?
+    var storiesBasis: String?
+    var dismissedStories: Set<String>?
 
     init() {}
 
@@ -54,6 +58,9 @@ struct Library: Codable {
         dismissedDownloads = (try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedDownloads)) ?? []
         dismissedInsights = (try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedInsights)) ?? []
         customCategories = (try? c.decodeIfPresent(Lossy<CustomCategory>.self, forKey: .customCategories))?.values
+        stories = (try? c.decodeIfPresent(Lossy<Story>.self, forKey: .stories))?.values
+        storiesBasis = try? c.decodeIfPresent(String.self, forKey: .storiesBasis)
+        dismissedStories = try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedStories)
         // Every line must belong to an account that still exists.
         let known = Set(accounts.map(\.id))
         entries.removeAll { !known.contains($0.accountID) }

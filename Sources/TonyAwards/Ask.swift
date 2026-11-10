@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 import FoundationModels
 
 // MARK: - Understanding the question (AI) → computing the answer (code)
@@ -137,6 +138,10 @@ struct Answer: Identifiable, Hashable {
     let query: SpendingQuery
     let headline: String
     let rows: [(label: String, detail: String, value: String, category: Category?)]
+    /// From the conversational path: bars to draw, and a few words on what was looked up.
+    var chart: [ChatAnalyst.ChartBar] = []
+    var chartIsLine = false
+    var understood: String?
 
     static func == (a: Answer, b: Answer) -> Bool { a.id == b.id }
     func hash(into h: inout Hasher) { h.combine(id) }
@@ -231,15 +236,19 @@ struct AskView: View {
     @State private var question = ""
     @State private var answers: [Answer] = []
     @State private var thinking = false
+    @State private var turns: [ChatAnalyst.Turn] = []
     @FocusState private var focused: Bool
 
-    private let examples = [
-        "How much did I spend on dining last month?",
-        "What are my subscriptions?",
-        "Top places this year",
-        "What did I buy at Amazon?",
-        "Average monthly grocery spending",
-    ]
+    private var examples: [String] {
+        guard CloudAI.isEnabled, let latest = store.months.last else {
+            return ["How much did I spend on dining last month?", "What are my subscriptions?", "Top places this year",
+                    "What did I buy at Amazon?", "Average monthly grocery spending"]
+        }
+        var list = ["Why was \(latest.name) so high?", "Where does most of my money go?", "Show dining month by month",
+                    "What are my biggest purchases this year?"]
+        if let trip = store.stories.first { list.insert("How much did \(trip.name) cost?", at: 1) }
+        return list
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -302,8 +311,10 @@ struct AskView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Ask the Academy")
                         .font(.system(size: 30, weight: .bold, design: .rounded))
-                    Text("Questions are answered right here on your Mac. Nothing is sent anywhere.")
+                    Text(CloudAI.isEnabled ? "Ask anything about your money, then keep going: “and last year?”, “why?”, “what about travel?”"
+                                           : "Questions are answered right here on your Mac. Nothing is sent anywhere.")
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             FlowLayout(spacing: 8) {
@@ -322,6 +333,12 @@ struct AskView: View {
         question = ""
         thinking = true
         Task {
+            // With the cloud model this is a conversation; otherwise one question at a time, on the Mac.
+            if let (answer, turn) = await ChatAnalyst.answer(q, history: turns, store: store) {
+                turns.append(turn)
+                withAnimation(.snappy) { answers.append(answer); thinking = false }
+                return
+            }
             let query = await QueryParser.parse(q, months: store.months)
             let answer = AnswerEngine.answer(q, query: query, store: store)
             withAnimation(.snappy) { answers.append(answer); thinking = false }
@@ -346,6 +363,9 @@ private struct AnswerBubble: View {
                 Card(padding: 16) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(answer.headline).font(.title3.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                        if answer.chart.count >= 2 { AnswerChart(bars: answer.chart, isLine: answer.chartIsLine) }
                         if !answer.rows.isEmpty {
                             VStack(spacing: 8) {
                                 ForEach(Array(answer.rows.enumerated()), id: \.offset) { _, row in
@@ -375,9 +395,47 @@ private struct AnswerBubble: View {
         let q = answer.query
         let parts = [q.category?.displayName, q.place?.capitalized,
                      q.from == q.to ? q.from.title : "\(q.from.title) – \(q.to.title)"].compactMap { $0 }
-        return Label(parts.joined(separator: " · "), systemImage: "line.3.horizontal.decrease.circle")
+        return Label(answer.understood.map { "Looked up: \($0)" } ?? parts.joined(separator: " · "),
+                     systemImage: "line.3.horizontal.decrease.circle")
             .font(.caption)
             .foregroundStyle(.secondary)
+            .lineLimit(2)
+    }
+}
+
+/// The figures behind an answer, drawn: bars for categories and places, a line for months.
+private struct AnswerChart: View {
+    let bars: [ChatAnalyst.ChartBar]
+    let isLine: Bool
+
+    var body: some View {
+        Chart(Array(bars.enumerated()), id: \.offset) { _, bar in
+            if isLine {
+                LineMark(x: .value("When", bar.label), y: .value("Amount", bar.value))
+                    .foregroundStyle(Theme.accent)
+                    .interpolationMethod(.monotone)
+                    .symbol(.circle)
+                AreaMark(x: .value("When", bar.label), y: .value("Amount", bar.value))
+                    .foregroundStyle(LinearGradient(colors: [Theme.accent.opacity(0.25), Theme.accent.opacity(0.02)], startPoint: .top, endPoint: .bottom))
+                    .interpolationMethod(.monotone)
+            } else {
+                BarMark(x: .value("What", bar.label), y: .value("Amount", bar.value), width: .ratio(0.62))
+                    .cornerRadius(5)
+                    .foregroundStyle((bar.category?.color ?? Theme.accent).gradient)
+            }
+        }
+        .chartXAxis {
+            AxisMarks { _ in
+                AxisValueLabel(collisionResolution: .greedy(minimumSpacing: 6)).font(.caption2)
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
+                AxisGridLine()
+                AxisValueLabel { if let v = value.as(Double.self) { Text(Money.format(v, cents: false)) } }
+            }
+        }
+        .frame(height: 170)
     }
 }
 

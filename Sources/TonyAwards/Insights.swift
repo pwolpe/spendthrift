@@ -267,7 +267,7 @@ enum RecapWriter {
             You are the host of The Tony Awards, a playful awards show that honors Tony's monthly spending. Tony is a CPA.
             Write a 2-sentence opening for this month's ceremony using ONLY the facts given. Copy dollar amounts exactly as written.
             Use theater and awards-show language. Be warm, witty and specific, never judgmental. No lists, no quotes, no stage directions.
-            """, facts: facts.joined(separator: "\n"), maxTokens: 120, temperature: 0.8), numbersAreReal(written) {
+            """, facts: facts.joined(separator: "\n"), maxTokens: 3_000, temperature: 0.8), numbersAreReal(written) {
             cache[key] = written
             return written
         }

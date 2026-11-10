@@ -49,8 +49,11 @@ enum CloudAI {
     }
 
     /// One request. `json: true` asks for (and returns) a JSON object.
+    /// - maxTokens: room for the whole reply, including any thinking the model does before it
+    ///   writes. Too little and the answer is cut off mid-sentence, so be generous.
+    /// - effort: how hard the model should think first ("low", "medium", "high"); nil = its default.
     static func complete(system: String, user: String, json: Bool, maxTokens: Int, temperature: Double = 0,
-                         timeout: TimeInterval = 90) async throws -> String {
+                         timeout: TimeInterval = 90, effort: String? = nil) async throws -> String {
         guard let key = CloudKey.load() else { throw CloudError.noKey }
         var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, timeoutInterval: timeout)
         request.httpMethod = "POST"
@@ -65,6 +68,7 @@ enum CloudAI {
             "temperature": temperature,
         ]
         if json { body["response_format"] = ["type": "json_object"] }
+        if let effort { body["reasoning"] = ["effort": effort] }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         var lastError: CloudError = .unreachable
@@ -79,6 +83,11 @@ enum CloudAI {
                           let choices = object["choices"] as? [[String: Any]],
                           let message = choices.first?["message"] as? [String: Any],
                           let content = message["content"] as? String, !content.isEmpty else { throw CloudError.badReply }
+                    // Cut off for length: a partial answer is worse than none (half a JSON object).
+                    if (choices.first?["finish_reason"] as? String) == "length" {
+                        if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil { print("DEBUG CLOUD reply cut off at \(maxTokens) tokens") }
+                        throw CloudError.badReply
+                    }
                     await CloudStatus.shared.note(error: nil)
                     return content
                 case 401, 403: lastError = .badKey
@@ -130,7 +139,7 @@ final class CloudStatus {
     func refreshKey() { hasKey = CloudKey.exists; if !hasKey { lastError = nil } }
 }
 
-/// The OpenRouter key lives in the Mac's keychain: never in the app, its data file, or a backup.
+/// The OpenRouter key lives in a private file in the data folder: never in the app, the library file, or a backup.
 enum CloudKey {
     private static let service = "com.pwolpe.tonyawards.openrouter"
     private static let account = "api-key"
@@ -141,19 +150,27 @@ enum CloudKey {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
     }
 
+    /// Why a file and not the keychain: macOS ties keychain access to the exact build of an app
+    /// unless it's signed with an Apple Developer ID. Every update would make Tony type his Mac
+    /// password into a "wants to use your confidential information" dialog, and the app would
+    /// freeze behind it. A file only his user account can read asks for nothing, ever. It always
+    /// lives in the real data folder, never a test folder, and is not part of any backup the app makes.
+    private static let file: URL = {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let folder = support.appendingPathComponent("Tony Awards", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("ai-key")
+    }()
+
     static var exists: Bool { load() != nil }
 
     static func load() -> String? {
         lock.lock(); defer { lock.unlock() }
         if let cached { return cached }
-        var q = query
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        let value: String? = SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess
-            ? (item as? Data).flatMap { String(data: $0, encoding: .utf8) } : nil
-        cached = .some(value)
-        return value
+        let value = (try? String(contentsOf: file, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = value?.isEmpty == false ? value : nil
+        cached = .some(key)
+        return key
     }
 
     @discardableResult
@@ -161,20 +178,37 @@ enum CloudKey {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return false }
         lock.lock(); defer { lock.unlock() }
-        SecItemDelete(query as CFDictionary)
-        var q = query
-        q[kSecValueData as String] = data
-        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        q[kSecAttrLabel as String] = "The Tony Awards: OpenRouter key"
-        let ok = SecItemAdd(q as CFDictionary, nil) == errSecSuccess
-        cached = .some(ok ? trimmed : nil)
-        return ok
+        do {
+            try data.write(to: file, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+            cached = .some(trimmed)
+            return true
+        } catch {
+            return false
+        }
     }
 
     static func delete() {
         lock.lock(); defer { lock.unlock() }
-        SecItemDelete(query as CFDictionary)
+        try? FileManager.default.removeItem(at: file)
         cached = .some(nil)
+    }
+
+    /// Earlier builds kept the key in the keychain. Move it across once, off the main thread
+    /// (reading it may show macOS's permission dialog, which must never freeze the app).
+    /// Returns true if a key was moved.
+    static func migrateFromKeychain() async -> Bool {
+        guard load() == nil else { return false }
+        return await Task.detached(priority: .utility) { () -> Bool in
+            var q = query
+            q[kSecReturnData as String] = true
+            q[kSecMatchLimit as String] = kSecMatchLimitOne
+            var item: CFTypeRef?
+            guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
+                  let key = (item as? Data).flatMap({ String(data: $0, encoding: .utf8) }), save(key) else { return false }
+            SecItemDelete(query as CFDictionary)
+            return true
+        }.value
     }
 }
 
@@ -206,28 +240,25 @@ enum Redactor {
         return description.split(whereSeparator: \.isWhitespace).map(String.init).joined(separator: " ")
     }
 
-    /// For a whole statement: the holder's name, street address, city/ZIP, email, phone and
-    /// account or card numbers are replaced before the text leaves the Mac.
-    static func blank(_ statement: String) -> String {
-        var lines = statement.components(separatedBy: .newlines)
-        let street = try? NSRegularExpression(
+    /// The account holder's name as printed on a statement: it sits on the line above the street
+    /// address. Other text can share that line ("PAUL WOLPE  We accept operator relay calls"), so
+    /// only the leading capitalized words are taken.
+    static func holderNames(in statement: String) -> Set<String> {
+        let lines = statement.components(separatedBy: .newlines)
+        guard let street = try? NSRegularExpression(
             pattern: #"^\s*\d{1,6}\s+[A-Za-z0-9 .'-]*\b(ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|LN|LANE|WAY|PL|PLACE|CT|COURT|TER|TERRACE|PKWY|HWY|SQ|CIR)\b.*$"#,
-            options: .caseInsensitive)
-        let poBox = try? NSRegularExpression(pattern: #"^\s*P\.?\s?O\.?\s+BOX\b.*$"#, options: .caseInsensitive)
-        let cityZip = try? NSRegularExpression(pattern: #"^\s*[A-Za-z .'-]+,?\s+[A-Z]{2}\s+\d{5}(-\d{4})?\s*$"#)
-        func matches(_ re: NSRegularExpression?, _ s: String) -> Bool {
-            re?.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
-        }
-        // The holder's name sits on the line above their street address. Other text can share that
-        // line ("PAUL WOLPE  We accept operator relay calls"), so take only the leading capitalized words.
-        var names: Set<String> = []
+            options: .caseInsensitive) else { return [] }
         // Words that appear in capitals on statements but are never part of a person's name.
         let notNames: Set<String> = ["PAYMENT", "BALANCE", "DUE", "DATE", "STATEMENT", "ACCOUNT", "NEW", "MINIMUM", "TOTAL", "AMOUNT",
                                      "ENCLOSED", "SUMMARY", "CARD", "CARDS", "CASH", "CREDIT", "PAGE", "PERIOD", "BANK", "BOX", "PO",
                                      "MEMBER", "SINCE", "CUSTOMER", "SERVICE", "PLATINUM", "CHECKING", "SAVINGS", "PLEASE", "YOUR", "THE"]
-        for i in lines.indices where matches(street, lines[i]) && !matches(poBox, lines[i]) {
+        var names: Set<String> = []
+        for i in lines.indices {
+            let line = lines[i]
+            guard street.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil,
+                  line.range(of: #"(?i)^\s*P\.?\s?O\.?\s+BOX\b"#, options: .regularExpression) == nil else { continue }
             // Usually the line directly above; page layout can slip another row in between. Further up,
-            // only accept a line that is nothing but a name, so ordinary capitalized text isn't blanked.
+            // only accept a line that is nothing but a name, so ordinary capitalized text isn't taken.
             for above in stride(from: i - 1, through: max(0, i - 3), by: -1) where above >= 0 {
                 let all = lines[above].split(separator: " ")
                 var words: [Substring] = []
@@ -243,6 +274,22 @@ enum Redactor {
                 }
             }
         }
+        return names
+    }
+
+    /// For a whole statement: the holder's name, street address, city/ZIP, email, phone and
+    /// account or card numbers are replaced before the text leaves the Mac.
+    static func blank(_ statement: String) -> String {
+        var lines = statement.components(separatedBy: .newlines)
+        let street = try? NSRegularExpression(
+            pattern: #"^\s*\d{1,6}\s+[A-Za-z0-9 .'-]*\b(ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|LN|LANE|WAY|PL|PLACE|CT|COURT|TER|TERRACE|PKWY|HWY|SQ|CIR)\b.*$"#,
+            options: .caseInsensitive)
+        let poBox = try? NSRegularExpression(pattern: #"^\s*P\.?\s?O\.?\s+BOX\b.*$"#, options: .caseInsensitive)
+        let cityZip = try? NSRegularExpression(pattern: #"^\s*[A-Za-z .'-]+,?\s+[A-Z]{2}\s+\d{5}(-\d{4})?\s*$"#)
+        func matches(_ re: NSRegularExpression?, _ s: String) -> Bool {
+            re?.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
+        }
+        var names = holderNames(in: statement)
         // Statements also print "Account holder: Jane Q. Public"-style labels.
         // The label may be in any case, but the name itself must be capitalized words after a colon
         // (otherwise "cardmember you have…" would turn "have" into a name).
@@ -302,6 +349,45 @@ struct CloudVerdict: Sendable {
     let category: Category
     /// False when the model is guessing (e.g. a payment to a person): those go to Double-Check.
     let confident: Bool
+    /// The business's website, when it's a business with one ("dunkindonuts.com").
+    var domain: String? = nil
+}
+
+/// Finds the website of businesses by name, so their logos can be shown.
+enum LogoFinder {
+    /// name → domain ("" when it isn't a business with a website, or the model doesn't know it).
+    static func domains(for names: [String]) async -> [String: String]? {
+        guard !names.isEmpty else { return [:] }
+        let system = """
+        For each numbered business or payee, give the main website domain of that business (for example \
+        "starbucks.com", "coned.com", "united.com"), lower case, without "www". Use null when it is a person, a \
+        generic description ("Card Payment", "Cash Withdrawal", "Check Deposit"), a small local place whose \
+        website you don't actually know, or anything you aren't sure about. Never invent a domain.
+        Reply with JSON only: {"sites": [{"id": 1, "domain": "example.com"}]}
+        """
+        let listing = names.enumerated().map { "\($0 + 1). \($1)" }.joined(separator: "\n")
+        let reply = await Timeout.run(90) {
+            try? await CloudAI.complete(system: system, user: listing, json: true, maxTokens: 60 * names.count + 3_000, timeout: 80)
+        }
+        guard let reply, let sites = CloudAI.object(from: reply)?["sites"] as? [[String: Any]] else { return nil }
+        var out: [String: String] = Dictionary(uniqueKeysWithValues: names.map { ($0, "") }.reduce(into: [(String, String)]()) { acc, pair in
+            if !acc.contains(where: { $0.0 == pair.0 }) { acc.append(pair) }
+        })
+        for site in sites {
+            guard let id = (site["id"] as? Int) ?? (site["id"] as? String).flatMap(Int.init), (1...names.count).contains(id) else { continue }
+            out[names[id - 1]] = clean(site["domain"] as? String) ?? ""
+        }
+        return out
+    }
+
+    /// "https://www.Starbucks.com/menu" → "starbucks.com"; nil for anything that isn't a plain domain.
+    static func clean(_ raw: String?) -> String? {
+        guard var d = raw?.lowercased().trimmingCharacters(in: .whitespaces), !d.isEmpty, d != "null" else { return nil }
+        for prefix in ["https://", "http://", "www."] where d.hasPrefix(prefix) { d.removeFirst(prefix.count) }
+        d = String(d.split(separator: "/").first ?? "")
+        guard d.contains("."), d.count <= 60, d.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" }) else { return nil }
+        return d
+    }
 }
 
 enum CloudSorter {
@@ -346,7 +432,8 @@ enum CloudSorter {
             let lines = examples.suffix(40).map { "\($0.name): \($0.category.rawValue)" }.joined(separator: "\n")
             text += "\n\nPlaces this person already sorted. Follow the same habits:\n\(lines)"
         }
-        text += "\n\nReply with JSON only: {\"results\": [{\"id\": 1, \"name\": \"…\", \"category\": \"…\", \"confident\": true}]} with one result per item."
+        text += "\n- website: the business's main website domain (\"starbucks.com\"), lower case, when you actually know it; otherwise null. Never invent one."
+        text += "\n\nReply with JSON only: {\"results\": [{\"id\": 1, \"name\": \"…\", \"category\": \"…\", \"confident\": true, \"website\": null}]} with one result per item."
         return text
     }
 
@@ -371,7 +458,7 @@ enum CloudSorter {
               let user = String(data: body, encoding: .utf8) else { return nil }
         let system = instructions(examples: examples)
         let reply = await Timeout.run(120) {
-            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 120 * items.count + 200)
+            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 250 * items.count + 4_000)
         }
         guard let reply, let results = CloudAI.object(from: reply)?["results"] as? [[String: Any]] else { return nil }
         var out: [String: CloudVerdict] = [:]
@@ -383,7 +470,8 @@ enum CloudSorter {
             let item = items[id - 1]
             var name = ((result["name"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if name.isEmpty || name.count > 60 { name = KeywordExtractor.displayName(for: item.description) }
-            out[item.key] = CloudVerdict(name: name, category: category, confident: (result["confident"] as? Bool) ?? false)
+            out[item.key] = CloudVerdict(name: name, category: category, confident: (result["confident"] as? Bool) ?? false,
+                                         domain: LogoFinder.clean(result["website"] as? String) ?? "")
         }
         return out
     }
@@ -536,7 +624,7 @@ enum CloudStatementReader {
         var sums: [String: Double] = [:], totals: [String: Double] = [:]
         for chunk in chunks {
             let reply = await Timeout.run(180) {
-                try? await CloudAI.complete(system: system, user: period + chunk, json: true, maxTokens: 16_000, timeout: 170)
+                try? await CloudAI.complete(system: system, user: period + chunk, json: true, maxTokens: 40_000, timeout: 170)
             }
             guard let reply, let object = CloudAI.object(from: reply) else { return nil }
             for t in (object["transactions"] as? [[String: Any]]) ?? [] {
@@ -563,6 +651,178 @@ enum CloudStatementReader {
             if abs(sum - printed) < 0.005 { matched += 1 } else { mismatched += 1 }
         }
         return Reading(rows: PDFStatement.removeInternalAdjustments(rows), verified: matched > 0 && mismatched == 0)
+    }
+}
+
+// MARK: - Drawing Tony
+
+/// Today's picture, drawn by a cloud image model from Paul's caricature: Tony himself, doing
+/// something tied to a purchase he just made. The caricature goes along as the reference so the
+/// face, suit and drawing style stay his.
+enum CloudImage {
+    static let defaultModel = "google/gemini-nano-banana-2.1"
+    static var model: String {
+        get { UserDefaults.standard.string(forKey: "cloudImageModel") ?? defaultModel }
+        set { UserDefaults.standard.set(newValue, forKey: "cloudImageModel") }
+    }
+
+    struct Scene: Sendable {
+        let scene: String
+        let caption: String
+    }
+
+    /// One sentence saying what Tony is doing, and the nomination line that goes with it.
+    static func scene(merchant: String, category: String, amount: Double, when: String) async -> Scene? {
+        let system = """
+        You design today's picture for The Tony Awards, a playful personal budgeting app. The picture shows \
+        Tony, a cartoon businessman in a dark suit, doing something tied to a purchase he just made. Seeing \
+        it should make him laugh because it is so specifically about what he really did.
+
+        Given the purchase, reply with JSON only: {"scene": "...", "caption": "..."}
+
+        scene: one sentence describing what Tony is holding or doing and where, as concretely tied to this \
+        exact business as you can. Use what the business is known for: its products, its colors, its setting. \
+        Examples: Dunkin' -> "holding an iced coffee in an orange-and-pink cup and a box of donuts, outside a \
+        donut shop with an orange and pink awning"; United Airlines -> "proudly holding a toy passenger jet \
+        with a blue tail at an airport gate, a rolling suitcase beside him"; Wynn Las Vegas -> "fanning out \
+        playing cards at a casino table under a curved bronze hotel tower"; Con Edison -> "holding a glowing \
+        light bulb next to an electricity meter". One clear action, one clear setting. Do not ask for any \
+        words, lettering or logos in the picture.
+
+        caption: one witty awards-show nomination, at most 14 words, starting with "Nominated for Best", about \
+        this purchase. Light accounting humor is welcome; never negative about spending. Do not mention the amount.
+        """
+        let user = "Purchase: \(merchant) (\(category)), \(Money.format(amount)), \(when)."
+        let reply = await Timeout.run(40) {
+            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 3_000, temperature: 0.9, timeout: 35)
+        }
+        guard let reply, let o = CloudAI.object(from: reply), let scene = (o["scene"] as? String), !scene.isEmpty else { return nil }
+        var caption = ((o["caption"] as? String) ?? "").replacingOccurrences(of: "*", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\" \n"))
+        if !caption.hasPrefix("Nominated") || caption.count > 140 { caption = "Nominated for Best Supporting Role at \(merchant)." }
+        return Scene(scene: scene, caption: caption)
+    }
+
+    /// Draws the scene with the caricature as the model for Tony. Nil if it couldn't be drawn.
+    static func draw(scene: String, reference: Data) async -> Data? {
+        guard let key = CloudKey.load() else { return nil }
+        let prompt = """
+        This is Tony, a cartoon character. Draw a new picture of this exact same character: the same face, \
+        hair, beard, smile, body proportions, dark suit and light blue tie, in the same clean cartoon style with \
+        bold outlines. In the new picture he is \(scene)
+        Show him full body or three-quarter, clearly the star of the picture, with a colorful, detailed cartoon \
+        background that fits the scene. Square picture. No words, letters, logos, captions or watermarks anywhere.
+        """
+        let body: [String: Any] = [
+            "model": model,
+            "modalities": ["image", "text"],
+            "messages": [["role": "user", "content": [
+                ["type": "text", "text": prompt],
+                ["type": "image_url", "image_url": ["url": "data:image/png;base64," + reference.base64EncodedString()]],
+            ]]],
+        ]
+        var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, timeoutInterval: 120)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("The Tony Awards", forHTTPHeaderField: "X-Title")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = (object["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any],
+              let images = message["images"] as? [[String: Any]],
+              let url = (images.first?["image_url"] as? [String: Any])?["url"] as? String,
+              let comma = url.firstIndex(of: ","),
+              let picture = Data(base64Encoded: String(url[url.index(after: comma)...])) else { return nil }
+        return picture
+    }
+}
+
+// MARK: - Noticing trips and events
+
+/// Nothing in a statement says "trip". But a flight, then a week of charges in another country,
+/// then a flight home, is a story anyone would recognize. The model finds those runs; the app
+/// adds up what they cost.
+enum StoryFinder {
+    struct Line: Sendable {
+        let id: UUID
+        let date: String
+        let text: String
+        let amount: Double
+        let category: String
+    }
+
+    private static let system = """
+    You are looking at a person's card and bank spending, one transaction per line:
+    number | date | merchant text (often ends with a city and state or country) | amount | category
+
+    Work out where home is (where most everyday purchases happen). Then find:
+
+    1. TRIPS: travel away from home. A trip is a run of days with spending in another city, state or country, \
+    plus the flights, trains, hotels, rental cars and tours that belong to it even when they were paid weeks earlier. \
+    One trip per journey; if several places were visited on one journey, it is one trip.
+    2. EVENTS: a cluster of unusual, related spending that is clearly one occasion or project, such as a wedding, a big party, \
+    a move, a renovation, or a medical episode. Be conservative: ordinary life is not an event.
+
+    Do not include everyday spending at home, commuting, regular subscriptions, or single purchases. \
+    Only include a transaction when you are reasonably sure it belongs. A weekend away with two or three charges still counts as a trip.
+
+    For each one give:
+    - kind: "trip" or "event"
+    - name: short and natural, like "Mongolia", "Las Vegas weekend", "Ireland and Northern Ireland", "Kitchen renovation"
+    - place: the main place (city, region or country), or null for an event with no particular place
+    - start and end: YYYY-MM-DD, the days actually away (or the span of the event), not the booking dates
+    - summary: one warm, specific sentence about what the spending shows. Do not mention any amounts.
+    - lines: the numbers of every transaction that belongs to it
+
+    Reply with JSON only: {"home": "...", "stories": [{"kind": "trip", "name": "", "place": "", "start": "", "end": "", "summary": "", "lines": [1, 2]}]}
+    """
+
+    /// Nil when the cloud couldn't be used. Each transaction lands in at most one story.
+    static func find(_ lines: [Line]) async -> [Story]? {
+        guard CloudAI.isEnabled, lines.count >= 20 else { return [] }
+        // Everything in one request when it fits (a holiday trip shouldn't be cut in two at New Year);
+        // only a very long history is split, a calendar year at a time.
+        var stories: [Story] = []
+        var used: Set<UUID> = []
+        let groups: [(key: String, value: [Line])] = lines.count <= 3_500
+            ? [("all", lines)]
+            : Dictionary(grouping: lines, by: { String($0.date.prefix(4)) }).sorted(by: { $0.key < $1.key })
+        for (_, year) in groups {
+            let numbered = year.sorted { $0.date < $1.date }
+            let listing = numbered.enumerated().map { i, l in
+                "\(i + 1) | \(l.date) | \(String(Redactor.scrub(l.text).prefix(60))) | \(String(format: "%.2f", l.amount)) | \(l.category)"
+            }.joined(separator: "\n")
+            let reply = await Timeout.run(600) {
+                try? await CloudAI.complete(system: system, user: listing, json: true, maxTokens: 64_000, timeout: 590, effort: "medium")
+            }
+            if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil {
+                print("DEBUG STORIES sent \(numbered.count) lines (\(listing.count) chars); reply \(reply?.count ?? -1) chars; ends: \(String((reply ?? "").suffix(80)).replacingOccurrences(of: "\n", with: " "))")
+            }
+            guard let reply, let found = CloudAI.object(from: reply)?["stories"] as? [[String: Any]] else { return nil }
+            for item in found {
+                guard let name = (item["name"] as? String)?.trimmingCharacters(in: .whitespaces), !name.isEmpty,
+                      let numbers = item["lines"] as? [Any] else { continue }
+                let ids = numbers.compactMap { ($0 as? Int) ?? ($0 as? String).flatMap(Int.init) }
+                    .filter { (1...numbered.count).contains($0) }
+                    .map { numbered[$0 - 1].id }
+                    .filter { used.insert($0).inserted }
+                guard ids.count >= 2 else { continue }
+                let dates = numbered.filter { ids.contains($0.id) }.map(\.date).sorted()
+                let valid = { (s: Any?) -> String? in
+                    guard let s = s as? String, DateParsing.parse(s, format: "yyyy-MM-dd") != nil else { return nil }
+                    return String(s.prefix(10))
+                }
+                stories.append(Story(kind: (item["kind"] as? String) == "event" ? .event : .trip,
+                                     name: String(name.prefix(60)),
+                                     place: (item["place"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                                     start: valid(item["start"]) ?? dates.first ?? "", end: valid(item["end"]) ?? dates.last ?? "",
+                                     summary: ((item["summary"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+                                     entryIDs: ids))
+            }
+        }
+        return stories.sorted { $0.start > $1.start }
     }
 }
 

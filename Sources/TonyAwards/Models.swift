@@ -192,6 +192,8 @@ struct MerchantInfo: Codable, Hashable {
     var confirmed = false
     /// An original bank description, shown so Tony can recognize the place.
     var sample: String
+    /// The business's website ("starbucks.com"), used to show its logo. Empty = looked for, none known.
+    var domain: String?
 
     init(name: String, category: Category?, source: Source, confirmed: Bool = false, sample: String) {
         self.name = name; self.category = category; self.source = source; self.confirmed = confirmed; self.sample = sample
@@ -205,6 +207,7 @@ struct MerchantInfo: Codable, Hashable {
         source = (try? c.decodeIfPresent(String.self, forKey: .source)).flatMap(Source.init(rawValue:)) ?? .ai
         confirmed = (try? c.decodeIfPresent(Bool.self, forKey: .confirmed)) ?? false
         sample = (try? c.decodeIfPresent(String.self, forKey: .sample)) ?? name
+        domain = try? c.decodeIfPresent(String.self, forKey: .domain)
     }
 }
 
@@ -356,6 +359,21 @@ struct CardCoverage: Identifiable, Hashable {
     var accounts: [String] = []
 }
 
+/// Months an account has no statement for, though the months around them (or other accounts) do.
+struct MissingStatements: Identifiable, Hashable {
+    var id: UUID { accountID }
+    let accountID: UUID
+    let account: String
+    let months: [Month]
+
+    var summary: String {
+        let names = months.prefix(4).map(\.name)
+        let list = names.count <= 2 ? names.joined(separator: " and ")
+            : names.dropLast().joined(separator: ", ") + " and " + (months.count > 4 ? "\(months.count - 3) more" : names.last!)
+        return "\(account): nothing for \(list)"
+    }
+}
+
 /// A file from the last import that couldn't be added, with a plain-English reason.
 struct ImportIssue: Identifiable, Hashable {
     let id = UUID()
@@ -371,7 +389,7 @@ struct Toast: Identifiable, Equatable {
 }
 
 enum SidebarItem: Hashable {
-    case overview, cashflow, transactions, report, ask, review, categories, accounts
+    case overview, cashflow, stories, transactions, report, ask, review, categories, accounts
 }
 
 /// "New Category…" was chosen somewhere; `then` receives the category once it's made.
@@ -387,6 +405,42 @@ struct TransactionFilter: Equatable {
     var accountID: UUID?
     var merchantKey: String?
     var needsCheck = false
+    /// Only the charges that belong to one trip or event.
+    var storyID: UUID?
+}
+
+/// A trip or an event the app noticed in the spending: a run of charges that belong together.
+/// Which charges belong is the model's call; every number shown is added up in code.
+struct Story: Codable, Identifiable, Hashable {
+    enum Kind: String, Codable { case trip, event }
+    var id = UUID()
+    var kind: Kind
+    var name: String
+    var place: String?
+    var start: String          // yyyy-MM-dd
+    var end: String
+    var summary: String
+    var entryIDs: [UUID]
+
+    /// Stable across re-detection, so a story Tony dismissed stays dismissed.
+    var fingerprint: String { "\(kind.rawValue)|\(name.lowercased())|\(start.prefix(7))" }
+
+    init(kind: Kind, name: String, place: String?, start: String, end: String, summary: String, entryIDs: [UUID]) {
+        self.kind = kind; self.name = name; self.place = place; self.start = start; self.end = end
+        self.summary = summary; self.entryIDs = entryIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
+        kind = (try? c.decodeIfPresent(String.self, forKey: .kind)).flatMap(Kind.init(rawValue:)) ?? .trip
+        name = try c.decode(String.self, forKey: .name)
+        place = try? c.decodeIfPresent(String.self, forKey: .place)
+        start = try c.decode(String.self, forKey: .start)
+        end = (try? c.decodeIfPresent(String.self, forKey: .end)) ?? start
+        summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? ""
+        entryIDs = (try? c.decodeIfPresent([UUID].self, forKey: .entryIDs)) ?? []
+    }
 }
 
 // MARK: - Formatting

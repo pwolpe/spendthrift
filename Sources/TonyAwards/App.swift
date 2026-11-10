@@ -28,13 +28,14 @@ struct TonyAwardsApp: App {
             CommandMenu("Go") {
                 Button("Overview") { BudgetStore.shared.selection = .overview }.keyboardShortcut("1")
                 Button("Cash Flow") { BudgetStore.shared.selection = .cashflow }.keyboardShortcut("2")
-                Button("Transactions") { BudgetStore.shared.selection = .transactions }.keyboardShortcut("3")
-                Button("Year in Review") { BudgetStore.shared.selection = .report }.keyboardShortcut("4")
-                Button("Ask the Academy") { BudgetStore.shared.selection = .ask }.keyboardShortcut("5")
+                Button("Trips & Events") { BudgetStore.shared.selection = .stories }.keyboardShortcut("3")
+                Button("Transactions") { BudgetStore.shared.selection = .transactions }.keyboardShortcut("4")
+                Button("Year in Review") { BudgetStore.shared.selection = .report }.keyboardShortcut("5")
+                Button("Ask the Academy") { BudgetStore.shared.selection = .ask }.keyboardShortcut("6")
                 Divider()
-                Button("Double-Check") { BudgetStore.shared.selection = .review }.keyboardShortcut("6")
-                Button("Categories") { BudgetStore.shared.selection = .categories }.keyboardShortcut("7")
-                Button("Accounts") { BudgetStore.shared.selection = .accounts }.keyboardShortcut("8")
+                Button("Double-Check") { BudgetStore.shared.selection = .review }.keyboardShortcut("7")
+                Button("Categories") { BudgetStore.shared.selection = .categories }.keyboardShortcut("8")
+                Button("Accounts") { BudgetStore.shared.selection = .accounts }.keyboardShortcut("9")
             }
         }
 

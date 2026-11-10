@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var key = ""
     @State private var model = CloudAI.model
     @State private var readsStatements = CloudAI.readsStatements
+    @State private var addsAutomatically = BudgetStore.addsDownloadsAutomatically
     @State private var testing = false
     @State private var message: (text: String, good: Bool)?
 
@@ -28,7 +29,7 @@ struct SettingsView: View {
                 if status.hasKey {
                     LabeledContent("Key") {
                         HStack {
-                            Label("Saved in this Mac's keychain", systemImage: "checkmark.seal.fill").foregroundStyle(Theme.good)
+                            Label("Saved on this Mac", systemImage: "checkmark.seal.fill").foregroundStyle(Theme.good)
                             Spacer()
                             Button("Remove", role: .destructive) {
                                 CloudKey.delete(); status.refreshKey(); message = nil
@@ -71,8 +72,18 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Statements") {
+                Toggle("Add new statements from Downloads automatically", isOn: $addsAutomatically)
+                    .onChange(of: addsAutomatically) {
+                        BudgetStore.addsDownloadsAutomatically = addsAutomatically
+                        store.refreshDownloads()
+                    }
+                Text("When you save a statement from your bank's website, it's added a few seconds later. Every addition can be undone.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("What leaves this Mac") {
-                Text("• To sort a place: the bank's text for it (like “TST*BLUE DOOR CAFE”), the typical amount, and how often it appears.\n• To read a statement: its text, with your name, address, email and account numbers blanked first.\n• To answer a question: the question itself.\n\nYour totals, balances and the saved data file are never sent. The key is stored in the keychain, not in the app.")
+                Text("• To sort a place: the bank's text for it (like “TST*BLUE DOOR CAFE”), the typical amount, and how often it appears.\n• To read a statement: its text, with your name, address, email and account numbers blanked first.\n• To answer a question: the question itself.\n\nYour totals, balances and the saved data file are never sent. The key is stored in a private file on this Mac, not in the app.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -88,7 +99,7 @@ struct SettingsView: View {
         let entered = key
         guard entered.trimmingCharacters(in: .whitespaces).count >= 10 else { return }
         guard CloudKey.save(entered) else {
-            message = ("The key couldn't be saved to the keychain.", false)
+            message = ("The key couldn't be saved.", false)
             return
         }
         key = ""

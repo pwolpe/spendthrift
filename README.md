@@ -35,7 +35,7 @@ Image Playground) and has no dependencies.
 
 ## Smarter AI (optional, recommended)
 
-**The Tony Awards → Settings…** takes an OpenRouter key (stored in the Mac's keychain, never in the
+**The Tony Awards → Settings…** takes an OpenRouter key (stored in a private file only his account can read, never in the
 app, its data, or this repository). Make Tony his own key at openrouter.ai with a spending limit.
 With a key:
 

@@ -11,6 +11,10 @@ import AppKit
 enum DebugHooks {
     static let env = ProcessInfo.processInfo.environment
     static var askQuestion: String? { env["TONY_AWARDS_ASK"] }
+    private static var storiesWaited = false
+    /// TONY_AWARDS_OFF="donut,trend": leave parts of the Overview out, to track down a drawing problem.
+    private static let offParts = Set((env["TONY_AWARDS_OFF"] ?? "").split(separator: ",").map(String.init))
+    static func off(_ part: String) -> Bool { offParts.contains(part) }
 
     static func startIfRequested() {
         guard let outDir = env["TONY_AWARDS_SNAPSHOT"] else { return }
@@ -54,6 +58,33 @@ enum DebugHooks {
             print("DEBUG SUGGEST \(t.description) → \(t.merchant) | \(t.category.rawValue) | \(t.source.rawValue)\(t.needsCheck ? " ?" : "") [\(key)] x\(txns.count)")
         }
         if env["TONY_AWARDS_SUGGEST_ONLY"] != nil { NSApp.terminate(nil); return }
+        // TONY_AWARDS_DRAW="Dunkin'|United Airlines": draw Tony for each purchase, to look at the results.
+        if let list = env["TONY_AWARDS_DRAW"], let cartoon = DailyTony.shared.cartoon, let reference = DailyTony.referencePNG(cartoon) {
+            for (i, merchant) in list.split(separator: "|").map(String.init).enumerated() {
+                let started = Date.now
+                guard let scene = await CloudImage.scene(merchant: merchant, category: "purchase", amount: 42, when: "yesterday") else {
+                    print("DRAW \(merchant): no scene"); continue
+                }
+                let planned = Date.now.timeIntervalSince(started)
+                let picture = await CloudImage.draw(scene: scene.scene, reference: reference)
+                print("DRAW \(merchant) [\(CloudImage.model)] plan \(String(format: "%.1f", planned))s, total \(String(format: "%.1f", Date.now.timeIntervalSince(started)))s, image \(picture?.count ?? 0) bytes\n  scene: \(scene.scene)\n  caption: \(scene.caption)")
+                try? picture?.write(to: outDir.appendingPathComponent("draw-\(i).png"))
+            }
+            NSApp.terminate(nil); return
+        }
+        // TONY_AWARDS_CHAT="first question|a follow-up|another": a conversation with Ask the Academy.
+        if let chat = env["TONY_AWARDS_CHAT"] {
+            var turns: [ChatAnalyst.Turn] = []
+            for q in chat.split(separator: "|").map(String.init) {
+                let started = Date.now
+                if let (answer, turn) = await ChatAnalyst.answer(q, history: turns, store: store) {
+                    turns.append(turn)
+                    print("CHAT Q: \(q)\n  A (\(String(format: "%.1f", Date.now.timeIntervalSince(started)))s): \(answer.headline)\n  looked up: \(answer.understood ?? "-") | rows \(answer.rows.count) | chart bars \(answer.chart.count)\(answer.chartIsLine ? " (line)" : "")")
+                    for row in answer.rows.prefix(4) { print("    \(row.label) — \(row.detail) — \(row.value)") }
+                } else { print("CHAT Q: \(q)\n  (no answer from the cloud)") }
+            }
+            NSApp.terminate(nil); return
+        }
         if env["TONY_AWARDS_SELFTEST"] != nil { await selfTest(files: files); NSApp.terminate(nil); return }
 
         await snap("03-review", outDir) { ReviewView(scrolls: false) }
@@ -73,6 +104,16 @@ enum DebugHooks {
             for c in flow.byInvestmentCategory { print("DEBUG FLOW   \(c.category.rawValue): in \(Int(c.moneyIn)) out \(Int(c.moneyOut))") }
             for c in store.cardCoverage { print("DEBUG CARD \(c.issuer): paid \(Int(c.paid)) x\(c.payments), uncovered \(Int(c.uncoveredPaid)) x\(c.uncoveredPayments), accounts \(c.accounts), statement spend \(Int(c.statementSpend))") }
         }
+        // Trips and events are found after sorting finishes; give that pass time to run.
+        for _ in 0..<420 where store.isFindingStories || (CloudAI.isEnabled && store.stories.isEmpty && store.transactions.count >= 20 && !storiesWaited) {
+            try? await Task.sleep(for: .milliseconds(500))
+            if !store.isFindingStories, store.stories.isEmpty { storiesWaited = true }
+        }
+        for s in store.stories {
+            let t = store.transactions(in: s)
+            print("DEBUG STORY \(s.kind.rawValue) | \(s.name) | \(s.place ?? "-") | \(s.start)…\(s.end) | \(t.count) charges | \(Int(t.reduce(0) { $0 + $1.amount })) | \(s.summary)")
+        }
+        await snap("06-stories", outDir) { StoriesView(scrolls: false) }
         await snap("09-allcaughtup", outDir) { ReviewView(scrolls: false) }
         await snap("10-new-category", outDir) {
             CategoryEditorSheet(request: CategoryEditorRequest(editing: CustomCategory(name: "Pets", symbol: "pawprint.fill", color: "teal")))

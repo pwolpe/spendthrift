@@ -70,7 +70,11 @@ enum PDFStatement {
         var cloudCheck: StatementCheck?
         // Card statements print an account summary ("Purchases +$346.81, Payments/Credits -$1,818.04")
         // rather than section totals: that's just as good a check.
-        if best.matched == 0, best.mismatched.isEmpty, matchesAccountSummary(text, rows: rows) { best.matched = 1 }
+        // (The summary may only read correctly in one of the two text orders, so try both.)
+        let summaryMatches = { (candidate: [CanonicalRow]) in
+            matchesAccountSummary(text, rows: candidate) || (positionalText.map { matchesAccountSummary($0, rows: candidate) } ?? false)
+        }
+        if best.matched == 0, best.mismatched.isEmpty, summaryMatches(rows) { best.matched = 1 }
         // Unless our own reading already adds up to the statement's printed totals, let the powerful
         // model read it too (when Tony's Mac has a key). It copes with layouts and scans the patterns
         // don't, and two independent readings that agree are as good as a printed total.
@@ -79,7 +83,7 @@ enum PDFStatement {
            let cloud = await CloudStatementReader.read(text: positionalText ?? text, closing: closing) {
             let total = { (list: [CanonicalRow]) in (list.reduce(0) { $0 + $1.amount } * 100).rounded() / 100 }
             let agree = cloud.rows.count == rows.count && total(cloud.rows) == total(rows)
-            if cloud.verified || agree || matchesAccountSummary(text, rows: cloud.rows) {
+            if cloud.verified || agree || summaryMatches(cloud.rows) {
                 if !agree { rows = cloud.rows }
                 cloudCheck = .verified
             } else if rows.isEmpty || !best.mismatched.isEmpty || positionalText == nil || cloud.rows.count >= rows.count {
@@ -270,7 +274,8 @@ enum PDFStatement {
 
     // MARK: Pattern matching
 
-    private static let moneyToken = #"^\(?-?\$?-?[\d,]*\d\.\d{2}\)?(?:CR|DR)?-?$"#
+    /// "1,234.56", "$12.00", "(45.00)", "12.00CR", and amounts under a dollar written ".79" or "-.79".
+    private static let moneyToken = #"^\(?-?\$?-?(?:[\d,]*\d)?\.\d{2}\)?(?:CR|DR)?-?$"#
     private static let monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
     private static let skipWords = ["total", "balance", "payment due", "minimum", "credit limit", "available credit",
                                     "previous", "new balance", "interest charged", "annual percentage", "page "]
@@ -298,8 +303,17 @@ enum PDFStatement {
         }
         // A charge whose amount is on a later line.
         var pending: (date: Date, description: String, linesWaited: Int)?
+        // The row just added from a bare amount with no "$": the next line may hold the real dollars.
+        var foreignCandidate: Int?
+        var foreignLinesLeft = 0
 
-        func add(_ date: Date, _ description: String, _ rawAmount: Double) {
+        // Statements with several cardholders print the holder's name in front of every merchant.
+        let holders = Redactor.holderNames(in: text).map { $0.uppercased() + " " }
+        func add(_ date: Date, _ fullDescription: String, _ rawAmount: Double) {
+            var description = fullDescription
+            if let name = holders.first(where: { description.uppercased().hasPrefix($0) }) {
+                description = String(description.dropFirst(name.count)).trimmingCharacters(in: .whitespaces)
+            }
             guard description.filter(\.isLetter).count >= 3,
                   !skipWords.contains(where: description.lowercased().hasPrefix) else { return }
             var amount = rawAmount
@@ -345,10 +359,26 @@ enum PDFStatement {
                 .filter { $0.contains(where: { $0.isLetter || $0.isNumber || "$-().,/*".contains($0) }) }
             let hasMoney = tokens.contains(where: isMoney)
 
+            // A foreign charge lists the foreign amount, then the dollars on the next line
+            // ("7,312.50" then "-$443.99"). The dollars are what was charged.
+            // The currency's name can sit in between ("7,312.50", "South African", "Rands", "-$443.99").
+            if let index = foreignCandidate {
+                foreignLinesLeft -= 1
+                if tokens.count == 1, isMoney(tokens[0]), tokens[0].contains("$"), let dollars = parseMoney(tokens[0]),
+                   index == out.rows.count - 1 {
+                    sectionSum += abs(dollars) - abs(out.rows[index].amount)
+                    out.rows[index].amount = ((sectionIsCredit && dollars > 0 ? -dollars : dollars) * 100).rounded() / 100
+                    foreignCandidate = nil
+                    continue
+                }
+                if foreignLinesLeft <= 0 || hasMoney || leadingDate(tokens, closing: closing) != nil { foreignCandidate = nil }
+            }
             // An amount on a line of its own finishes the pending charge.
             if let p = pending {
                 if tokens.count == 1, isMoney(tokens[0]), let amount = parseMoney(tokens[0]) {
+                    let before = out.rows.count
                     add(p.date, p.description, amount)
+                    if out.rows.count > before, !tokens[0].contains("$") { foreignCandidate = out.rows.count - 1; foreignLinesLeft = 4 }
                     pending = nil
                     continue
                 }
@@ -376,7 +406,8 @@ enum PDFStatement {
             }
             if tokens.first?.lowercased() == "total" { reconcile(line, tokens: tokens); continue }
             // Captions under pictures of paid checks ("001234567890 FEB 23 #0000000178 $180.00") repeat the Checks Paid rows.
-            if tokens.contains(where: { $0.hasPrefix("#") && $0.count > 6 && $0.dropFirst().allSatisfy(\.isNumber) }) { continue }
+            // (Ten digits: a store number such as "DUNKIN #365296" is a real purchase.)
+            if tokens.contains(where: { $0.hasPrefix("#") && $0.count >= 10 && $0.dropFirst().allSatisfy(\.isNumber) }) { continue }
 
             guard let start = (0..<min(tokens.count, 7)).first(where: { leadingDate(Array(tokens[$0...]), closing: closing) != nil }) else { continue }
             var checkNumber: String?
@@ -396,7 +427,12 @@ enum PDFStatement {
 
             var trailing: [String] = []
             while let last = tokens.last, isMoney(last), trailing.count < 2 { trailing.insert(tokens.removeLast(), at: 0) }
-            guard let amountToken = trailing.first, let amount = parseMoney(amountToken) else { continue }
+            // Two amounts at the end are usually "amount, running balance": take the first. But a
+            // foreign charge prints the foreign amount and then the dollars ("7,312.50 -$443.99"):
+            // when only the second carries a dollar sign, that's the one that was charged.
+            var amountToken = trailing.first
+            if trailing.count == 2, trailing[1].contains("$"), !trailing[0].contains("$") { amountToken = trailing[1] }
+            guard let amountToken, let amount = parseMoney(amountToken) else { continue }
             pending = nil
             add(date, checkNumber.map { "Check #\($0)" } ?? tokens.joined(separator: " "), amount)
         }

@@ -255,6 +255,7 @@ struct ReportContent: View {
                     RecurringCard(subscriptions: data.subscriptions)
                     MoneyInCard(data: data)
                 }
+                TaxTimeCard(months: Set(data.months))
             }
             Text("Prepared by The Tony Awards on \(Date.now.formatted(date: .long, time: .omitted)). Payments between accounts are left out of spending.")
                 .font(.caption)
@@ -547,7 +548,7 @@ private struct PlacesCard: View {
                             .monospacedDigit()
                             .foregroundStyle(i < 3 ? AnyShapeStyle(Gold.gradient) : AnyShapeStyle(.tertiary))
                             .frame(width: 20)
-                        CategoryIcon(category: place.category, size: 28)
+                        MerchantIcon(name: place.name, category: place.category, size: 28)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(place.name).font(.body.weight(.medium)).lineLimit(1)
                             Text(place.count == 1 ? "1 visit" : "\(place.count) visits")
@@ -573,7 +574,7 @@ private struct BiggestCard: View {
                 SectionHeader(title: "Biggest Purchases")
                 ForEach(Array(transactions.enumerated()), id: \.element.id) { i, t in
                     HStack(spacing: 12) {
-                        CategoryIcon(category: t.category, size: 28)
+                        MerchantIcon(name: t.merchant, category: t.category, size: 28)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(t.merchantDisplay).font(.body.weight(.medium)).lineLimit(1)
                             Text(t.date.formatted(.dateTime.month(.wide).day()))
@@ -610,7 +611,7 @@ private struct RecurringCard: View {
                 } else {
                     ForEach(subscriptions) { s in
                         HStack(spacing: 12) {
-                            CategoryIcon(category: s.category, size: 28)
+                            MerchantIcon(name: s.merchant, category: s.category, size: 28)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(s.merchant).font(.body.weight(.medium)).lineLimit(1)
                                 Text("Last charged \(s.lastCharge.formatted(.dateTime.month(.abbreviated).day()))")
@@ -692,6 +693,81 @@ private struct MoneyInCard: View {
 enum Gold {
     static let gradient = LinearGradient(colors: [Color(red: 0.98, green: 0.82, blue: 0.36), Color(red: 0.78, green: 0.56, blue: 0.13)],
                                          startPoint: .top, endPoint: .bottom)
+}
+
+// MARK: - For tax time
+
+/// The figures an accountant asks for, gathered in one place. Not tax advice: just the totals,
+/// with what each one is made of, so nothing has to be dug out of statements in April.
+private struct TaxTimeCard: View {
+    @Environment(BudgetStore.self) private var store
+    let months: Set<Month>
+
+    private struct Line: Identifiable {
+        var id: String { title }
+        let title: String
+        let note: String
+        let total: Double
+        let symbol: String
+        let color: Color
+        let details: [(String, Double)]
+    }
+
+    private var lines: [Line] {
+        let txns = store.transactions.filter { months.contains($0.month) }
+        func gather(_ title: String, _ note: String, _ symbol: String, _ color: Color, _ keep: (Transaction) -> Bool) -> Line? {
+            let list = txns.filter(keep)
+            let total = list.reduce(0) { $0 + $1.amount }
+            guard abs(total) > 0.005 else { return nil }
+            let byPlace = Dictionary(grouping: list, by: \.merchant).map { ($0.key, $0.value.reduce(0) { $0 + $1.amount }) }
+                .sorted { abs($0.1) > abs($1.1) }
+            return Line(title: title, note: note, total: total, symbol: symbol, color: color, details: Array(byPlace.prefix(4)))
+        }
+        let named = { (t: Transaction, words: [String]) in words.contains { t.merchant.localizedCaseInsensitiveContains($0) } }
+        return [
+            gather("Income tax payments", "Estimated and balance-due payments, less any refunds", "doc.text.fill", Category.taxes.color) { $0.lane == .taxes },
+            gather("Property tax", "Paid directly, not through a mortgage", "house.fill", Category.home.color) { named($0, ["Property Tax"]) },
+            gather("Mortgage and home loan payments", "Total paid; the interest part is on Form 1098 from the lender", "building.columns.fill", Category.home.color) {
+                $0.category == .home && named($0, ["Mortgage", "Loan"]) && !named($0, ["Property Tax"])
+            },
+            gather("Charitable giving", "Everything filed under Gifts & Giving", "gift.fill", Category.gifts.color) { $0.category == .gifts },
+            gather("Investment loan interest", "Interest paid on the loan used for investing", "percent", Category.investmentLoan.color) {
+                $0.category == .investmentLoan && named($0, ["Interest"])
+            },
+            gather("Medical and health", "Everything filed under Health & Fitness, gym included", "heart.fill", Category.health.color) { $0.category == .health },
+        ].compactMap { $0 }
+    }
+
+    var body: some View {
+        let lines = lines
+        if !lines.isEmpty {
+            Card {
+                VStack(alignment: .leading, spacing: 14) {
+                    SectionHeader(title: "For Tax Time", subtitle: "The totals your accountant will ask for. A starting point, not tax advice.")
+                    ForEach(lines) { line in
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: line.symbol)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 28, height: 28)
+                                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(line.color.gradient))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(line.title).font(.body.weight(.medium))
+                                Text(line.note).font(.caption).foregroundStyle(.secondary)
+                                Text(line.details.map { "\($0.0) \(Money.format($0.1, cents: false))" }.joined(separator: "  ·  "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            Text(Money.format(line.total)).font(.body.weight(.semibold)).monospacedDigit()
+                        }
+                        if line.id != lines.last?.id { Divider().padding(.leading, 40) }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // MARK: - PDF export

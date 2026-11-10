@@ -15,6 +15,10 @@ struct TransactionsView: View {
         if let m = f.month { list = list.filter { $0.month == m } }
         if let a = f.accountID { list = list.filter { $0.accountID == a } }
         if let k = f.merchantKey { list = list.filter { $0.merchantKey == k } }
+        if let s = f.storyID, let story = store.stories.first(where: { $0.id == s }) {
+            let ids = Set(story.entryIDs)
+            list = list.filter { ids.contains($0.id) }
+        }
         if f.needsCheck { list = list.filter(\.needsCheck) }
         if !search.isEmpty {
             list = list.filter {
@@ -79,7 +83,7 @@ struct TransactionsView: View {
 
             TableColumn("Place", value: \.merchant) { t in
                 HStack(spacing: 10) {
-                    CategoryIcon(category: t.category, size: 26)
+                    MerchantIcon(name: t.merchant, category: t.category, size: 26)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(t.merchant).font(.body.weight(.medium)).lineLimit(1)
                         Text(t.description).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -173,6 +177,9 @@ private struct FilterBar: View {
             if store.transactionFilter.needsCheck {
                 chip("AI guesses", symbol: "sparkles") { store.transactionFilter.needsCheck = false }
             }
+            if let id = store.transactionFilter.storyID {
+                chip(store.stories.first { $0.id == id }?.name ?? "One trip", symbol: "airplane") { store.transactionFilter.storyID = nil }
+            }
             if store.transactionFilter != TransactionFilter() {
                 Button("Clear") { store.transactionFilter = TransactionFilter() }
                     .buttonStyle(.borderless)
@@ -235,7 +242,7 @@ private struct TransactionInspector: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(spacing: 10) {
-                    CategoryIcon(category: t.category, size: 56)
+                    MerchantIcon(name: t.merchant, category: t.category, size: 56)
                     TextField("Name", text: $name)
                         .textFieldStyle(.plain)
                         .font(.title2.weight(.bold))

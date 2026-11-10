@@ -91,6 +91,13 @@ private struct AccountCard: View {
                     }
                 }
                 .font(.callout)
+                if let missing = store.missingStatements.first(where: { $0.accountID == account.id }) {
+                    Label("No statement for \(missing.months.prefix(6).map(\.shortName).joined(separator: ", "))\(missing.months.count > 6 ? " and \(missing.months.count - 6) more" : ""). Download \(missing.months.count == 1 ? "it" : "them") from the bank and I'll add \(missing.months.count == 1 ? "it" : "them").",
+                          systemImage: "calendar.badge.exclamationmark")
+                        .font(.callout)
+                        .foregroundStyle(Theme.caution)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .onAppear { name = account.name }

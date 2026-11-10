@@ -392,7 +392,7 @@ private struct InvestmentsCard: View {
                         Divider().gridCellUnsizedAxes(.horizontal)
                         GridRow {
                             HStack(spacing: 10) {
-                                CategoryIcon(category: line.category, size: 26)
+                                MerchantIcon(name: line.name, category: line.category, size: 26)
                                 VStack(alignment: .leading, spacing: 0) {
                                     Text(line.name).font(.body.weight(.medium)).lineLimit(1)
                                     Text(line.category.displayName).font(.caption).foregroundStyle(.secondary)

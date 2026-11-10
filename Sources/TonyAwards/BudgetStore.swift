@@ -18,6 +18,8 @@ final class BudgetStore {
     private(set) var months: [Month] = []
     private(set) var reviewItems: [ReviewItem] = []
     private(set) var cardCoverage: [CardCoverage] = []
+    private(set) var missingStatements: [MissingStatements] = []
+    private(set) var domainByName: [String: String] = [:]
     @ObservationIgnored private var spendingByMonth: [Month: [Transaction]] = [:]
     @ObservationIgnored private var dateCache: [String: Date] = [:]
 
@@ -47,6 +49,9 @@ final class BudgetStore {
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var aiAttempted: Set<String> = []
     @ObservationIgnored private var cloudAttempted: Set<String> = []
+    @ObservationIgnored private var autoAttempted: Set<URL> = []
+    @ObservationIgnored private var downloadsWatcher: DispatchSourceFileSystemObject?
+    @ObservationIgnored private var downloadsDebounce: Task<Void, Never>?
     @ObservationIgnored private var relearnKeys: Set<String> = []
     @ObservationIgnored private var relearnTask: Task<Void, Never>?
     @ObservationIgnored private var lastImport: (entries: Set<UUID>, accounts: Set<UUID>, hashes: Set<String>)?
@@ -166,10 +171,36 @@ final class BudgetStore {
             coverage[issuer]?.accounts = library.accounts.filter { cardAccount[$0.id] == issuer }.map(\.name)
         }
         cardCoverage = coverage.values.sorted { $0.paid > $1.paid }
+        var domains: [String: String] = [:]
+        for info in library.merchants.values { if let d = info.domain, !d.isEmpty { domains[info.name] = d } }
+        domainByName = domains
         list.sort { $0.date < $1.date }
         transactions = list
         months = Array(Set(list.map(\.month))).sorted()
         spendingByMonth = Dictionary(grouping: list.filter(\.countsAsSpending), by: \.month)
+
+        // Which months is each account missing? A hole in the middle of an account that's normally
+        // busy, or an account that has fallen more than a month behind the others.
+        var missing: [MissingStatements] = []
+        let byAccount = Dictionary(grouping: list, by: \.accountID)
+        for account in library.accounts {
+            guard let txns = byAccount[account.id] else { continue }
+            let counts = Dictionary(grouping: txns, by: \.month).mapValues(\.count)
+            let covered = counts.keys.sorted()
+            guard covered.count >= 2, let first = covered.first, let last = covered.last else { continue }
+            var gaps: [Month] = []
+            let typical = counts.values.sorted()[counts.count / 2]
+            if typical >= 3 {
+                var m = first.adding(1)
+                while m < last { if counts[m] == nil { gaps.append(m) }; m = m.adding(1) }
+            }
+            if let newest = months.last {
+                var m = last.adding(1)
+                while m < newest, gaps.count < 12 { gaps.append(m); m = m.adding(1) }
+            }
+            if !gaps.isEmpty { missing.append(MissingStatements(accountID: account.id, account: account.name, months: gaps)) }
+        }
+        missingStatements = missing
 
         var items: [ReviewItem] = []
         for (key, txns) in Dictionary(grouping: list.filter(\.needsCheck), by: \.merchantKey) {
@@ -186,7 +217,12 @@ final class BudgetStore {
     private func sortRemaining() async {
         guard !isSuggesting else { return }
         isSuggesting = true
-        defer { isSuggesting = false }
+        defer {
+            isSuggesting = false
+            // Once everything has a category, look for the trips and events in it, and find logos.
+            Task { await findStoriesIfNeeded() }
+            Task { await findLogosIfNeeded() }
+        }
         // With a cloud key, the powerful model decides everything the built-in list doesn't know.
         if CloudAI.isEnabled { await sortWithCloud() }
         guard aiAvailable else { return }
@@ -264,6 +300,7 @@ final class BudgetStore {
                             library.merchants[key]?.category = verdict.category
                             library.merchants[key]?.name = verdict.name
                             library.merchants[key]?.source = verdict.confident ? .cloud : .cloudGuess
+                            library.merchants[key]?.domain = verdict.domain
                         }
                         if !verdicts.isEmpty { withAnimation(.snappy) { changed() } }
                     } else if batch.count > 4, anySucceeded || batch.count > 15 {
@@ -282,6 +319,80 @@ final class BudgetStore {
     func cloudBecameAvailable() {
         cloudAttempted.removeAll()
         Task { await sortRemaining() }
+    }
+
+    // MARK: - Logos
+
+    @ObservationIgnored private var isFindingLogos = false
+
+    /// The website of the business with this name, if known (its logo is fetched from there).
+    func domain(forPlace name: String) -> String? { domainByName[name] }
+
+    /// Businesses the app recognized by itself (Starbucks, Con Edison…) never went to the cloud
+    /// model, so nobody has said what their website is. Ask once, in the background.
+    private func findLogosIfNeeded() async {
+        guard CloudAI.isEnabled, !isFindingLogos else { return }
+        let used = Set(library.entries.map(\.merchantKey))
+        let unknown = library.merchants.filter { $0.value.domain == nil && used.contains($0.key) }
+        guard !unknown.isEmpty else { return }
+        isFindingLogos = true
+        defer { isFindingLogos = false }
+        for batch in Array(unknown).chunked(into: 80) {
+            guard let found = await LogoFinder.domains(for: batch.map(\.value.name)) else { return }
+            for (key, info) in batch { library.merchants[key]?.domain = found[info.name] ?? "" }
+            changed()
+        }
+    }
+
+    // MARK: - Trips and events
+
+    private(set) var isFindingStories = false
+
+    /// Trips and events, newest first, without the ones Tony said weren't.
+    var stories: [Story] {
+        let dismissed = library.dismissedStories ?? []
+        return (library.stories ?? []).filter { !dismissed.contains($0.fingerprint) }
+    }
+
+    func transactions(in story: Story) -> [Transaction] {
+        let ids = Set(story.entryIDs)
+        return transactions.filter { ids.contains($0.id) }
+    }
+
+    func dismissStory(_ story: Story) {
+        var dismissed = library.dismissedStories ?? []
+        dismissed.insert(story.fingerprint)
+        library.dismissedStories = dismissed
+        if transactionFilter.storyID == story.id { transactionFilter.storyID = nil }
+        withAnimation(.snappy) { changed() }
+        showToast("Removed “\(story.name)”. Its charges are untouched.", symbol: "checkmark.circle.fill")
+    }
+
+    /// What the stories were last worked out from: when the data changes, look again.
+    private var storiesBasis: String {
+        "\(library.entries.count)|\(Int(library.entries.reduce(0) { $0 + abs($1.amount) }))"
+    }
+
+    private func findStoriesIfNeeded() async {
+        guard CloudAI.isEnabled, !isFindingStories, !isImporting, !isSuggesting else { return }
+        let basis = storiesBasis
+        guard library.storiesBasis != basis else { return }
+        isFindingStories = true
+        defer { isFindingStories = false }
+        let lines = transactions.filter { $0.countsAsSpending && !$0.isUnknown }.map {
+            StoryFinder.Line(id: $0.id, date: DateParsing.iso.string(from: $0.date), text: $0.description,
+                             amount: $0.amount, category: $0.category.displayName)
+        }
+        guard let found = await StoryFinder.find(lines) else { return }      // offline: try again next time
+        guard storiesBasis == basis else { return }                          // more arrived meanwhile; a newer pass will run
+        let before = Set(stories.map(\.fingerprint))
+        library.stories = found
+        library.storiesBasis = basis
+        withAnimation(.snappy) { changed() }
+        if let fresh = stories.first(where: { !before.contains($0.fingerprint) }), !before.isEmpty || stories.count == 1 {
+            Notifier.post(title: fresh.kind == .trip ? "I noticed a trip" : "I noticed something",
+                          body: "\(fresh.name): \(Money.format(transactions(in: fresh).reduce(0) { $0 + $1.amount }, cents: false)) across \(fresh.entryIDs.count) charges.")
+        }
     }
 
     // MARK: - Changing categories by hand
@@ -481,7 +592,9 @@ final class BudgetStore {
         return "This file couldn't be read (\(ns.localizedDescription))."
     }
 
-    private func importFilesAsync(_ dropped: [URL]) async {
+    /// - automatic: the app found these in Downloads by itself. Nothing may interrupt Tony then:
+    ///   no password prompt, no column picker, no error sheet. Anything that needs him waits in the banner.
+    private func importFilesAsync(_ dropped: [URL], automatic: Bool = false) async {
         let (urls, fromFolder) = Self.expand(dropped)
         var issues: [ImportIssue] = []
         var added = 0, touched: [String] = [], verified = 0, mismatches: [String] = [], scanned = 0
@@ -502,7 +615,7 @@ final class BudgetStore {
             do {
                 // Some banks lock statements with a password (often part of an ID number). Ask for it.
                 if case .failure(PDFStatement.PDFError.locked) = reading {
-                    guard let password = askPassword(for: url) else { throw PDFStatement.PDFError.lockedAndSkipped }
+                    guard !automatic, let password = askPassword(for: url) else { throw PDFStatement.PDFError.lockedAndSkipped }
                     let data = try Data(contentsOf: url)
                     reading = .success((Self.hash(data), data, try await StatementReader.read(url, data: data, password: password)))
                 }
@@ -529,6 +642,7 @@ final class BudgetStore {
                         Task { await sortRemaining() }
                     }
                 case .needsMapping(let table, let signature, let name):
+                    guard !automatic else { throw StatementReader.ReadError.notAStatement }
                     pendingImports.append(PendingImport(fileURL: url, fileHash: hash, table: table, mapping: nil,
                                                         candidates: accounts.filter { $0.signature == signature },
                                                         suggestedName: name, signature: signature))
@@ -569,16 +683,23 @@ final class BudgetStore {
         if dropped.count > 0, urls.isEmpty {
             issues.append(ImportIssue(file: dropped[0].lastPathComponent, reason: "There were no statements in that folder."))
         }
-        if !issues.isEmpty { importIssues = issues }
+        if !issues.isEmpty, !automatic { importIssues = issues }
         if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil {
             print("DEBUG IMPORT files \(urls.count) added \(added) verified \(verified) scanned \(scanned) mismatched \(mismatches) issues \(issues.count)")
         }
-        if !touched.isEmpty {
+        if !touched.isEmpty, added > 0 || !automatic {
             lastImport = batch
             withAnimation(.snappy) { changed() }
-            showImportToast(added: added, accounts: touched, verified: verified, mismatches: mismatches, scanned: scanned)
+            showImportToast(added: added, accounts: touched, verified: verified, mismatches: mismatches, scanned: scanned,
+                            automatic: automatic)
             if selection == nil { selection = .overview }
             Task { await sortRemaining() }
+            if automatic {
+                Notifier.post(title: "New statement added",
+                              body: "\(added) \(added == 1 ? "transaction" : "transactions") from \(touched.joined(separator: ", ")), sorted and ready.")
+            }
+        } else if !touched.isEmpty {
+            changed()   // nothing new in them, but remember we've seen these files
         }
         refreshDownloads()
     }
@@ -617,6 +738,8 @@ final class BudgetStore {
         library.entries.removeAll { last.entries.contains($0.id) }
         library.accounts.removeAll { id in last.accounts.contains(id.id) && !library.entries.contains { $0.accountID == id.id } }
         library.importedHashes.subtract(last.hashes)
+        // He took it back out: don't quietly add it again from Downloads.
+        library.dismissedDownloads.formUnion(last.hashes)
         pruneUnusedPlaces()
         withAnimation(.snappy) { changed() }
         showToast("Removed. Nothing from that file was kept.", symbol: "arrow.uturn.backward.circle.fill")
@@ -714,8 +837,14 @@ final class BudgetStore {
         return ids
     }
 
-    private func showImportToast(added: Int, accounts names: [String], verified: Int = 0, mismatches: [String] = [], scanned: Int = 0) {
+    private func showImportToast(added: Int, accounts names: [String], verified: Int = 0, mismatches: [String] = [], scanned: Int = 0,
+                                 automatic: Bool = false) {
         let where_ = names.joined(separator: ", ")
+        if automatic, mismatches.isEmpty, scanned == 0 {
+            showToast("Found a new statement in Downloads and added \(added) \(added == 1 ? "transaction" : "transactions") to \(where_).",
+                      symbol: "sparkles", offersUndo: true)
+            return
+        }
         if scanned > 0, added > 0, mismatches.isEmpty {
             showToast("Added \(added) transactions to \(where_). \(scanned == 1 ? "One file was" : "\(scanned) files were") read from a picture, so give the amounts a quick look.",
                       symbol: "text.viewfinder", offersUndo: true)
@@ -818,8 +947,48 @@ final class BudgetStore {
         let known = library.importedHashes.union(library.dismissedDownloads)
         Task.detached(priority: .utility) {
             let found = Self.scanDownloads(excluding: known)
-            await MainActor.run { self.downloadCandidates = found }
+            await MainActor.run { self.foundInDownloads(found) }
         }
+    }
+
+    /// New statements are simply added (Tony can undo). Only ones that need him, such as a locked
+    /// PDF, wait in the "New in your Downloads" banner.
+    private func foundInDownloads(_ found: [URL]) {
+        guard Self.addsDownloadsAutomatically else { downloadCandidates = Array(found.prefix(5)); return }
+        let fresh = found.filter { !autoAttempted.contains($0) }
+        downloadCandidates = Array(found.filter { autoAttempted.contains($0) }.prefix(5))
+        guard !fresh.isEmpty, !isImporting else { return }
+        autoAttempted.formUnion(fresh)
+        Task { await importFilesAsync(fresh, automatic: true) }
+    }
+
+    static var addsDownloadsAutomatically: Bool {
+        get { UserDefaults.standard.object(forKey: "addsDownloadsAutomatically") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "addsDownloadsAutomatically") }
+    }
+
+    /// Watches the Downloads folder while the app is open, so a statement saved from the bank's
+    /// website shows up in the app a few seconds later without Tony doing anything.
+    func watchDownloads() {
+        guard downloadsWatcher == nil, ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] == nil,
+              let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }
+        let descriptor = open(folder.path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: [.write, .rename], queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.downloadsDebounce?.cancel()
+                self.downloadsDebounce = Task {
+                    try? await Task.sleep(for: .seconds(4))      // let the browser finish writing the file
+                    guard !Task.isCancelled else { return }
+                    self.refreshDownloads()
+                }
+            }
+        }
+        source.setCancelHandler { close(descriptor) }
+        source.resume()
+        downloadsWatcher = source
     }
 
     nonisolated private static func scanDownloads(excluding known: Set<String>) -> [URL] {
@@ -847,7 +1016,7 @@ final class BudgetStore {
                 return !known.contains(hash(data))
             }
             .sorted { $0.1 > $1.1 }
-            .prefix(5)
+            .prefix(60)
             .map(\.0)
     }
 
@@ -871,7 +1040,7 @@ final class BudgetStore {
         var seen: Set<String> = []
         return spending.filter { $0.date >= cutoff }.reversed().compactMap { t in
             guard seen.insert(t.merchant).inserted else { return nil }
-            return DailyTony.Highlight(merchant: t.merchant, category: t.category, amount: t.amount)
+            return DailyTony.Highlight(merchant: t.merchant, category: t.category, amount: t.amount, date: t.date)
         }
     }
 

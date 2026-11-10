@@ -16,6 +16,7 @@ struct ContentView: View {
                     switch store.selection ?? .overview {
                     case .overview: OverviewView()
                     case .cashflow: CashFlowView()
+                    case .stories: StoriesView()
                     case .transactions: TransactionsView()
                     case .report: ReportView()
                     case .ask: AskView()
@@ -71,9 +72,15 @@ struct ContentView: View {
         }
         .task {
             Updater.shared.start()
+            store.watchDownloads()
             DebugHooks.startIfRequested()
             await DailyTony.shared.ensureCartoon()
             TonyArt.shared.prepare()
+            // A key saved by an earlier build moves out of the keychain, once.
+            if await CloudKey.migrateFromKeychain() {
+                CloudStatus.shared.refreshKey()
+                store.cloudBecameAvailable()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.refreshDownloads()
@@ -103,6 +110,9 @@ struct SidebarView: View {
                     .tag(SidebarItem.overview)
                 Label("Cash Flow", systemImage: "arrow.left.arrow.right.circle.fill")
                     .tag(SidebarItem.cashflow)
+                Label("Trips & Events", systemImage: "airplane.departure")
+                    .badge(Text(store.stories.isEmpty ? "" : "\(store.stories.count)").foregroundStyle(.tertiary))
+                    .tag(SidebarItem.stories)
                 Label("Transactions", systemImage: "list.bullet.rectangle.portrait.fill")
                     .tag(SidebarItem.transactions)
                 Label("Year in Review", systemImage: "chart.bar.xaxis")

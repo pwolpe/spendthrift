@@ -87,7 +87,7 @@ private struct ReviewRow: View {
     var body: some View {
         Card(padding: 14) {
             HStack(spacing: 14) {
-                CategoryIcon(category: item.info.category ?? .unsorted, size: 42)
+                MerchantIcon(name: item.info.name, category: item.info.category ?? .unsorted, size: 42)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.info.name).font(.headline)
                     Text(item.info.sample)
