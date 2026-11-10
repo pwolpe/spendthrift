@@ -186,6 +186,8 @@ enum MerchantResolver {
     /// - existingKeys: places already known, so "DICKSON'S FARMSTAND M" joins "DICKSON'S FARMSTAND".
     static func key(for description: String, amount: Double, existingKeys: some Collection<String>) -> String {
         if let known = KnownMerchants.match(description, amount: amount, generic: false) { return "known:" + known.name }
+        // A wire is whoever it was sent to, not the words every wire begins with.
+        if let recipient = KeywordExtractor.wireRecipient(description) { return "WIRE " + recipient }
         let keyword = KeywordExtractor.keyword(for: description)
         let shorter = existingKeys.filter { $0.count >= 6 && $0 != keyword && !$0.hasPrefix("known:") && keyword.hasPrefix($0) }
         return shorter.min { $0.count < $1.count } ?? keyword
@@ -196,6 +198,9 @@ enum MerchantResolver {
         if let known = KnownMerchants.match(description, amount: amount, generic: false) {
             let tentative = KnownMerchants.tentativeNames.contains(known.name)
             return MerchantInfo(name: known.name, category: known.category, source: tentative ? .ai : .known, confirmed: false, sample: description)
+        }
+        if let recipient = KeywordExtractor.wireRecipient(description) {
+            return MerchantInfo(name: "Wire to " + recipient.capitalized, category: nil, source: .ai, sample: description)
         }
         let name = KeywordExtractor.displayName(for: description)
         // Once Tony has his own categories, a generic word ("CLINIC" on a vet's name) is no longer

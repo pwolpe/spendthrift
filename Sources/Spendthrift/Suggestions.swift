@@ -14,6 +14,21 @@ enum KeywordExtractor {
 
     static func keyword(for description: String) -> String { keyword(for: description, maxTokens: 3) }
 
+    /// Who a wire went to. A bank prints every wire the same way ("Consumer Online International Wire
+    /// Via: … A/C: Hsbc Uk Bank Plc Birmingham …"), so without this every wire would be one payee.
+    /// Returns the recipient named after "A/C:", upper case, a few words: enough to tell recipients apart.
+    static func wireRecipient(_ description: String) -> String? {
+        let upper = description.uppercased()
+        guard upper.range(of: #"\bWIRE\b"#, options: .regularExpression) != nil, let start = upper.range(of: "A/C:") else { return nil }
+        var rest = String(upper[start.upperBound...])
+        // The recipient ends where the next labelled field begins.
+        if let end = rest.range(of: #"\s(REF|ORG|IMAD|TRN|BNF|OBI|SSN|ID)\s?[:/]"#, options: .regularExpression) { rest = String(rest[..<end.lowerBound]) }
+        let words = rest.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+            .filter { !$0.allSatisfy(\.isNumber) }
+        let name = words.prefix(4).joined(separator: " ")
+        return name.count >= 3 ? name : nil
+    }
+
     /// Removes card-processor prefixes ("TST*", "SQ *", "SP ") from upper-cased text.
     static func stripPrefixes(_ text: String) -> String {
         var s = text

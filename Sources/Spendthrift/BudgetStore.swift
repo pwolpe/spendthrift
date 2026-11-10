@@ -112,6 +112,7 @@ final class BudgetStore {
         let (loaded, result) = Library.load(paths: paths)
         library = loaded
         CustomCategories.set(library.customCategories ?? [])
+        splitWiresByRecipient()
         rebuild()
         switch result {
         case .restoredFromBackup(let date):
@@ -647,6 +648,41 @@ final class BudgetStore {
                 withAnimation(.snappy) { changed() }
             }
         }
+    }
+
+    /// Libraries from before wires were told apart hold every international wire as one payee.
+    /// Once, each wire is given to its own recipient. A recipient that is new starts with the old
+    /// payee's category as a guess and goes to Double-Check to be named.
+    private func splitWiresByRecipient() {
+        guard library.adopted?.contains("wires") != true else { return }
+        library.adopted = (library.adopted ?? []).union(["wires"])
+        // Which recipients each old payee turns into.
+        var becomes: [String: Set<String>] = [:]
+        for entry in library.entries where !entry.merchantKey.hasPrefix("known:") {
+            guard let recipient = KeywordExtractor.wireRecipient(entry.description), "WIRE " + recipient != entry.merchantKey else { continue }
+            becomes[entry.merchantKey, default: []].insert("WIRE " + recipient)
+        }
+        guard !becomes.isEmpty else { return }
+        for i in library.entries.indices {
+            let entry = library.entries[i]
+            guard let targets = becomes[entry.merchantKey], let recipient = KeywordExtractor.wireRecipient(entry.description) else { continue }
+            let key = "WIRE " + recipient
+            if library.merchants[key] == nil, let old = library.merchants[entry.merchantKey] {
+                if targets.count == 1 {
+                    // It was one recipient all along: everything the person decided about it carries over.
+                    library.merchants[key] = old
+                } else {
+                    var info = MerchantResolver.instant(description: entry.description, amount: entry.amount, bankCategory: nil)
+                    info.category = old.category
+                    library.merchants[key] = info
+                }
+            }
+            library.entries[i].merchantKey = key
+        }
+        // The lumped payees are empty now; a confirmed one would otherwise linger as a name with nothing in it.
+        for old in becomes.keys { library.merchants[old] = nil }
+        pruneUnusedPlaces()
+        library.save(paths: paths)
     }
 
     // MARK: - A category added after a library was sorted
