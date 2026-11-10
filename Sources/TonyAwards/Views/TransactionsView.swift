@@ -26,6 +26,7 @@ struct TransactionsView: View {
                 $0.merchant.localizedCaseInsensitiveContains(search)
                     || $0.description.localizedCaseInsensitiveContains(search)
                     || $0.category.displayName.localizedCaseInsensitiveContains(search)
+                    || ($0.note?.localizedCaseInsensitiveContains(search) ?? false)
             }
         }
         return list.sorted(using: sortOrder)
@@ -229,6 +230,7 @@ private struct TransactionInspector: View {
     @Environment(BudgetStore.self) private var store
     let transaction: Transaction
     @State private var name = ""
+    @State private var note = ""
 
     private var sameplace: [Transaction] { store.transactions.filter { $0.merchantKey == transaction.merchantKey } }
 
@@ -274,6 +276,19 @@ private struct TransactionInspector: View {
                     Label(reason.text, systemImage: reason.symbol)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    // The distinction the whole app turns on: was this money consumed, or put away?
+                    if t.amount > 0, t.lane == .everyday {
+                        Button("This Was Saving or Investing, Not Spending", systemImage: "arrow.up.forward.circle") {
+                            store.setCategory(.investing, forPlace: t.merchantKey)
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.callout)
+                        .help("Money moved to a brokerage, a retirement account or another investment. It stops counting as spending.")
+                    } else if t.amount > 0, t.lane == .investments {
+                        Label("Counted as investing, not spending", systemImage: "arrow.up.forward.circle.fill")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(Theme.goldDeep)
+                    }
                     Menu("Change only this charge") {
                         CategoryChoices { store.setCategory($0, for: [t.id], wholePlace: false) }
                     }
@@ -300,6 +315,17 @@ private struct TransactionInspector: View {
                     }
                 }
 
+                group("Your note") {
+                    TextField("What was this? (optional)", text: $note, axis: .vertical)
+                        .lineLimit(2...5)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { store.setNote(note, for: t.id) }
+                    Text("Anything you remember helps: who it was for, what trip, why. I use it when sorting, finding trips and answering questions.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 group("From your statement") {
                     Text(t.description)
                         .font(.callout.monospaced())
@@ -316,8 +342,13 @@ private struct TransactionInspector: View {
             }
             .padding(18)
         }
-        .onAppear { name = transaction.merchant }
-        .onChange(of: transaction.id) { name = transaction.merchant }
+        .onAppear { name = transaction.merchant; note = transaction.note ?? "" }
+        // Leaving a charge saves what was typed about it, whether or not Return was pressed.
+        .onChange(of: transaction.id) { old, _ in
+            store.setNote(note, for: old)
+            name = transaction.merchant; note = transaction.note ?? ""
+        }
+        .onDisappear { store.setNote(note, for: transaction.id) }
         .onChange(of: transaction.merchant) { name = transaction.merchant }
     }
 

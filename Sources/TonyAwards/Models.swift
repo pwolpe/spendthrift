@@ -155,6 +155,8 @@ struct LedgerEntry: Codable, Identifiable, Hashable {
     var merchantKey: String
     /// Set when this one line was given a category different from its place.
     var override: Category?
+    /// Anything the person remembers about this charge ("deposit for the Mongolia trip"). Optional; the AI reads it.
+    var note: String?
 
     var dedupeKey: String { "\(date)|\(description.uppercased())|\(String(format: "%.2f", amount))" }
 
@@ -176,6 +178,7 @@ struct LedgerEntry: Codable, Identifiable, Hashable {
         merchantKey = (try? c.decodeIfPresent(String.self, forKey: .merchantKey))
             ?? MerchantResolver.key(for: description, amount: amount, existingKeys: [String]())
         override = try? c.decodeIfPresent(Category.self, forKey: .override)
+        note = try? c.decodeIfPresent(String.self, forKey: .note)
     }
 }
 
@@ -221,6 +224,8 @@ struct Account: Codable, Identifiable, Hashable {
     var invertAmounts: Bool?
     /// Months some statement of this account says it covers, whether or not anything was bought then.
     var statementMonths: Set<String>?
+    /// Earlier card numbers of this same account (a card that was reissued), so their statements still land here.
+    var formerSignatures: [String]?
 
     init(name: String, signature: String) { self.name = name; self.signature = signature }
 
@@ -232,6 +237,7 @@ struct Account: Codable, Identifiable, Hashable {
         lastImport = try? c.decodeIfPresent(Date.self, forKey: .lastImport)
         invertAmounts = try? c.decodeIfPresent(Bool.self, forKey: .invertAmounts)
         statementMonths = try? c.decodeIfPresent(Set<String>.self, forKey: .statementMonths)
+        formerSignatures = try? c.decodeIfPresent([String].self, forKey: .formerSignatures)
     }
 }
 
@@ -254,6 +260,8 @@ struct Transaction: Identifiable, Hashable {
     let needsCheck: Bool
     /// This line has its own category, different from the rest of the place.
     let isOverride: Bool
+    /// What the person wrote about this charge, if anything.
+    var note: String? = nil
 
     var isUnknown: Bool { category == .unsorted }
     var isTransfer: Bool { category == .transfer }

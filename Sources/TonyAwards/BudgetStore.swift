@@ -171,6 +171,7 @@ final class BudgetStore {
                 account: accountNames[e.accountID] ?? "", accountID: e.accountID,
                 source: e.override != nil ? .user : (info?.source ?? .ai),
                 needsCheck: e.override == nil && unchecked, isOverride: e.override != nil))
+            if let note = e.note, !note.isEmpty { list[list.count - 1].note = note }
         }
         for issuer in coverage.keys {
             coverage[issuer]?.statementSpend = cardSpend[issuer] ?? 0
@@ -281,6 +282,7 @@ final class BudgetStore {
                 var item = CloudItem(key: key, description: info.sample, averageAmount: total / Double(entries.count),
                                      count: entries.count, bankCategory: entries.compactMap(\.bankCategory).first)
                 item.amounts = Array(entries.suffix(8).map { abs($0.amount) })
+                item.notes = entries.compactMap(\.note).filter { !$0.isEmpty }.suffix(4).map { String($0.prefix(200)) }
                 if let guess = info.category { item.appGuess = "\(info.name): \(guess.rawValue)" }
                 waiting.append((item, abs(total)))
             }
@@ -437,9 +439,10 @@ final class BudgetStore {
         guard library.storiesBasis != basis else { return }
         isFindingStories = true
         defer { isFindingStories = false }
-        let lines = transactions.filter { $0.countsAsSpending && !$0.isUnknown }.map {
-            StoryFinder.Line(id: $0.id, date: DateParsing.iso.string(from: $0.date), text: $0.description,
-                             amount: $0.amount, category: $0.category.displayName)
+        let lines = transactions.filter { $0.countsAsSpending && !$0.isUnknown }.map { t in
+            StoryFinder.Line(id: t.id, date: DateParsing.iso.string(from: t.date),
+                             text: t.note.map { "\(t.description) [the person's note: \($0.prefix(160))]" } ?? t.description,
+                             amount: t.amount, category: t.category.displayName)
         }
         guard let found = await StoryFinder.find(lines) else { return }      // offline: try again next time
         guard storiesBasis == basis else { return }                          // more arrived meanwhile; a newer pass will run
@@ -518,6 +521,22 @@ final class BudgetStore {
     }
 
     func place(_ key: String) -> MerchantInfo? { library.merchants[key] }
+
+    /// Saves what the person remembers about one charge. If the place is still a guess, the note is
+    /// reason enough to have the model look at it again.
+    func setNote(_ text: String, for id: Transaction.ID) {
+        guard let i = library.entries.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (library.entries[i].note ?? "") != trimmed else { return }
+        library.entries[i].note = trimmed.isEmpty ? nil : trimmed
+        let key = library.entries[i].merchantKey
+        changed()
+        if !trimmed.isEmpty, library.merchants[key]?.confirmed == false, CloudAI.isEnabled {
+            relearnKeys.insert(key)
+            cloudAttempted.remove(key)
+            Task { await sortRemaining() }
+        }
+    }
 
     /// Opens the page for one place: everything ever spent there.
     func showPlace(_ name: String) {
@@ -761,6 +780,7 @@ final class BudgetStore {
                 startNext()
             }
         }
+        joinReissuedCards()
         importProgress = nil
         isImporting = false
         if dropped.count > 0, urls.isEmpty {
@@ -830,8 +850,47 @@ final class BudgetStore {
     }
 
     /// Finds the account a file belongs to, or makes one. Never asks.
+    /// When a card is replaced, the bank gives it new last digits and its statements look like a new
+    /// account. Two cards from the same bank where one stops just as the other starts are one card:
+    /// their histories are joined under the newest number, and the old numbers keep leading here.
+    private func joinReissuedCards() {
+        var joined = false
+        while true {
+            // (Dates are kept as yyyy-MM-dd text, which sorts correctly as text.)
+            // "first" is where the account really gets going (its 5th percentile), because a new card's
+            // first statement often carries a few refunds dated months before the card existed.
+            var dates: [UUID: [String]] = [:]
+            for entry in library.entries { dates[entry.accountID, default: []].append(entry.date) }
+            var ranges: [UUID: (first: Date, last: Date)] = [:]
+            for (id, unsorted) in dates {
+                let list = unsorted.sorted()
+                if let first = DateParsing.parse(list[list.count / 20], format: "yyyy-MM-dd"),
+                   let last = DateParsing.parse(list[list.count - 1], format: "yyyy-MM-dd") { ranges[id] = (first, last) }
+            }
+            let cards = library.accounts.filter { $0.signature.hasPrefix("pdf:") && Self.issuer(in: $0.name) != nil && !$0.name.contains("Checking") && !$0.name.contains("Savings") }
+            var pair: (old: Account, new: Account)?
+            search: for older in cards {
+                for newer in cards where newer.id != older.id && Self.issuer(in: newer.name) == Self.issuer(in: older.name) {
+                    guard let a = ranges[older.id], let b = ranges[newer.id], a.first < b.first else { continue }
+                    // The old one's last charge and the new one's first are within a few weeks of each other,
+                    // and the two barely overlap (charges posted around the changeover).
+                    let gap = b.first.timeIntervalSince(a.last) / 86_400
+                    if gap > -12, gap < 45 { pair = (older, newer); break search }
+                }
+            }
+            guard let pair, let keep = library.accounts.firstIndex(where: { $0.id == pair.new.id }) else { break }
+            for i in library.entries.indices where library.entries[i].accountID == pair.old.id { library.entries[i].accountID = pair.new.id }
+            library.accounts[keep].formerSignatures = (library.accounts[keep].formerSignatures ?? []) + [pair.old.signature] + (pair.old.formerSignatures ?? [])
+            library.accounts[keep].statementMonths = (library.accounts[keep].statementMonths ?? []).union(pair.old.statementMonths ?? [])
+            library.accounts.removeAll { $0.id == pair.old.id }
+            joined = true
+        }
+        if joined { changed() }
+    }
+
     private func account(for signature: String, name: String) -> (UUID, isNew: Bool) {
         if let exact = accounts.first(where: { $0.signature == signature }) { return (exact.id, false) }
+        if let former = accounts.first(where: { $0.formerSignatures?.contains(signature) == true }) { return (former.id, false) }
         // Same file shape, and one side doesn't know its card digits: treat as the same account.
         let base = { (s: String) in s.components(separatedBy: "|#")[0] }
         let digits = { (s: String) in s.components(separatedBy: "|#").dropFirst().first }

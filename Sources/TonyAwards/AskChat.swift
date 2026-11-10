@@ -133,7 +133,7 @@ enum ChatAnalyst {
             }
             if let from = q.from, t.date < from { return false }
             if let to = q.to, t.date > to { return false }
-            if let p = q.place, !(t.merchant.localizedCaseInsensitiveContains(p) || t.description.localizedCaseInsensitiveContains(p)) { return false }
+            if let p = q.place, !(t.merchant.localizedCaseInsensitiveContains(p) || t.description.localizedCaseInsensitiveContains(p) || (t.note?.localizedCaseInsensitiveContains(p) ?? false)) { return false }
             if let a = q.account, !t.account.localizedCaseInsensitiveContains(a) { return false }
             if let ids = tripIDs, !ids.contains(t.id) { return false }
             if q.trip != nil, tripIDs == nil { return false }

@@ -27,6 +27,13 @@ struct OverviewView: View {
                 if !store.reviewItems.isEmpty, !store.isSuggesting { reviewBanner }
                 if !store.missingStatements.isEmpty, !store.isImporting { missingBanner }
 
+                // The judgment that matters most, always in sight: did consumption stay within income?
+                if store.months.count > 2, let period = ReportData.periods(for: store).first {
+                    Button { store.selection = .cashflow } label: {
+                        VerdictCard(data: CashFlowData(store: store, period: period), compact: true)
+                    }
+                    .buttonStyle(.plain)
+                }
                 if store.months.count > 1 { scopePicker }
 
                 if store.overviewShowsYear, let period = currentPeriod {

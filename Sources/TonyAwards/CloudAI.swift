@@ -326,6 +326,8 @@ struct CloudItem {
     var amounts: [Double] = []
     /// What the app's own rules guessed, if anything.
     var appGuess: String?
+    /// What the person wrote about charges at this place.
+    var notes: [String] = []
 }
 
 struct CloudVerdict: Sendable {
@@ -395,6 +397,12 @@ enum CloudSorter {
         - Software, apps and online services billed regularly are Subscriptions. Property tax, mortgage, rent, condo \
         fees, furniture and repairs are Home. Insurance, phone, internet and power are Bills & Utilities.
         - Name a credit card bill payment "<Issuer> Card Payment" (for example "Chase Card Payment").
+        - Saving is not spending. Money moved into a brokerage, retirement account (IRA, 401k), 529 plan, \
+        robo-advisor, crypto exchange, private fund or other investment is "Investing & Capital Calls", never an \
+        everyday spending category, even though the money left the bank account. Getting this right matters more \
+        than anything else here: the app tells the person whether they spent more than they earned.
+        - "notes", when present, are what the person wrote about these charges in their own words. They know what \
+        happened: let a note decide the category and whether you are confident.
         - If "bank_category" is given it is the bank's own guess, and "app_guess" is this app's: useful hints, often too \
         broad. Decide for yourself.
         - "amounts" lists some of the actual amounts. A credit card bill payment changes every month. The same fixed \
@@ -436,6 +444,7 @@ enum CloudSorter {
             if let bank = item.bankCategory { entry["bank_category"] = bank }
             if item.amounts.count > 1 { entry["amounts"] = item.amounts.map { ($0 * 100).rounded() / 100 } }
             if let guess = item.appGuess { entry["app_guess"] = guess }
+            if !item.notes.isEmpty { entry["notes"] = item.notes }
             return entry
         }
         guard let body = try? JSONSerialization.data(withJSONObject: ["items": payload]),

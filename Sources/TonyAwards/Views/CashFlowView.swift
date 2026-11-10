@@ -52,6 +52,14 @@ struct CashFlowData {
     var borrowed: Double { flow(.investmentLoan).moneyIn }
     var earned: Double { income + unsortedIn }
 
+    /// Income is what was earned plus what investments paid out. Selling an investment or borrowing
+    /// brings in cash too, but it is not income.
+    var totalIncome: Double { earned + fromInvestments }
+    /// Consumption is what is gone for good: lived on, paid in taxes, paid in interest. Investing is not in it.
+    var consumed: Double { spending + taxes + loanInterest }
+    /// Positive: lived within income, and this much was left to save or invest. Negative: spent more than came in.
+    var surplus: Double { totalIncome - consumed }
+
     var everydayResult: Double { income + unsortedIn - spending - taxes }
     var investmentNet: Double { investmentIn - investmentOut }
     var netCash: Double { everydayResult + investmentNet }
@@ -180,6 +188,7 @@ struct CashFlowContent: View {
                     .font(.title3)
                     .foregroundStyle(.secondary)
             }
+            VerdictCard(data: data)
             PurposeCard(data: data)
             HStack(alignment: .top, spacing: 22) {
                 StatementCard(data: data, open: interactive ? open : nil)
@@ -204,6 +213,77 @@ struct CashFlowContent: View {
     private func openPlace(_ key: String) {
         store.transactionFilter = TransactionFilter(merchantKey: key)
         store.selection = .transactions
+    }
+}
+
+// MARK: - The verdict
+
+/// The one judgment the app makes: did consumption stay within income? Investing never counts
+/// against it. Spending more than was earned always does.
+struct VerdictCard: View {
+    let data: CashFlowData
+    var compact = false
+
+    var body: some View {
+        let income = data.totalIncome, consumed = data.consumed
+        let within = data.surplus >= 0
+        let share = income > 0 ? consumed / income : 0
+        let color: Color = within ? Theme.good : .red
+        Card(padding: compact ? 14 : 20) {
+            VStack(alignment: .leading, spacing: compact ? 8 : 14) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: within ? "checkmark.seal.fill" : "exclamationmark.triangle.fill").foregroundStyle(color)
+                        .font(compact ? .title3 : .title2)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(income <= 0 ? "No income found for this period"
+                             : within ? "You lived within your income" : "You spent \(Money.format(-data.surplus, cents: false)) more than you earned")
+                            .font(.system(size: compact ? 17 : 24, weight: .bold, design: .serif))
+                        Text(detail(income: income, consumed: consumed, within: within, share: share))
+                            .font(compact ? .callout : .body)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    if compact { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary) }
+                }
+                if income > 0 {
+                    // Income is the whole track; consumption fills it. Past the end is living beyond it.
+                    GeometryReader { geo in
+                        let full = geo.size.width
+                        let track = within ? full : full / CGFloat(share)
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.red.opacity(within ? 0 : 0.85)).frame(width: full)
+                            Capsule().fill(Theme.good.opacity(0.18)).frame(width: track)
+                            Capsule().fill(Color.pink.gradient).frame(width: max(6, min(track, track * CGFloat(share))))
+                            Rectangle().fill(Color.primary).frame(width: 2, height: compact ? 16 : 22).offset(x: track - 1)
+                        }
+                    }
+                    .frame(height: compact ? 10 : 14)
+                    if !compact {
+                        HStack {
+                            Label("Consumed \(Money.format(consumed, cents: false))", systemImage: "circle.fill").foregroundStyle(.pink)
+                            Spacer()
+                            Text("Income \(Money.format(income, cents: false))").foregroundStyle(.secondary)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                    }
+                }
+            }
+        }
+    }
+
+    private func detail(income: Double, consumed: Double, within: Bool, share: Double) -> String {
+        guard income > 0 else { return "Add the account your pay goes into and this will say whether spending stayed within it." }
+        let cents = Int((share * 100).rounded())
+        let period = data.period.title
+        if within {
+            return "\(period): of every dollar that came in, \(cents)¢ was consumed (living, taxes, interest). "
+                + "\(Money.format(data.surplus, cents: false)) was left to save or invest."
+                + (data.built > 0.5 ? " Money you invested is not counted as spending." : "")
+        }
+        return "\(period): for every dollar of income, \(Money.format(share)) went to living, taxes and interest. "
+            + "The difference came out of savings, sold investments or borrowing. Investing is not part of this number."
     }
 }
 
