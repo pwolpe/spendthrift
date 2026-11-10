@@ -356,6 +356,62 @@ struct SpotArt: View {
     }
 }
 
+/// A name that can be changed where it stands, and looks like it: a pencil beside it, a dashed
+/// line under it when the pointer is near, and a word about Return while it's being typed.
+struct EditableName: View {
+    @Binding var text: String
+    var font: Font
+    var centered = false
+    var help = "Click to rename"
+    /// Called when Return is pressed.
+    var commit: () -> Void
+    /// Called when Escape is pressed, to put the old name back.
+    var cancel: () -> Void = {}
+    @FocusState private var editing: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: centered ? .center : .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                // The hidden text gives the field exactly the width of the name, so the pencil sits right after it.
+                Text(text.isEmpty ? "Name" : text + " ")
+                    .font(font).lineLimit(1).hidden()
+                    .overlay(alignment: centered ? .center : .leading) {
+                        TextField("Name", text: $text)
+                            .textFieldStyle(.plain)
+                            .font(font)
+                            .multilineTextAlignment(centered ? .center : .leading)
+                            .focused($editing)
+                            .onSubmit { commit(); editing = false }
+                            .onExitCommand { cancel(); editing = false }
+                    }
+                    .overlay(alignment: .bottom) {
+                        // The line a form leaves for writing on.
+                        ReceiptRule().opacity(editing ? 1 : (hovering ? 0.7 : 0)).offset(y: 3)
+                    }
+                Button { editing = true } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(editing ? Theme.accent : Color.secondary)
+                        .padding(5)
+                        .background(Color.primary.opacity(hovering || editing ? 0.07 : 0.04), in: .circle)
+                }
+                .buttonStyle(.plain)
+                .help(help)
+            }
+            if editing {
+                Text("Return to save · Esc to cancel")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .transition(.opacity)
+            }
+        }
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .animation(.easeOut(duration: 0.12), value: editing)
+        .help(help)
+    }
+}
+
 /// A small square scene of Tony and Paul, for the head of a page or a sheet: the playful stand-in
 /// for what would otherwise be a plain portrait.
 struct Vignette: View {

@@ -275,14 +275,9 @@ struct TransactionInspector: View {
                 ReceiptPaper(padding: 16) {
                     VStack(spacing: 10) {
                         MerchantIcon(name: t.merchant, category: t.category, size: 44)
-                        TextField("Name", text: $name)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 19, weight: .bold, design: .serif))
-                            .frame(minHeight: 26)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .multilineTextAlignment(.center)
-                            .onSubmit { store.renamePlace(t.merchantKey, to: name) }
-                            .help("Click to rename this payee")
+                        EditableName(text: $name, font: .system(size: 19, weight: .bold, design: .serif), centered: true,
+                                     help: "Rename this payee",
+                                     commit: { store.renamePlace(t.merchantKey, to: name) }, cancel: { name = t.merchant })
                         Text(t.date.formatted(date: .complete, time: .omitted))
                             .font(Theme.mono(11))
                             .foregroundStyle(.secondary)

@@ -48,15 +48,9 @@ struct PlaceView: View {
         return HStack(alignment: .center, spacing: 16) {
             MerchantIcon(name: name, category: first.category, size: 64)
             VStack(alignment: .leading, spacing: 6) {
-                TextField("Name", text: $draft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 30, weight: .bold, design: .serif))
-                    // A plain text field keeps the height of ordinary text unless told otherwise, which
-                    // cut the top off a name this large.
-                    .frame(minHeight: 40)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .onSubmit { rename(keys) }
-                    .help("Click to rename. Give two payees the same name and they become one.")
+                EditableName(text: $draft, font: .system(size: 30, weight: .bold, design: .serif),
+                             help: "Rename this payee. Give two payees the same name and they become one.",
+                             commit: { rename(keys) }, cancel: { draft = name })
                 HStack(spacing: 10) {
                     CategoryPill(category: first.isUnknown ? nil : first.category) { category in
                         for key in keys { store.setCategory(category, forPlace: key) }

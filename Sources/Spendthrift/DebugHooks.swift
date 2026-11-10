@@ -195,6 +195,12 @@ enum DebugHooks {
         if env["SPENDTHRIFT_PIECES"] != nil {
             await snap("30-masthead", outDir, width: 230) { Masthead().padding(16) }
             await snap("35-story", outDir, width: 700) { StoryView(scrolls: false) }
+            await snap("44-editable", outDir, width: 560) {
+                VStack(alignment: .leading, spacing: 20) {
+                    EditableName(text: .constant("Wire Transfer to Staci Ruiz"), font: .system(size: 30, weight: .bold, design: .serif), commit: {})
+                    EditableName(text: .constant("Pastis"), font: .system(size: 19, weight: .bold, design: .serif), centered: true, commit: {}).frame(maxWidth: .infinity)
+                }.padding(24)
+            }
             await snap("36-statements", outDir) { StatementsView(scrolls: false) }
             if let month = store.lastFullMonth {
                 for (i, kind) in PremiereCard.Kind.available(in: store, month: month).enumerated() {
