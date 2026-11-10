@@ -246,6 +246,12 @@ struct ReportContent: View {
                 Text("No spending in this period.").foregroundStyle(.secondary)
             } else {
                 MonthlyChartCard(data: data)
+                if interactive {
+                    switch data.period {
+                    case .year(let year): NoticedCard(scope: .year(year))
+                    case .last12: NoticedCard(scope: .last12)
+                    }
+                }
                 CategoryTableCard(data: data, open: interactive ? open : nil)
                 HStack(alignment: .top, spacing: 22) {
                     PlacesCard(places: data.places)

@@ -576,17 +576,9 @@ final class BudgetStore {
         defer { isFindingDiscoveries = false }
         // The last twelve months of real spending: recent enough to act on.
         let start = last.adding(-11)
-        let recent = transactions.filter { $0.month >= start && !$0.isTransfer && !$0.isUnknown && $0.lane != .investments }.suffix(3_000)
-        let lines = recent.map { t in
-            StoryFinder.Line(id: t.id, date: DateParsing.iso.string(from: t.date),
-                             text: t.note.map { "\(t.merchant) (\(t.description)) [note: \($0.prefix(120))]" } ?? "\(t.merchant) (\(t.description.prefix(40)))",
-                             amount: t.amount, category: t.category.displayName)
-        }
-        guard let found = await Discoverer.find(lines, notes: allNotes(limit: 20)) else { return }
+        guard let found = await discover(in: transactions.filter { $0.month >= start }) else { return }
         guard storiesBasis == basis else { return }
-        library.discoveries = found.map { finding in
-            Discovery(title: finding.title, detail: finding.detail, kind: finding.kind, entryIDs: finding.lines.map { lines[$0 - 1].id })
-        }
+        library.discoveries = found
         library.discoveriesBasis = basis
         withAnimation(.snappy) { changed() }
         if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
@@ -594,6 +586,88 @@ final class BudgetStore {
                 let list = transactions(in: d)
                 print("DEBUG NOTICED [\(d.kind)] \(d.title) | \(list.count) charges | \(Int(list.reduce(0) { $0 + $1.amount })) | \(d.detail)")
             }
+        }
+    }
+
+    /// Has the analyst read one stretch of charges and say what stands out in it.
+    private func discover(in stretch: [Transaction]) async -> [Discovery]? {
+        let recent = stretch.filter { !$0.isTransfer && !$0.isUnknown && $0.lane != .investments }.suffix(3_000)
+        let lines = recent.map { t in
+            StoryFinder.Line(id: t.id, date: DateParsing.iso.string(from: t.date),
+                             text: t.note.map { "\(t.merchant) (\(t.description)) [note: \($0.prefix(120))]" } ?? "\(t.merchant) (\(t.description.prefix(40)))",
+                             amount: t.amount, category: t.category.displayName)
+        }
+        guard let found = await Discoverer.find(lines, notes: allNotes(limit: 20)) else { return nil }
+        return found.map { finding in
+            Discovery(title: finding.title, detail: finding.detail, kind: finding.kind, entryIDs: finding.lines.map { lines[$0 - 1].id })
+        }
+    }
+
+    // MARK: What was noticed in the month or year on screen
+
+    /// Calendar years being read right now.
+    private(set) var readingYears: Set<Int> = []
+
+    /// Whether a month falls inside the rolling year the main list was worked out from.
+    private func isRecent(_ month: Month) -> Bool { months.last.map { month >= $0.adding(-11) } ?? false }
+
+    private func yearBasis(_ year: Int) -> String {
+        let list = library.entries.filter { $0.date.hasPrefix(String(year)) }
+        return "\(list.count)|\(Int(list.reduce(0) { $0 + abs($1.amount) }))"
+    }
+
+    /// What was noticed that touches this month or year, with only the charges that fall inside it.
+    func noticed(in scope: NoticedScope) -> [(item: Discovery, charges: [Transaction])] {
+        let dismissed = library.dismissedDiscoveries ?? []
+        let source: [Discovery]
+        let inside: (Transaction) -> Bool
+        switch scope {
+        case .last12:
+            source = discoveries; inside = { _ in true }
+        case .year(let year):
+            source = library.discoveriesByYear?[String(year)]?.items ?? []
+            inside = { $0.month.year == year }
+        case .month(let month):
+            source = isRecent(month) ? discoveries : (library.discoveriesByYear?[String(month.year)]?.items ?? [])
+            inside = { $0.month == month }
+        }
+        let byID = Dictionary(transactions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return source.filter { !dismissed.contains($0.title.lowercased()) }.compactMap { item in
+            let charges = item.entryIDs.compactMap { byID[$0] }.filter(inside)
+            return charges.isEmpty ? nil : (item, charges)
+        }
+    }
+
+    /// True while the year this scope depends on is still being read.
+    func isReading(_ scope: NoticedScope) -> Bool {
+        switch scope {
+        case .last12: isFindingDiscoveries
+        case .year(let year): readingYears.contains(year)
+        case .month(let month): isRecent(month) ? isFindingDiscoveries : readingYears.contains(month.year)
+        }
+    }
+
+    /// An earlier year is read the first time it is looked at, and kept.
+    func readIfNeeded(_ scope: NoticedScope) async {
+        let year: Int
+        switch scope {
+        case .last12: return
+        case .year(let y): year = y
+        case .month(let month):
+            guard !isRecent(month) else { return }
+            year = month.year
+        }
+        let basis = yearBasis(year)
+        guard CloudAI.isEnabled, !isImporting, !readingYears.contains(year), library.discoveriesByYear?[String(year)]?.basis != basis else { return }
+        readingYears.insert(year)
+        defer { readingYears.remove(year) }
+        guard let found = await discover(in: transactions.filter { $0.month.year == year }) else { return }
+        var all = library.discoveriesByYear ?? [:]
+        all[String(year)] = YearFindings(basis: basis, items: found)
+        library.discoveriesByYear = all
+        withAnimation(.snappy) { changed() }
+        if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
+            for d in found { print("DEBUG NOTICED \(year) [\(d.kind)] \(d.title) | \(d.entryIDs.count) charges | \(d.detail)") }
         }
     }
 

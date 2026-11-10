@@ -53,7 +53,7 @@ struct OverviewView: View {
                             if !DebugHooks.off("places") { topPlacesCard(m) }
                         }
                         VStack(spacing: 20) {
-                            NoticedCard()
+                            NoticedCard(scope: .month(m))
                             if !DebugHooks.off("trend") { trendCard(m) }
                             ForecastCard()
                             if !DebugHooks.off("coming") { comingUpCard }
@@ -569,38 +569,55 @@ struct ForecastCard: View {
 /// What the analyst noticed reading every charge. Each line opens the charges behind it.
 struct NoticedCard: View {
     private var store: BudgetStore { .shared }
+    /// The month or year on screen: only what was noticed in it is shown, with that stretch's amounts.
+    var scope: NoticedScope = .last12
 
     var body: some View {
-        let found = store.discoveries
-        if !found.isEmpty {
-            Card {
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionHeader(title: "Things I noticed", subtitle: "From reading every charge of the last year")
-                    ForEach(Array(found.prefix(6).enumerated()), id: \.element.id) { i, item in
-                        let list = store.transactions(in: item)
-                        let total = list.reduce(0) { $0 + $1.amount }
-                        Button { store.showDiscovery(item) } label: {
-                            HStack(alignment: .top, spacing: 11) {
-                                Image(systemName: item.symbol).font(.title2).foregroundStyle(Theme.accent).frame(width: 28)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(alignment: .firstTextBaseline) {
-                                        Text(item.title).font(.body.weight(.semibold)).multilineTextAlignment(.leading)
-                                            .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                                        Spacer(minLength: 6)
-                                        Text(Money.format(abs(total), cents: false)).font(.body.weight(.semibold)).monospacedDigit()
-                                    }
-                                    Text(item.detail).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.leading)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
+        let found = store.noticed(in: scope)
+        let reading = store.isReading(scope)
+        Group {
+            if !found.isEmpty || reading {
+                Card {
+                    VStack(alignment: .leading, spacing: 12) {
+                        SectionHeader(title: "Things I noticed", subtitle: scope.label)
+                        if found.isEmpty {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text("Reading every charge…").font(.callout).foregroundStyle(.secondary)
                             }
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
-                        .contextMenu { Button("Not Interesting", systemImage: "xmark.circle") { store.dismissDiscovery(item) } }
-                        if i < min(found.count, 6) - 1 { Divider().padding(.leading, 39) }
+                        ForEach(Array(found.prefix(6).enumerated()), id: \.element.item.id) { i, entry in
+                            let item = entry.item
+                            let net = entry.charges.reduce(0) { $0 + $1.amount }
+                            // A charge and its refund net to nothing; show what was charged rather than "$0".
+                            let total = abs(net) >= 1 ? net : entry.charges.filter { $0.amount > 0 }.reduce(0) { $0 + $1.amount }
+                            Button {
+                                store.showCharges(TransactionFilter(ids: Set(entry.charges.map(\.id)), title: item.title))
+                            } label: {
+                                HStack(alignment: .top, spacing: 11) {
+                                    Image(systemName: item.symbol).font(.title2).foregroundStyle(Theme.accent).frame(width: 28)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(alignment: .firstTextBaseline) {
+                                            Text(item.title).font(.body.weight(.semibold)).multilineTextAlignment(.leading)
+                                                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                                            Spacer(minLength: 6)
+                                            Text(Money.format(abs(total), cents: false)).font(.body.weight(.semibold)).monospacedDigit()
+                                        }
+                                        Text(item.detail).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu { Button("Not Interesting", systemImage: "xmark.circle") { store.dismissDiscovery(item) } }
+                            if i < min(found.count, 6) - 1 { Divider().padding(.leading, 39) }
+                        }
                     }
                 }
             }
         }
+        // A year further back than the last twelve months is read the first time it is looked at.
+        .task(id: scope) { await store.readIfNeeded(scope) }
     }
 }

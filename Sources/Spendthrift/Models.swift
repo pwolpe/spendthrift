@@ -501,6 +501,25 @@ struct TransactionFilter: Equatable {
     var title: String?
 }
 
+/// What the analyst noticed in one calendar year, and the data it was worked out from.
+struct YearFindings: Codable, Hashable {
+    var basis: String
+    var items: [Discovery]
+}
+
+/// The stretch of time "Things I noticed" is being asked about.
+enum NoticedScope: Hashable {
+    case month(Month), year(Int), last12
+
+    var label: String {
+        switch self {
+        case .month(let m): "In \(m.title)"
+        case .year(let y): "In \(y)"
+        case .last12: "From reading every charge of the last year"
+        }
+    }
+}
+
 /// Something the model noticed reading every charge: a subscription paid twice, a habit that adds
 /// up, a fee nobody would choose to pay. The model picks the charges; the app adds them up.
 struct Discovery: Codable, Identifiable, Hashable {

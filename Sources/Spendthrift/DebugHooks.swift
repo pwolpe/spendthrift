@@ -144,6 +144,20 @@ enum DebugHooks {
             let t = txns[0]
             print("DEBUG SUGGEST \(t.description) → \(t.merchant) | \(t.category.rawValue) | \(t.source.rawValue)\(t.needsCheck ? " ?" : "") [\(key)] x\(txns.count)")
         }
+        // SPENDTHRIFT_NOTICED=<year>: what "Things I noticed" shows for the latest months and for that year, then quit.
+        if let wanted = env["SPENDTHRIFT_NOTICED"].flatMap(Int.init) {
+            func show(_ scope: NoticedScope) {
+                let found = store.noticed(in: scope)
+                print("NOTICED \(scope.label): \(found.count)")
+                for f in found.prefix(6) { print("   \(f.item.title) | \(f.charges.count) charges | \(Money.format(abs(f.charges.reduce(0) { $0 + $1.amount }), cents: false))") }
+            }
+            show(.last12)
+            for m in store.months.suffix(3) { show(.month(m)) }
+            await store.readIfNeeded(.year(wanted))
+            show(.year(wanted))
+            if let m = store.months.first(where: { $0.year == wanted && $0.month == 7 }) { show(.month(m)) }
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_HUNCH=1: ask for a best guess at every place on Double-Check, print them, then quit.
         if env["SPENDTHRIFT_HUNCH"] != nil {
             await store.guessWhatTheyWere()

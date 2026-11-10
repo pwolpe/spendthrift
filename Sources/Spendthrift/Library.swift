@@ -69,6 +69,8 @@ struct Library: Codable {
     var discoveries: [Discovery]?
     var discoveriesBasis: String?
     var dismissedDiscoveries: Set<String>?
+    /// The same, for earlier calendar years, each worked out the first time that year is looked at.
+    var discoveriesByYear: [String: YearFindings]?
     /// The original statement files that were kept (see `BudgetPaths.statementsFolder`).
     var sources: [SourceFile]?
 
@@ -92,6 +94,7 @@ struct Library: Codable {
         discoveriesBasis = try? c.decodeIfPresent(String.self, forKey: .discoveriesBasis)
         dismissedDiscoveries = try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedDiscoveries)
         sources = (try? c.decodeIfPresent(Lossy<SourceFile>.self, forKey: .sources))?.values
+        discoveriesByYear = try? c.decodeIfPresent([String: YearFindings].self, forKey: .discoveriesByYear)
         // Every line must belong to an account that still exists.
         let known = Set(accounts.map(\.id))
         entries.removeAll { !known.contains($0.accountID) }
