@@ -337,7 +337,7 @@ private struct StatTile: View {
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(tint)
                 Text(value)
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.system(size: 30, weight: .bold, design: .serif))
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)

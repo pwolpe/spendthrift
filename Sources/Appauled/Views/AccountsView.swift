@@ -9,7 +9,7 @@ struct AccountsView: View {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Accounts")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .font(.system(size: 30, weight: .bold, design: .serif))
                         Text("To update one, download a newer statement and drop it anywhere in this window. I'll find the right account and skip anything already here.")
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -56,8 +56,7 @@ private struct AccountCard: View {
                         .help("Click to rename")
                     Menu {
                         Button("Show Transactions", systemImage: "list.bullet") {
-                            store.transactionFilter = TransactionFilter(accountID: account.id)
-                            store.selection = .transactions
+                            store.showCharges(TransactionFilter(accountID: account.id))
                         }
                         Button("Amounts Look Backwards…", systemImage: "arrow.up.arrow.down") { confirmFlip = true }
                         Divider()
@@ -195,6 +194,8 @@ struct CoverageCard: View {
                     }
                     if missingCount > 0 || !never.isEmpty {
                         Divider()
+                        HStack(alignment: .top, spacing: 16) {
+                        SpotArt(name: "missing", height: 96)
                         VStack(alignment: .leading, spacing: 6) {
                             Text("To download").font(.callout.weight(.semibold))
                             ForEach(rows.filter { !$0.missing.isEmpty }) { row in
@@ -210,6 +211,7 @@ struct CoverageCard: View {
                                     .foregroundStyle(Theme.caution)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
+                        }
                         }
                     }
                 }

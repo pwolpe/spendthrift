@@ -48,7 +48,7 @@ struct StoriesView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 360), spacing: 18, alignment: .top)], alignment: .leading, spacing: 18) {
                     ForEach(stories) { StoryCard(story: $0) }
                 }
-                Text("I worked out which charges belong together; the totals are added up from your statements. If I got one wrong, use the ••• menu on its card.")
+                Text("Click a trip to see its charges. If one isn't a trip at all, right-click it.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity)
@@ -92,6 +92,7 @@ struct StoryCard: View {
     private var store: BudgetStore { .shared }   // not from the environment: menus and sheets don't always pass it down
     let story: Story
     var compact = false
+    @State private var hovering = false
 
     static func dates(_ story: Story) -> String {
         guard let start = DateParsing.parse(story.start, format: "yyyy-MM-dd"),
@@ -162,31 +163,25 @@ struct StoryCard: View {
                         }
                     }
                 }
-                if !compact {
-                    HStack {
-                        Button("See the Charges") { open() }
-                            .buttonStyle(.bordered)
-                        Spacer()
-                        Menu {
-                            Button(story.kind == .trip ? "This Isn't a Trip" : "This Isn't an Event", systemImage: "xmark.circle") {
-                                store.dismissStory(story)
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle").font(.title3)
-                        }
-                        .menuStyle(.borderlessButton)
-                        .menuIndicator(.hidden)
-                        .fixedSize()
-                    }
-                }
             }
         }
+        // The whole tile opens the trip. Saying "this isn't a trip" lives in the right-click menu,
+        // where it is there when wanted and out of the way when not.
         .contentShape(Rectangle())
-        .onTapGesture { if compact { open() } }
+        .onTapGesture { open() }
+        .onHover { hovering = $0 }
+        .scaleEffect(hovering ? 1.012 : 1)
+        .animation(.snappy(duration: 0.18), value: hovering)
+        .contextMenu {
+            Button(story.kind == .trip ? "This Isn't a Trip" : "This Isn't an Event", systemImage: "xmark.circle") {
+                store.dismissStory(story)
+            }
+        }
+        .help("Click to see the charges")
     }
 
     private func open() {
-        store.transactionFilter = TransactionFilter(storyID: story.id)
-        store.selection = .transactions
+        // One plain page of the trip's charges; the full table stays out of the way.
+        store.showCharges(TransactionFilter(storyID: story.id))
     }
 }

@@ -42,11 +42,16 @@ struct OverviewView: View {
                 } else if let m = currentMonth {
                     header(m)
                     beyondEveryday(m)
+                    // Two balanced columns: this month on the left (where it went, and to whom),
+                    // the run of months and what's ahead on the right.
                     HStack(alignment: .top, spacing: 20) {
-                        if !DebugHooks.off("donut") { breakdownCard(m) }
+                        VStack(spacing: 20) {
+                            if !DebugHooks.off("donut") { breakdownCard(m) }
+                            if !DebugHooks.off("places") { topPlacesCard(m) }
+                        }
                         VStack(spacing: 20) {
                             if !DebugHooks.off("trend") { trendCard(m) }
-                            if !DebugHooks.off("places") { topPlacesCard(m) }
+                            ForecastCard()
                             if !DebugHooks.off("coming") { comingUpCard }
                         }
                         .frame(minWidth: 300, maxWidth: 420)
@@ -360,8 +365,7 @@ struct OverviewView: View {
                     VStack(spacing: 4) {
                         ForEach(totals, id: \.category) { item in
                             CategoryRow(category: item.category, total: item.total, fraction: item.total / max(sum, 1)) {
-                                store.transactionFilter = TransactionFilter(category: item.category, month: m)
-                                store.selection = .transactions
+                                store.showCharges(TransactionFilter(category: item.category, month: m))
                             }
                         }
                     }
@@ -484,5 +488,55 @@ private struct CategoryRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+    }
+}
+
+/// "Next month, about $38,000": an estimate from the history, what repeats, and the person's notes.
+struct ForecastCard: View {
+    private var store: BudgetStore { .shared }
+    @State private var estimate = Forecaster.cached
+
+    private var next: Month? { store.months.last?.adding(1) }
+    /// Changes when there is a new month of data or a new note, which is when to think again.
+    private var basis: String {
+        "\(store.months.last?.key ?? "")|\(store.transactions.count)|\(store.allNotes(limit: 60).joined().hashValue)"
+    }
+
+    var body: some View {
+        Group {
+            if let estimate, let next, CloudAI.isEnabled, store.months.count >= 3 {
+                Card {
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionHeader(title: "Looking ahead", subtitle: "An estimate for \(next.name), not a promise")
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("About \(Money.format(estimate.amount, cents: false))")
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                            Text("likely \(Money.format(estimate.low, cents: false))–\(Money.format(estimate.high, cents: false))")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                        if !estimate.because.isEmpty {
+                            Text(estimate.because).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        Label("Notes you leave on places and charges make this sharper.", systemImage: "text.bubble")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
+        .task(id: basis) {
+            guard CloudAI.isEnabled, !store.isImporting, !store.isSuggesting, store.months.count >= 3, let next else { return }
+            let recent = store.months.suffix(12)
+            let history = recent.map { m -> String in
+                let top = store.categoryTotals(in: m).prefix(6).map { "\($0.category.displayName) \(Int($0.total))" }.joined(separator: ", ")
+                return "\(m.title): total \(Int(store.totalSpent(in: m))) (\(top))"
+            }
+            let repeating = store.subscriptions().map { "\($0.merchant): \(Money.format($0.monthlyAmount)) a month" }
+            let result = await Forecaster.estimate(month: next.title, history: history, repeating: repeating,
+                                                   notes: store.allNotes(), basis: basis)
+            if let result { withAnimation(.snappy) { estimate = result } }
+        }
     }
 }

@@ -280,7 +280,7 @@ struct BannerCard: View {
                             .foregroundStyle(Color(red: 1, green: 0.84, blue: 0.4))
                             .textCase(.uppercase)
                         Text(daily.caption.isEmpty ? "Today's daydream" : daily.caption)
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .font(.system(size: 30, weight: .bold, design: .serif))
                             .foregroundStyle(.white)
                             .fixedSize(horizontal: false, vertical: true)
                             .contentTransition(.opacity)

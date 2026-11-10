@@ -54,7 +54,9 @@ struct TransactionsView: View {
         .searchable(text: $search, prompt: "Search places or categories")
         .navigationTitle("Transactions")
         .navigationSubtitle(rows.count == 1 ? "1 transaction" : "\(rows.count) transactions")
-        .inspector(isPresented: $showInspector) {
+        // One pane on the right at a time: while the question pane is open, the details pane stays
+        // closed (double-click a charge for its place instead).
+        .inspector(isPresented: Binding(get: { showInspector && !store.showsAsk }, set: { showInspector = $0 })) {
             Group {
                 if let selected {
                     TransactionInspector(transaction: selected)

@@ -197,6 +197,8 @@ struct MerchantInfo: Codable, Hashable {
     var sample: String
     /// The business's website ("starbucks.com"), used to show its logo. Empty = looked for, none known.
     var domain: String?
+    /// What the person wants remembered about this place ("only when the in-laws visit"). Optional; the AI reads it.
+    var note: String?
 
     init(name: String, category: Category?, source: Source, confirmed: Bool = false, sample: String) {
         self.name = name; self.category = category; self.source = source; self.confirmed = confirmed; self.sample = sample
@@ -211,6 +213,7 @@ struct MerchantInfo: Codable, Hashable {
         confirmed = (try? c.decodeIfPresent(Bool.self, forKey: .confirmed)) ?? false
         sample = (try? c.decodeIfPresent(String.self, forKey: .sample)) ?? name
         domain = try? c.decodeIfPresent(String.self, forKey: .domain)
+        note = try? c.decodeIfPresent(String.self, forKey: .note)
     }
 }
 

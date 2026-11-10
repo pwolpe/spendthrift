@@ -54,7 +54,7 @@ struct ReviewView: View {
             TonyAvatar(size: 56)
             VStack(alignment: .leading, spacing: 4) {
                 Text("A few educated guesses")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.system(size: 30, weight: .bold, design: .serif))
                 Text("These are already counted in your totals. Confirm the ones that look right, or pick a better category. I'll remember.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

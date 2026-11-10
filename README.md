@@ -62,6 +62,17 @@ credit, or there's no internet, everything falls back to the on-device paths.
 
 ## Screens
 
+- **The first minute**: the welcome screen asks for the OpenRouter key and tests it. Dropping in a pile
+  of statements plays as a show (statements counted off, accounts, regulars and trips called out as they
+  are found) and ends in a seven-card premiere: the count, where it went, the charge that stands out,
+  what repeats, trips, the verdict, and a picture.
+- **Say what it was**: in Double-Check, on a place's page, or as a note on a charge, type what something
+  was in your own words ("my accountant, for tax prep"). The model names it, files it (making a category
+  if none fits) and keeps the note. Notes also feed trip-finding, answers and the estimate below.
+- **Looking ahead**: an estimate of next month's everyday spending from the history, what repeats and
+  your notes. Always labelled an estimate.
+- **Drill-downs**: any click on a category, month, trip or account opens one plain page of charges
+  (`ChargesView`); a place opens its own page (`PlaceView`). Only one pane is ever open on the right.
 - **Overview**: a wide banner across the top with a cartoon of Tony living out a daydream about a
   real recent purchase. It never waits: on opening it shows the picture prepared during the last
   visit (or one of twelve starters in `Resources/Starters`), then quietly asks OpenRouter which image

@@ -241,6 +241,7 @@ final class BudgetStore {
             // Once everything has a category, look for the trips and events in it, and find logos.
             Task { await findStoriesIfNeeded() }
             Task { await findLogosIfNeeded() }
+            announceNewFindings()
         }
         // With a cloud key, the powerful model decides everything the built-in list doesn't know.
         if CloudAI.isEnabled { await sortWithCloud() }
@@ -288,7 +289,7 @@ final class BudgetStore {
                 var item = CloudItem(key: key, description: info.sample, averageAmount: total / Double(entries.count),
                                      count: entries.count, bankCategory: entries.compactMap(\.bankCategory).first)
                 item.amounts = Array(entries.suffix(8).map { abs($0.amount) })
-                item.notes = entries.compactMap(\.note).filter { !$0.isEmpty }.suffix(4).map { String($0.prefix(200)) }
+                item.notes = ([info.note].compactMap { $0 } + entries.compactMap(\.note)).filter { !$0.isEmpty }.suffix(4).map { String($0.prefix(200)) }
                 if let guess = info.category { item.appGuess = "\(info.name): \(guess.rawValue)" }
                 waiting.append((item, abs(total)))
             }
@@ -517,6 +518,42 @@ final class BudgetStore {
     func confirm(_ keys: [String]) {
         for key in keys where library.merchants[key]?.category != nil { library.merchants[key]?.confirmed = true }
         withAnimation(.snappy) { changed() }
+    }
+
+    /// What the person wrote about a place, if anything.
+    func note(forPlace name: String) -> String {
+        library.merchants.values.first { $0.name == name && !($0.note ?? "").isEmpty }?.note ?? ""
+    }
+
+    /// Saves a note about a place. If the place is still a guess, the note is the person saying
+    /// what it is, so it is acted on; either way the estimate of what's coming is worked out again.
+    func setNote(_ text: String, forPlace name: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard note(forPlace: name) != trimmed else { return }
+        let keys = library.merchants.filter { $0.value.name == name }.map(\.key)
+        for key in keys { library.merchants[key]?.note = trimmed.isEmpty ? nil : trimmed }
+        changed()
+        Forecaster.forget()
+        if !trimmed.isEmpty, CloudAI.isEnabled, let guess = keys.first(where: { library.merchants[$0]?.confirmed == false }) {
+            Task { await explain(guess, said: trimmed) }
+        }
+    }
+
+    /// Every note the person has written, about places and about single charges: what the model
+    /// should know before it answers a question or estimates what's coming.
+    func allNotes(limit: Int = 40) -> [String] {
+        var lines: [String] = []
+        var seen: Set<String> = []
+        for info in library.merchants.values {
+            if let note = info.note, !note.isEmpty, seen.insert(info.name).inserted { lines.append("\(info.name): \(note)") }
+        }
+        for t in transactions.reversed() {
+            if let note = t.note, !note.isEmpty {
+                lines.append("\(t.merchant), \(DateParsing.iso.string(from: t.date)), \(Money.format(t.amount)): \(note)")
+            }
+            if lines.count >= limit { break }
+        }
+        return Array(lines.prefix(limit))
     }
 
     /// Places being worked out from what the person said about them.
@@ -1254,6 +1291,24 @@ final class BudgetStore {
             guard seen.insert(t.merchant).inserted else { return nil }
             return DailyPicture.Highlight(merchant: t.merchant, category: t.category, amount: t.amount, date: t.date)
         }
+    }
+
+    /// Tells the person, once, about anything new worth knowing in the latest month: a price that
+    /// went up, a new repeating charge, what looks like a double charge. Only while they're elsewhere
+    /// (the notifier stays quiet when the app is in front), and never the same thing twice.
+    func announceNewFindings() {
+        guard let latest = months.last else { return }
+        var told = Set(UserDefaults.standard.stringArray(forKey: "announcedFindings") ?? [])
+        let worth: [Insight.Kind] = [.priceIncrease, .duplicate, .newSubscription, .unusual]
+        let fresh = insights(for: latest).filter { worth.contains($0.kind) && !told.contains($0.id) }
+        // The first time through (a library just imported), remember everything quietly: nobody
+        // wants forty notifications about the past.
+        let firstTime = UserDefaults.standard.object(forKey: "announcedFindings") == nil
+        for insight in fresh.prefix(firstTime ? 0 : 2) {
+            Notifier.post(title: insight.title, body: insight.detail)
+        }
+        told.formUnion(fresh.map(\.id))
+        UserDefaults.standard.set(Array(told.suffix(500)), forKey: "announcedFindings")
     }
 
     func insights(for month: Month) -> [Insight] {

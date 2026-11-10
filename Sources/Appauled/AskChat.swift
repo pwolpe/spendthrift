@@ -226,6 +226,9 @@ enum ChatAnalyst {
         let facts = results.map { describe($0) }
         let factsText = (try? JSONSerialization.data(withJSONObject: ["figures": facts], options: [.sortedKeys]))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        // What the person has written about places and charges: context for the wording, never a source of amounts.
+        let notes = store.allNotes(limit: 25)
+        let notesText = notes.isEmpty ? "" : "\n\nNotes the person wrote (context only; take no dollar amounts from them):\n" + notes.joined(separator: "\n")
         let writer = """
         You are the voice of Appauled, a friendly personal spending app. Answer the question in one to three \
         plain sentences, like a sharp friend who has looked at the numbers. Lead with the answer.
@@ -234,7 +237,7 @@ enum ChatAnalyst {
         nothing matched, say so simply and suggest what to try. No lists, no headings, no emoji.
         """
         let written = await Timeout.run(45) {
-            try? await CloudAI.complete(system: writer, user: "\(conversation)Question: \(question)\n\nFigures computed by the app:\n\(factsText)",
+            try? await CloudAI.complete(system: writer, user: "\(conversation)Question: \(question)\n\nFigures computed by the app:\n\(factsText)\(notesText)",
                                         json: false, maxTokens: 4_000, temperature: 0.3, timeout: 40)
         }?.trimmingCharacters(in: .whitespacesAndNewlines)
 

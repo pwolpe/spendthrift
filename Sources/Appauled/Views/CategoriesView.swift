@@ -13,7 +13,7 @@ struct CategoriesView: View {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Categories")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .font(.system(size: 30, weight: .bold, design: .serif))
                         Text("Make your own for anything you want to keep an eye on: the dog, the kids, the boat. Then pick it from any category menu, and I'll start using it too.")
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -111,8 +111,7 @@ private struct CategoryManageRow: View {
         .onHover { hovering = $0 }
         .onTapGesture {
             guard count > 0 else { return }
-            store.transactionFilter = TransactionFilter(category: category)
-            store.selection = .transactions
+            store.showCharges(TransactionFilter(category: category))
         }
         .confirmationDialog("Delete \(category.displayName)?", isPresented: $confirmDelete) {
             Button("Delete Category", role: .destructive) { if let custom { store.deleteCategory(custom) } }

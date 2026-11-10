@@ -7,7 +7,10 @@ import Charts
 struct PlaceView: View {
     private var store: BudgetStore { .shared }
     let name: String
+    /// False when rendered for a test snapshot.
+    var scrolls = true
     @State private var draft = ""
+    @State private var note = ""
 
     private var charges: [Transaction] {
         store.transactions.filter { $0.merchant == name }.sorted { $0.date > $1.date }
@@ -15,13 +18,14 @@ struct PlaceView: View {
 
     var body: some View {
         let all = charges
-        ScrollView {
+        MaybeScroll(scrolls: scrolls) {
             VStack(alignment: .leading, spacing: 20) {
                 Button { store.placeFocus = nil } label: { Label("Back", systemImage: "chevron.left") }
                     .buttonStyle(.borderless)
                     .keyboardShortcut(.cancelAction)
                 if let first = all.first {
                     header(all, first)
+                    noteField
                     tiles(all)
                     if Set(all.map(\.month)).count > 1 { monthly(all) }
                     spellings(all)
@@ -68,6 +72,27 @@ struct PlaceView: View {
             }
             Spacer()
         }
+    }
+
+    /// Anything worth remembering about the place. Never required.
+    private var noteField: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "text.bubble").foregroundStyle(.secondary).padding(.top, 3)
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("Add a note about this place (optional)", text: $note, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...4)
+                    .onSubmit { store.setNote(note, forPlace: name) }
+                Text("Who it's for, why, whether it's ending. I use notes when sorting, answering questions and estimating what's coming.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(12)
+        .background(Color.primary.opacity(0.04), in: .rect(cornerRadius: 12, style: .continuous))
+        .onAppear { note = store.note(forPlace: name) }
+        .onChange(of: name) { old, new in store.setNote(note, forPlace: old); note = store.note(forPlace: new) }
+        .onDisappear { store.setNote(note, forPlace: name) }
     }
 
     private func rename(_ keys: Set<String>) {
@@ -198,11 +223,14 @@ struct PlaceView: View {
 struct ChargesView: View {
     private var store: BudgetStore { .shared }
     let filter: TransactionFilter
+    /// False when rendered for a test snapshot.
+    var scrolls = true
 
     private var title: String {
         var parts: [String] = []
         if let id = filter.storyID, let story = store.stories.first(where: { $0.id == id }) { parts.append(story.name) }
         if let c = filter.category { parts.append(c.displayName) }
+        if let id = filter.accountID, let account = store.accounts.first(where: { $0.id == id }) { parts.append(account.name) }
         if let name = filter.merchant { parts.append(name) }
         if let m = filter.month { parts.append(m.title) }
         return parts.isEmpty ? "Charges" : parts.joined(separator: " · ")
@@ -214,7 +242,7 @@ struct ChargesView: View {
         let places = Dictionary(grouping: all, by: \.merchant)
             .map { (name: $0.key, category: $0.value[0].category, count: $0.value.count, total: $0.value.reduce(0) { $0 + $1.amount }) }
             .sorted { abs($0.total) > abs($1.total) }
-        ScrollView {
+        MaybeScroll(scrolls: scrolls) {
             VStack(alignment: .leading, spacing: 20) {
                 Button { store.chargesFocus = nil } label: { Label("Back", systemImage: "chevron.left") }
                     .buttonStyle(.borderless)
@@ -312,5 +340,15 @@ struct SetupView: View {
             if store.selection == .categories { CategoriesView() } else { AccountsView() }
         }
         .navigationTitle("Setup")
+    }
+}
+
+/// A scroll view, except when a picture of the page is being taken (which can't draw one).
+struct MaybeScroll<Content: View>: View {
+    let scrolls: Bool
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if scrolls { ScrollView { content } } else { content }
     }
 }

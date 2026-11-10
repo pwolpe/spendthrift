@@ -207,12 +207,10 @@ struct CashFlowContent: View {
     }
 
     private func open(_ category: Category) {
-        store.transactionFilter = TransactionFilter(category: category)
-        store.selection = .transactions
+        store.showCharges(TransactionFilter(category: category, month: nil))
     }
     private func openPlace(_ key: String) {
-        store.transactionFilter = TransactionFilter(merchantKey: key)
-        store.selection = .transactions
+        if let name = store.place(key)?.name { store.showPlace(name) }
     }
 }
 

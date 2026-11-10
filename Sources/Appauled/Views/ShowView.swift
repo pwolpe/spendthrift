@@ -333,7 +333,7 @@ struct PremiereCard: View {
                             Text(StoryCard.dates(item.story)).font(.callout).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(Money.format(item.total, cents: false)).font(.system(size: 28, weight: .bold, design: .rounded)).monospacedDigit()
+                        Text(Money.format(item.total, cents: false)).font(.system(size: 30, weight: .bold, design: .serif)).monospacedDigit()
                     }
                 }
             }

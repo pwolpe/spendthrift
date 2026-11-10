@@ -101,11 +101,28 @@ enum DebugHooks {
         }
         await snap("06-stories", outDir) { StoriesView(scrolls: false) }
         await snap("11-coverage", outDir) { CoverageCard().padding(28).frame(width: 1000) }
+        // APPAULED_FORECAST=1 (optionally "Place|note" first): print the estimate for next month.
+        if let spec = ProcessInfo.processInfo.environment["APPAULED_FORECAST"], let next = store.months.last?.adding(1) {
+            let parts = spec.split(separator: "|", maxSplits: 1).map(String.init)
+            if parts.count == 2 { store.setNote(parts[1], forPlace: store.transactions.first { $0.merchant.localizedCaseInsensitiveContains(parts[0]) }?.merchant ?? parts[0]) }
+            let history = store.months.suffix(12).map { m -> String in
+                let top = store.categoryTotals(in: m).prefix(6).map { "\($0.category.displayName) \(Int($0.total))" }.joined(separator: ", ")
+                return "\(m.title): total \(Int(store.totalSpent(in: m))) (\(top))"
+            }
+            let repeating = store.subscriptions().map { "\($0.merchant): \(Money.format($0.monthlyAmount)) a month" }
+            Forecaster.forget()
+            let e = await Forecaster.estimate(month: next.title, history: history, repeating: repeating, notes: store.allNotes(), basis: "test-\(spec)")
+            print("FORECAST \(next.title): \(e.map { "about \(Int($0.amount)) (\(Int($0.low))–\(Int($0.high))): \($0.because)" } ?? "none") | notes: \(store.allNotes().count)")
+            Forecaster.forget()
+        }
         for (i, kind) in PremiereCard.Kind.available(in: store).enumerated() {
             await snap("20-premiere-\(i + 1)", outDir) { PremiereCard(kind: kind).padding(.vertical, 50).frame(width: 900) }
         }
         if let busiest = Dictionary(grouping: store.transactions.filter(\.countsAsSpending), by: \.merchant).max(by: { $0.value.count < $1.value.count })?.key {
-            await snap("12-place", outDir) { PlaceView(name: busiest).frame(width: 1000) }
+            await snap("12-place", outDir) { PlaceView(name: busiest, scrolls: false).frame(width: 1000) }
+        }
+        if let trip = store.stories.max(by: { store.transactions(in: $0).count < store.transactions(in: $1).count }) {
+            await snap("13-charges", outDir) { ChargesView(filter: TransactionFilter(storyID: trip.id), scrolls: false).frame(width: 1000) }
         }
         await snap("09-allcaughtup", outDir) { ReviewView(scrolls: false) }
         await snap("10-new-category", outDir) {
