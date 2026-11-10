@@ -121,14 +121,14 @@ picture.
 2. Run `scripts/release.sh "What's new, in a sentence. Tony sees this."`
 
 That builds, signs and publishes the zip to the public repository
-[pwolpe/tony-awards-releases](https://github.com/pwolpe/tony-awards-releases). Tony's app checks it
+[pwolpe/appauled-releases](https://github.com/pwolpe/appauled-releases). Tony's app checks it
 once a day (or from **Appauled → Check for Updates…**), shows a "Version 1.1 is ready" button,
 and on one click downloads it, checks the signature, replaces itself and reopens. The check sends
 nothing about Tony; it only asks GitHub for the latest version number.
 
 How it works without an Apple Developer account:
 
-- Every build is signed with a self-made certificate, **Tony Awards Signing**, in this Mac's login
+- Every build is signed with a self-made certificate, **Appauled Signing**, in this Mac's login
   keychain (created Nov 2026, valid ten years). Same certificate means same app identity, so macOS
   keeps Tony's Downloads permission across updates.
 - Before installing, the app requires the download to be signed by that same certificate and to be a
@@ -138,7 +138,7 @@ How it works without an Apple Developer account:
 
 **Back up the certificate.** If it is lost (a new Mac without migrating the keychain), Tony's app will
 refuse every future update and he'll need one manual reinstall (his data is unaffected). To back it
-up: Keychain Access → login → My Certificates → right-click **Tony Awards Signing** → Export, and keep
+up: Keychain Access → login → My Certificates → right-click **Appauled Signing** → Export, and keep
 the .p12 somewhere safe. To build on another Mac, import that file there.
 
 His data is not inside the app, so replacing the app never touches it. The data file is read

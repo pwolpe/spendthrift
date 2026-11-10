@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-REPO="pwolpe/tony-awards-releases"
+REPO="pwolpe/appauled-releases"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 NOTES="${1:-Improvements and fixes.}"
 APP="$ROOT/build/Appauled.app"
@@ -21,7 +21,7 @@ fi
 
 # Tony's app only accepts updates signed with the same certificate it was signed with.
 if ! codesign -dr - "$APP" 2>&1 | grep -q "certificate leaf"; then
-  echo "✗ This build isn't signed with the 'Tony Awards Signing' certificate, so Tony's app would refuse it."
+  echo "✗ This build isn't signed with the 'Appauled Signing' certificate, so Tony's app would refuse it."
   echo "  The certificate lives in this Mac's login keychain; see README (Sending updates)."
   exit 1
 fi

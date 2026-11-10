@@ -24,7 +24,10 @@ final class BudgetStore {
     @ObservationIgnored private var dateCache: [String: Date] = [:]
 
     // UI state
-    var selection: SidebarItem? = .overview { didSet { if placeFocus != nil { placeFocus = nil } } }
+    var selection: SidebarItem? = .overview { didSet { if placeFocus != nil { placeFocus = nil }; if chargesFocus != nil { chargesFocus = nil } } }
+    /// Non-nil while a plain list of charges is open (one month of dining, one trip…): where a click
+    /// in an answer lands. A place opened from it sits on top, and Back returns here.
+    var chargesFocus: TransactionFilter?
     /// Non-nil while one place's page is open over whatever page was showing.
     var placeFocus: String?
     /// The question pane on the right, available from every page.
@@ -536,6 +539,26 @@ final class BudgetStore {
             cloudAttempted.remove(key)
             Task { await sortRemaining() }
         }
+    }
+
+    /// Opens one simple page listing the charges that match.
+    func showCharges(_ filter: TransactionFilter) {
+        withAnimation(.snappy(duration: 0.25)) { placeFocus = nil; chargesFocus = filter }
+    }
+
+    func transactions(matching f: TransactionFilter) -> [Transaction] {
+        var list = transactions
+        if let c = f.category { list = list.filter { $0.category == c } }
+        if let m = f.month { list = list.filter { $0.month == m } }
+        if let a = f.accountID { list = list.filter { $0.accountID == a } }
+        if let k = f.merchantKey { list = list.filter { $0.merchantKey == k } }
+        if let name = f.merchant { list = list.filter { $0.merchant == name } }
+        if let s = f.storyID, let story = stories.first(where: { $0.id == s }) {
+            let ids = Set(story.entryIDs)
+            list = list.filter { ids.contains($0.id) }
+        }
+        if f.needsCheck { list = list.filter(\.needsCheck) }
+        return list
     }
 
     /// Opens the page for one place: everything ever spent there.

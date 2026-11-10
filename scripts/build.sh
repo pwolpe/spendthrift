@@ -12,7 +12,7 @@ mkdir -p "$BUILD"
 # Sign with Paul's own certificate when it's in the keychain. That gives every build the same
 # identity, so macOS keeps Tony's permissions across updates and the app can verify its updates.
 # Without it, fall back to a throwaway signature (the app runs, but can't update itself).
-SIGN_NAME="Tony Awards Signing"
+SIGN_NAME="Appauled Signing"
 if security find-certificate -c "$SIGN_NAME" >/dev/null 2>&1; then SIGN="$SIGN_NAME"; else SIGN="-"; fi
 
 # 1. Compile.

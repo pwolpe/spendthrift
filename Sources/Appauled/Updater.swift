@@ -11,7 +11,7 @@ import Security
 @MainActor @Observable
 final class Updater {
     static let shared = Updater()
-    static let releasesRepository = "pwolpe/tony-awards-releases"
+    static let releasesRepository = "pwolpe/appauled-releases"
 
     struct Release: Equatable {
         let version: String

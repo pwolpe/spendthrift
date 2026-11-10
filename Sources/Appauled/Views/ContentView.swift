@@ -16,6 +16,8 @@ struct ContentView: View {
                         WelcomeView(isDropTargeted: isDropTargeted)
                     } else if let place = store.placeFocus {
                         PlaceView(name: place)
+                    } else if let filter = store.chargesFocus {
+                        ChargesView(filter: filter)
                     } else {
                         switch store.selection ?? .overview {
                         case .overview, .report, .ask: OverviewView()

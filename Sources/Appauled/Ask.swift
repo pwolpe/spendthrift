@@ -439,13 +439,12 @@ enum Drill {
         let store = BudgetStore.shared
         switch target(label, in: answer) {
         case .place(let name): store.showPlace(name)
-        case .story(let story): store.transactionFilter = TransactionFilter(storyID: story.id); store.selection = .transactions
+        // One plain page of charges, not the full table with its filters and inspector.
+        case .story(let story): store.showCharges(TransactionFilter(storyID: story.id))
         case .category(let category):
-            store.transactionFilter = TransactionFilter(category: category, month: answer.query.from == answer.query.to ? answer.query.from : nil)
-            store.selection = .transactions
+            store.showCharges(TransactionFilter(category: category, month: answer.query.from == answer.query.to ? answer.query.from : nil))
         case .month(let month):
-            store.transactionFilter = TransactionFilter(category: category(in: answer), month: month)
-            store.selection = .transactions
+            store.showCharges(TransactionFilter(category: category(in: answer), month: month))
         case nil: break
         }
     }

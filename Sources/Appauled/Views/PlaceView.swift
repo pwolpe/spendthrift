@@ -193,6 +193,105 @@ struct PlaceView: View {
     }
 }
 
+/// A plain page of charges: what a click on a bar or a row in an answer opens. One title, one
+/// total, the places that make it up, and the charges. No filters, no table columns, no inspector.
+struct ChargesView: View {
+    private var store: BudgetStore { .shared }
+    let filter: TransactionFilter
+
+    private var title: String {
+        var parts: [String] = []
+        if let id = filter.storyID, let story = store.stories.first(where: { $0.id == id }) { parts.append(story.name) }
+        if let c = filter.category { parts.append(c.displayName) }
+        if let name = filter.merchant { parts.append(name) }
+        if let m = filter.month { parts.append(m.title) }
+        return parts.isEmpty ? "Charges" : parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        let all = store.transactions(matching: filter).sorted { $0.date > $1.date }
+        let total = all.reduce(0) { $0 + $1.amount }
+        let places = Dictionary(grouping: all, by: \.merchant)
+            .map { (name: $0.key, category: $0.value[0].category, count: $0.value.count, total: $0.value.reduce(0) { $0 + $1.amount }) }
+            .sorted { abs($0.total) > abs($1.total) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Button { store.chargesFocus = nil } label: { Label("Back", systemImage: "chevron.left") }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut(.cancelAction)
+                HStack(alignment: .lastTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title).font(.system(size: 30, weight: .bold, design: .serif))
+                        Text(all.count == 1 ? "1 charge" : "\(all.count) charges").font(.title3).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(Money.format(abs(total), cents: false))
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                }
+                if all.isEmpty {
+                    TonySays(title: "Nothing here", message: "No charges match. Try another month or category.", art: "nothing")
+                } else {
+                    if places.count > 1 {
+                        Card {
+                            VStack(alignment: .leading, spacing: 10) {
+                                SectionHeader(title: "Where", subtitle: "Click a place for everything you've ever spent there.")
+                                ForEach(Array(places.prefix(8).enumerated()), id: \.element.name) { i, place in
+                                    Button { store.showPlace(place.name) } label: {
+                                        HStack(spacing: 12) {
+                                            MerchantIcon(name: place.name, category: place.category, size: 28)
+                                            Text(place.name).font(.body.weight(.medium)).lineLimit(1)
+                                            Text(place.count == 1 ? "once" : "\(place.count) times").font(.callout).foregroundStyle(.secondary)
+                                            Spacer()
+                                            Text(Money.format(place.total, cents: false)).monospacedDigit()
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    if i < min(places.count, 8) - 1 { Divider().padding(.leading, 40) }
+                                }
+                                if places.count > 8 { Text("and \(places.count - 8) more places below").font(.caption).foregroundStyle(.tertiary) }
+                            }
+                        }
+                    }
+                    Card {
+                        VStack(alignment: .leading, spacing: 0) {
+                            SectionHeader(title: "Every charge").padding(.bottom, 8)
+                            ForEach(Array(all.prefix(400).enumerated()), id: \.element.id) { i, t in
+                                Button { store.showPlace(t.merchant) } label: {
+                                    HStack(spacing: 12) {
+                                        Text(t.date.formatted(.dateTime.month(.abbreviated).day().year()))
+                                            .monospacedDigit().foregroundStyle(.secondary)
+                                            .frame(width: 110, alignment: .leading)
+                                        Text(t.merchant).lineLimit(1)
+                                        Spacer()
+                                        AmountText(transaction: t).monospacedDigit()
+                                    }
+                                    .padding(.vertical, 6)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                if i < min(all.count, 400) - 1 { Divider() }
+                            }
+                            if all.count > 400 {
+                                Button("See All \(all.count) in Transactions") {
+                                    store.transactionFilter = filter
+                                    store.selection = .transactions
+                                }
+                                .padding(.top, 10)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: 820)
+            .frame(maxWidth: .infinity)
+        }
+        .navigationTitle(title)
+    }
+}
+
 /// Accounts and categories: the two things worth adjusting, on one page.
 struct SetupView: View {
     private var store: BudgetStore { .shared }
