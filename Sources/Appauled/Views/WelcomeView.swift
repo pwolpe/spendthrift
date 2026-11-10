@@ -13,13 +13,16 @@ struct WelcomeView: View {
     private var content: some View {
         VStack(spacing: 26) {
             Spacer(minLength: 24)
-            VStack(spacing: 10) {
-                TonyFigure(height: 230)
-                Text("Hi, Tony.")
-                    .font(.system(size: 44, weight: .bold, design: .rounded))
-                Text("Welcome to Appauled, honoring excellence in spending.")
+            VStack(spacing: 12) {
+                SpotArt(name: "welcome", height: 250)
+                Text("Welcome to Appauled")
+                    .font(.system(size: 42, weight: .bold, design: .serif))
+                Text("Drop in your bank and card statements. In about a minute you'll see where the money went, what it did, and whether you lived within your income.")
                     .font(.title3)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 600)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             dropZone
@@ -30,9 +33,23 @@ struct WelcomeView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Step(number: 1, text: "Sign in to your bank or credit card website.")
                 Step(number: 2, text: "Find **Download** or **Export** and save your activity or statement. Any format works.")
-                Step(number: 3, text: "Drag the file into this window. Everything is sorted for you, right on this Mac.")
+                Step(number: 3, text: "Drag the files into this window, as many as you like, a whole folder if you have one. Start with a year of each account.")
             }
-            .frame(maxWidth: 480, alignment: .leading)
+            .frame(maxWidth: 520, alignment: .leading)
+
+            // What a careful person wants to know before dropping a bank statement anywhere.
+            VStack(spacing: 6) {
+                Label(CloudAI.isEnabled ? "Your files stay on this Mac." : "Everything stays on this Mac.", systemImage: "lock.fill")
+                    .font(.callout.weight(.semibold))
+                Text(CloudAI.isEnabled
+                     ? "Smarter AI is on: to read, sort and answer questions, the text of your statements (names and account numbers blanked out) and your charges go to the AI model you chose. You can turn it off in Settings."
+                     : "Nothing is sent anywhere. For sharper sorting, trips, and pictures of your own spending, you can turn on Smarter AI in Settings later.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: 560)
 
             Spacer(minLength: 24)
         }

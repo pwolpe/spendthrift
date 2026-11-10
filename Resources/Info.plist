@@ -7,9 +7,9 @@
     <key>CFBundleDisplayName</key>
     <string>Appauled</string>
     <key>CFBundleIdentifier</key>
-    <string>com.pwolpe.tonyawards</string>
+    <string>com.pwolpe.appauled</string>
     <key>CFBundleExecutable</key>
-    <string>TonyAwards</string>
+    <string>Appauled</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>

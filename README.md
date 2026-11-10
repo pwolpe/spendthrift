@@ -1,7 +1,5 @@
 # Appauled
 
-*(Formerly The Tony Awards. The awards theme, Tony and Paul all stay; the data folder and the signing certificate keep their original names.)*
-
 A Mac app made for Tony, honoring excellence in spending. Tony drops in statements from any bank or
 card and sees where his money goes. No terminal, no Finder, no accounts to link.
 
@@ -154,11 +152,11 @@ notarizing the app; `notarytool` and `stapler` are already in the Command Line T
 
 ## Where the data lives
 
-`~/Library/Application Support/Tony Awards/`
+`~/Library/Application Support/Appauled/`
 
 - `library.json`: accounts, every statement line, and what the app has learned about each place
 - `Backups/`: one copy per day, two weeks' worth (**Help → Save a Backup to the Desktop** makes one on demand)
-- `Daily Tony/`: the last thirty banner pictures and `gallery.json`, which says what each is about
+- `Pictures/`: the last thirty banner pictures and `gallery.json`, which says what each is about
 
 To back up or move Tony to a new Mac, copy that folder.
 
@@ -170,7 +168,7 @@ To back up or move Tony to a new Mac, copy that folder.
 | `Library.swift` | The saved file, and `MerchantResolver` (which place is this? instant category) |
 | `Importing.swift`, `CSV.swift`, `PDFStatement.swift` | Reading CSV, OFX/QFX and PDF statements |
 | `Suggestions.swift`, `AISchemas.swift` | Name cleanup, known businesses, bank categories, Apple Intelligence |
-| `Insights.swift`, `Ask.swift`, `DailyTony.swift`, `Compositor.swift` | Awards and notes, questions, the daily picture |
+| `Insights.swift`, `Ask.swift`, `DailyPicture.swift`, `Compositor.swift` | Awards and notes, questions, the daily picture |
 | `Views/` | The screens |
 
 ## Testing (for Paul)
@@ -179,13 +177,13 @@ A self-driving test mode, enabled only through environment variables:
 
 ```sh
 open -W -n "build/Appauled.app" --stdout run.log \
-  --env TONY_AWARDS_HOME=/tmp/tony-test \
-  --env TONY_AWARDS_SNAPSHOT=/tmp/tony-test/snaps \
-  --env "TONY_AWARDS_IMPORT=a.csv:b.pdf:c.qfx"
+  --env APPAULED_HOME=/tmp/tony-test \
+  --env APPAULED_SNAPSHOT=/tmp/tony-test/snaps \
+  --env "APPAULED_IMPORT=a.csv:b.pdf:c.qfx"
 ```
 
 It imports the files, logs how every place was sorted, the awards, notes and sample Ask answers,
-and saves pictures of the main screens. Add `--env TONY_AWARDS_SELFTEST=1` to exercise category
-changes, re-import, undo-style removal and saving (prints PASS/FAIL lines). `TONY_AWARDS_HOME`
+and saves pictures of the main screens. Add `--env APPAULED_SELFTEST=1` to exercise category
+changes, re-import, undo-style removal and saving (prints PASS/FAIL lines). `APPAULED_HOME`
 alone runs the app against a scratch folder. To preview how a statement will be read:
-`"build/Appauled.app/Contents/MacOS/TonyAwards" --inspect file.pdf`
+`"build/Appauled.app/Contents/MacOS/Appauled" --inspect file.pdf`

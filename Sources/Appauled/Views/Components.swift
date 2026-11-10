@@ -55,7 +55,7 @@ struct TonyAvatar: View {
 
     var body: some View {
         Group {
-            if let photo = DailyTony.shared.avatar {
+            if let photo = DailyPicture.shared.avatar {
                 Image(nsImage: photo).resizable().aspectRatio(contentMode: .fill)
             } else {
                 Image(systemName: "person.crop.circle.fill").resizable().foregroundStyle(.secondary)
@@ -75,7 +75,7 @@ struct CastAvatars: View {
     var body: some View {
         HStack(spacing: -size * 0.28) {
             TonyAvatar(size: size)
-            if let paul = DailyTony.shared.paulAvatar {
+            if let paul = DailyPicture.shared.paulAvatar {
                 Image(nsImage: paul).resizable().aspectRatio(contentMode: .fill)
                     .frame(width: size, height: size)
                     .clipShape(Circle())
@@ -94,7 +94,7 @@ final class TonyArt {
     @ObservationIgnored private var started = false
 
     func prepare() {
-        guard !started, let cartoon = DailyTony.shared.cartoon,
+        guard !started, let cartoon = DailyPicture.shared.cartoon,
               let cg = cartoon.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
         started = true
         Task.detached(priority: .userInitiated) {
@@ -125,16 +125,52 @@ struct TonyFigure: View {
 }
 
 /// Tony with something to say: used for every empty screen.
+/// A small illustration of Tony and Paul for one moment in the app (nothing to check, no trips yet…).
+/// The pictures ship with the app in Resources/Art.
+struct SpotArt: View {
+    let name: String
+    var height: CGFloat = 200
+
+    @MainActor private static var cache: [String: NSImage] = [:]
+    @MainActor static func image(_ name: String) -> NSImage? {
+        if let hit = cache[name] { return hit }
+        var url = Bundle.main.resourceURL?.appendingPathComponent("Art/\(name).jpg")
+        if url.map({ FileManager.default.fileExists(atPath: $0.path) }) != true {
+            url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Resources/Art/\(name).jpg")
+        }
+        guard let url, let image = NSImage(contentsOf: url) else { return nil }
+        cache[name] = image
+        return image
+    }
+
+    var body: some View {
+        if let image = Self.image(name) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: height)
+                .clipShape(.rect(cornerRadius: height * 0.11, style: .continuous))
+                .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
+                .accessibilityHidden(true)
+        } else {
+            TonyFigure(height: height)
+        }
+    }
+}
+
 struct TonySays<Actions: View>: View {
     let title: String
     let message: String
     var figureHeight: CGFloat = 190
+    /// The illustration for this moment; without one, Tony stands in.
+    var art: String? = nil
     @ViewBuilder var actions: Actions
 
     var body: some View {
         VStack(spacing: 14) {
-            TonyFigure(height: figureHeight)
-            Text(title).font(.system(size: 26, weight: .bold, design: .rounded))
+            if let art { SpotArt(name: art, height: figureHeight + 30) } else { TonyFigure(height: figureHeight) }
+            Text(title).font(.system(size: 26, weight: .bold, design: .serif))
             Text(message)
                 .font(.title3)
                 .foregroundStyle(.secondary)
@@ -148,8 +184,8 @@ struct TonySays<Actions: View>: View {
 }
 
 extension TonySays where Actions == EmptyView {
-    init(title: String, message: String, figureHeight: CGFloat = 190) {
-        self.init(title: title, message: message, figureHeight: figureHeight) { EmptyView() }
+    init(title: String, message: String, figureHeight: CGFloat = 190, art: String? = nil) {
+        self.init(title: title, message: message, figureHeight: figureHeight, art: art) { EmptyView() }
     }
 }
 

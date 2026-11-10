@@ -8,7 +8,7 @@ enum Notifier {
     private static var askedPermission = false
 
     static func post(title: String, body: String) {
-        guard !NSApp.isActive, ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] == nil,
+        guard !NSApp.isActive, ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] == nil,
               Bundle.main.bundleURL.pathExtension == "app" else { return }
         let center = UNUserNotificationCenter.current()
         let send = {

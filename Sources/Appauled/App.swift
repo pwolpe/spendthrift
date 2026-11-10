@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 
-struct TonyAwardsApp: App {
+struct AppauledApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {

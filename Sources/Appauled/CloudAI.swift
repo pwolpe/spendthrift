@@ -29,7 +29,7 @@ enum CloudAI {
     }
 
     static var isEnabled: Bool {
-        ProcessInfo.processInfo.environment["TONY_AWARDS_NO_CLOUD"] == nil && CloudKey.exists
+        ProcessInfo.processInfo.environment["APPAULED_NO_CLOUD"] == nil && CloudKey.exists
     }
     static var canReadStatements: Bool { isEnabled && readsStatements }
 
@@ -84,7 +84,7 @@ enum CloudAI {
                           let content = message["content"] as? String, !content.isEmpty else { throw CloudError.badReply }
                     // Cut off for length: a partial answer is worse than none (half a JSON object).
                     if (choices.first?["finish_reason"] as? String) == "length" {
-                        if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil { print("DEBUG CLOUD reply cut off at \(maxTokens) tokens") }
+                        if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil { print("DEBUG CLOUD reply cut off at \(maxTokens) tokens") }
                         throw CloudError.badReply
                     }
                     await CloudStatus.shared.note(error: nil)
@@ -144,8 +144,8 @@ enum CloudKey {
     private static let lock = NSLock()
 
     /// A dot-file in the home folder also works, and wins if present: handy for setting a Mac up
-    /// from Terminal without opening Settings.  pbpaste > ~/.tony-awards-key && chmod 600 ~/.tony-awards-key
-    private static let dotFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tony-awards-key")
+    /// from Terminal without opening Settings.  pbpaste > ~/.appauled-key && chmod 600 ~/.appauled-key
+    private static let dotFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".appauled-key")
 
     /// Why a file and not the keychain: macOS ties keychain access to the exact build of an app
     /// unless it's signed with an Apple Developer ID. Every update would make Tony type his Mac
@@ -154,7 +154,7 @@ enum CloudKey {
     /// lives in the real data folder, never a test folder, and is not part of any backup the app makes.
     private static let file: URL = {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let folder = support.appendingPathComponent("Tony Awards", isDirectory: true)
+        let folder = support.appendingPathComponent("Appauled", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder.appendingPathComponent("ai-key")
     }()
@@ -484,7 +484,7 @@ enum CloudSorter {
 /// Not offered in Settings. Measured in Nov 2026 on 563 real places against Claude Sonnet 5.5:
 /// Clef (27B) was about twice as fast (25s vs 47s) and far cheaper, but agreed on only 64% of
 /// categories, with plain errors (airlines and parking as Subscriptions, restaurants as Shopping).
-/// Claude Haiku 5.5 agreed on 88%. Kept for experiments: `defaults write com.pwolpe.tonyawards
+/// Claude Haiku 5.5 agreed on 88%. Kept for experiments: `defaults write com.pwolpe.appauled
 /// cloudModel cloudflare/clef`. Jobs that need writing still use the default model.
 enum DecisionSorter {
     static func handles(_ model: String) -> Bool { model.hasPrefix("cloudflare/clef") }
@@ -565,7 +565,7 @@ enum DecisionSorter {
                   let answer = (object["answers"] as? [String: Any])?["category"] as? [String: Any],
                   let choice = answer["choice"] as? String,
                   let category = Category.pickable.first(where: { $0.rawValue == choice }) else {
-                if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil, attempt == 0 {
+                if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil, attempt == 0 {
                     print("DEBUG DECISION status \(status) \(String(data: data.prefix(300), encoding: .utf8) ?? "")")
                 }
                 return nil
@@ -875,7 +875,7 @@ enum StoryFinder {
             let reply = await Timeout.run(600) {
                 try? await CloudAI.complete(system: system, user: listing, json: true, maxTokens: 64_000, timeout: 590, effort: "medium")
             }
-            if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil {
+            if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil {
                 print("DEBUG STORIES sent \(numbered.count) lines (\(listing.count) chars); reply \(reply?.count ?? -1) chars; ends: \(String((reply ?? "").suffix(80)).replacingOccurrences(of: "\n", with: " "))")
             }
             guard let reply, let found = CloudAI.object(from: reply)?["stories"] as? [[String: Any]] else { return nil }

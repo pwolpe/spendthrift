@@ -303,8 +303,9 @@ struct AskView: View {
 
     private var intro: some View {
         VStack(alignment: .leading, spacing: 14) {
+            SpotArt(name: "ask", height: 170)
+                .frame(maxWidth: .infinity)
             HStack(spacing: 12) {
-                TonyAvatar(size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Ask")
                         .font(.system(size: 24, weight: .bold, design: .serif))
@@ -394,6 +395,62 @@ enum PlaceLinker {
     }
 }
 
+/// Clicking something in an answer (a bar, a row) goes to the charges behind it.
+@MainActor
+enum Drill {
+    enum Target { case place(String), category(Category), month(Month), story(Story) }
+
+    static func target(_ label: String, in answer: Answer) -> Target? {
+        let text = label.trimmingCharacters(in: .whitespaces)
+        if let place = PlaceLinker.names().first(where: { $0.caseInsensitiveCompare(text) == .orderedSame }) { return .place(place) }
+        if let story = BudgetStore.shared.stories.first(where: { $0.name.caseInsensitiveCompare(text) == .orderedSame }) { return .story(story) }
+        if let category = Category.pickable.first(where: { $0.displayName.caseInsensitiveCompare(text) == .orderedSame }) { return .category(category) }
+        if let month = month(text, in: answer) { return .month(month) }
+        return nil
+    }
+
+    /// "Jul", "July", "Jul 2026", "July ’26", "2026-07": with no year, the most recent such month there is data for.
+    private static func month(_ text: String, in answer: Answer) -> Month? {
+        if let exact = Month(key: text) { return exact }
+        let cleaned = text.replacingOccurrences(of: "’", with: "").replacingOccurrences(of: "'", with: "").replacingOccurrences(of: ",", with: "")
+        let parts = cleaned.split(separator: " ").map(String.init)
+        let names = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+        guard let first = parts.first, first.count >= 3, let index = names.firstIndex(of: String(first.lowercased().prefix(3))),
+              first.allSatisfy(\.isLetter) else { return nil }
+        if parts.count >= 2, var year = Int(parts[1]) {
+            if year < 100 { year += 2000 }
+            return Month(year: year, month: index + 1)
+        }
+        guard parts.count == 1 else { return nil }
+        return BudgetStore.shared.months.last { $0.month == index + 1 }
+    }
+
+    /// The category the question was about ("show dining month by month"), so a month keeps that focus.
+    private static func category(in answer: Answer) -> Category? {
+        if let c = answer.query.category { return c }
+        let question = answer.question.lowercased()
+        return Category.pickable.first { category in
+            let word = category.displayName.lowercased().components(separatedBy: CharacterSet.letters.inverted).first ?? ""
+            return word.count >= 4 && question.contains(word)
+        }
+    }
+
+    static func open(_ label: String, in answer: Answer) {
+        let store = BudgetStore.shared
+        switch target(label, in: answer) {
+        case .place(let name): store.showPlace(name)
+        case .story(let story): store.transactionFilter = TransactionFilter(storyID: story.id); store.selection = .transactions
+        case .category(let category):
+            store.transactionFilter = TransactionFilter(category: category, month: answer.query.from == answer.query.to ? answer.query.from : nil)
+            store.selection = .transactions
+        case .month(let month):
+            store.transactionFilter = TransactionFilter(category: category(in: answer), month: month)
+            store.selection = .transactions
+        case nil: break
+        }
+    }
+}
+
 private struct AnswerBubble: View {
     let answer: Answer
 
@@ -420,20 +477,25 @@ private struct AnswerBubble: View {
                                 BudgetStore.shared.showPlace(name)
                                 return .handled
                             })
-                        if answer.chart.count >= 2 { AnswerChart(bars: answer.chart, isLine: answer.chartIsLine) }
+                        if answer.chart.count >= 2 {
+                            AnswerChart(bars: answer.chart, isLine: answer.chartIsLine) { Drill.open($0, in: answer) }
+                            if answer.chart.contains(where: { Drill.target($0.label, in: answer) != nil }) {
+                                Text("Click a bar to see the charges behind it.").font(.caption).foregroundStyle(.tertiary)
+                            }
+                        }
                         if !answer.rows.isEmpty {
                             VStack(spacing: 8) {
                                 ForEach(Array(answer.rows.enumerated()), id: \.offset) { _, row in
                                     HStack(spacing: 10) {
                                         if let c = row.category { CategoryIcon(category: c, size: 24) }
                                         VStack(alignment: .leading, spacing: 0) {
-                                            if PlaceLinker.names().contains(row.label) {
-                                                Button(row.label) { BudgetStore.shared.showPlace(row.label) }
+                                            if Drill.target(row.label, in: answer) != nil {
+                                                Button(row.label) { Drill.open(row.label, in: answer) }
                                                     .buttonStyle(.plain)
                                                     .foregroundStyle(Theme.accent)
                                                     .underline()
                                                     .lineLimit(1)
-                                                    .help("Everything at \(row.label)")
+                                                    .help("See the charges behind \(row.label)")
                                             } else {
                                                 Text(row.label).lineLimit(1)
                                             }
@@ -471,6 +533,8 @@ private struct AnswerBubble: View {
 private struct AnswerChart: View {
     let bars: [ChatAnalyst.ChartBar]
     let isLine: Bool
+    /// Called with the label of the bar (or point) that was clicked.
+    var onPick: (String) -> Void = { _ in }
 
     var body: some View {
         Chart(Array(bars.enumerated()), id: \.offset) { _, bar in
@@ -497,6 +561,15 @@ private struct AnswerChart: View {
             AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
                 AxisGridLine()
                 AxisValueLabel { if let v = value.as(Double.self) { Text(Money.format(v, cents: false)) } }
+            }
+        }
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle().fill(.clear).contentShape(Rectangle())
+                    .onTapGesture { location in
+                        guard let frame = proxy.plotFrame.map({ geo[$0] }) else { return }
+                        if let label: String = proxy.value(atX: location.x - frame.origin.x) { onPick(label) }
+                    }
             }
         }
         .frame(height: 170)

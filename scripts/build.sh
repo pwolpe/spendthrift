@@ -18,13 +18,13 @@ if security find-certificate -c "$SIGN_NAME" >/dev/null 2>&1; then SIGN="$SIGN_N
 # 1. Compile.
 echo "→ Building app"
 swift build -c release --package-path "$ROOT" --arch arm64
-BIN="$(swift build -c release --package-path "$ROOT" --arch arm64 --show-bin-path)/TonyAwards"
+BIN="$(swift build -c release --package-path "$ROOT" --arch arm64 --show-bin-path)/Appauled"
 
 # 2. Assemble the bundle.
 echo "→ Assembling Appauled.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/TonyAwards"
+cp "$BIN" "$APP/Contents/MacOS/Appauled"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 # Version: the number in the VERSION file (what Tony sees in About), plus a build number from the clock.
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
@@ -56,6 +56,7 @@ if [ -f "$ROOT/Resources/paul.jpg" ]; then cp "$ROOT/Resources/paul.jpg" "$APP/C
 cp "$ROOT/Resources/tony-avatar.png" "$APP/Contents/Resources/tony-avatar.png"
 if [ -f "$ROOT/Resources/paul-avatar.png" ]; then cp "$ROOT/Resources/paul-avatar.png" "$APP/Contents/Resources/paul-avatar.png"; fi
 mkdir -p "$APP/Contents/Resources/Starters" && cp "$ROOT/Resources/Starters/"* "$APP/Contents/Resources/Starters/"
+mkdir -p "$APP/Contents/Resources/Art" && cp "$ROOT/Resources/Art/"* "$APP/Contents/Resources/Art/"
 
 # 4. Re-sign after adding resources. First drop "downloaded from the internet" marks and other
 #    Finder leftovers that source files may carry; they don't belong in a shipped app.

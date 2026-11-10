@@ -31,7 +31,7 @@ final class BudgetStore {
     var showsAsk = false
     var transactionFilter = TransactionFilter()
     /// The Overview looks at one month or at a whole year; the same page either way.
-    var overviewShowsYear = ProcessInfo.processInfo.environment["TONY_AWARDS_YEAR"] != nil
+    var overviewShowsYear = ProcessInfo.processInfo.environment["APPAULED_YEAR"] != nil
     var pendingImports: [PendingImport] = []
     /// Something Tony must be told at launch (e.g. data restored from a backup).
     var startupNotice: String?
@@ -669,7 +669,7 @@ final class BudgetStore {
 
     /// Asks for a locked PDF's password. Nothing is stored: it's used once to open the file.
     private func askPassword(for url: URL) -> String? {
-        guard ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] == nil else { return nil }
+        guard ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] == nil else { return nil }
         let alert = NSAlert()
         alert.messageText = "“\(url.lastPathComponent)” is locked"
         alert.informativeText = "Your bank protected this statement with a password. Type it to open the file. It isn't saved anywhere."
@@ -787,7 +787,7 @@ final class BudgetStore {
             issues.append(ImportIssue(file: dropped[0].lastPathComponent, reason: "There were no statements in that folder."))
         }
         if !issues.isEmpty, !automatic { importIssues = issues }
-        if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil {
+        if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil {
             print("DEBUG IMPORT files \(urls.count) added \(added) verified \(verified) scanned \(scanned) mismatched \(mismatches) issues \(issues.count)")
         }
         if !touched.isEmpty, added > 0 || !automatic {
@@ -1085,7 +1085,7 @@ final class BudgetStore {
     /// Looks for new statements in Downloads, off the main thread (the first look may wait
     /// on macOS's "allow access to Downloads?" prompt, and reading files takes a moment).
     func refreshDownloads() {
-        guard ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] == nil else { return }
+        guard ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] == nil else { return }
         let known = library.importedHashes.union(library.dismissedDownloads)
         Task.detached(priority: .utility) {
             let found = Self.scanDownloads(excluding: known)
@@ -1112,7 +1112,7 @@ final class BudgetStore {
     /// Watches the Downloads folder while the app is open, so a statement saved from the bank's
     /// website shows up in the app a few seconds later without Tony doing anything.
     func watchDownloads() {
-        guard downloadsWatcher == nil, ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] == nil,
+        guard downloadsWatcher == nil, ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] == nil,
               let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }
         let descriptor = open(folder.path, O_EVTONLY)
         guard descriptor >= 0 else { return }
@@ -1175,14 +1175,14 @@ final class BudgetStore {
     // MARK: - Daily Tony, insights
 
     /// Recent purchases for Daily Tony: one per place, from the last two weeks of data.
-    func recentHighlights() -> [DailyTony.Highlight] {
+    func recentHighlights() -> [DailyPicture.Highlight] {
         let spending = transactions.filter { $0.countsAsSpending && $0.amount >= 3 && $0.category != .unsorted }
         guard let latest = spending.last?.date else { return [] }
         let cutoff = latest.addingTimeInterval(-14 * 24 * 3600)
         var seen: Set<String> = []
         return spending.filter { $0.date >= cutoff }.reversed().compactMap { t in
             guard seen.insert(t.merchant).inserted else { return nil }
-            return DailyTony.Highlight(merchant: t.merchant, category: t.category, amount: t.amount, date: t.date)
+            return DailyPicture.Highlight(merchant: t.merchant, category: t.category, amount: t.amount, date: t.date)
         }
     }
 

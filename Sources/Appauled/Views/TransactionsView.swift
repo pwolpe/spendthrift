@@ -43,7 +43,7 @@ struct TransactionsView: View {
             FilterBar(rows: rows)
             Divider()
             if rows.isEmpty {
-                TonySays(title: "Nothing matches", message: "Try a different search, or clear the filters above.") {
+                TonySays(title: "Nothing matches", message: "Try a different search, or clear the filters above.", art: "nothing") {
                     Button("Show Everything") { store.transactionFilter = TransactionFilter(); search = "" }
                 }
                 .frame(maxHeight: .infinity)

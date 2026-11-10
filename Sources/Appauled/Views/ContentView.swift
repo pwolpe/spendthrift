@@ -107,13 +107,13 @@ struct ContentView: View {
             Updater.shared.start()
             store.watchDownloads()
             DebugHooks.startIfRequested()
-            await DailyTony.shared.ensureCartoon()
+            await DailyPicture.shared.ensureCartoon()
             TonyArt.shared.prepare()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.refreshDownloads()
             store.retrySorting()
-            DailyTony.shared.retryIfNeeded()
+            DailyPicture.shared.retryIfNeeded()
         }
     }
 }

@@ -90,7 +90,7 @@ enum Entry {
             dispatchMain()
         }
         guard let i = args.firstIndex(of: "--make-icon"), i + 1 < args.count else {
-            TonyAwardsApp.main()
+            AppauledApp.main()
             return
         }
         let iconOut = URL(fileURLWithPath: args[i + 1])
@@ -104,7 +104,7 @@ enum Entry {
         window.contentView = NSHostingView(rootView:
             HStack(spacing: 14) {
                 ProgressView()
-                Text("Drawing cartoon Tony for the app icon…").font(.headline)
+                Text("Drawing the app icon…").font(.headline)
             }.frame(width: 360, height: 110))
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -112,11 +112,11 @@ enum Entry {
 
         Task { @MainActor in
             var cartoon = cartoonOut.flatMap { NSImage(contentsOf: $0) }
-            if cartoon == nil, let photo = DailyTony.shared.headshot {
+            if cartoon == nil, let photo = DailyPicture.shared.headshot {
                 cartoon = await CartoonMaker.cartoon(from: photo)
                 if let cartoon, let cartoonOut { try? IconRenderer.png(cartoon)?.write(to: cartoonOut) }
             }
-            let face = cartoon ?? DailyTony.shared.headshot
+            let face = cartoon ?? DailyPicture.shared.headshot
             let data = IconRenderer.png(IconRenderer.icon(face: face, isCartoon: cartoon != nil))
             try? data?.write(to: iconOut)
             exit(data == nil ? 1 : 0)

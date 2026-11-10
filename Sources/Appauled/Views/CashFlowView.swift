@@ -167,7 +167,7 @@ struct CashFlowView: View {
                     }
                 }
             } else {
-                TonySays(title: "Nothing here yet", message: "Add your bank and card statements and I'll show where every dollar came from and went.")
+                TonySays(title: "Nothing here yet", message: "Add your bank and card statements and I'll show where every dollar came from and went.", art: "welcome")
             }
         }
         .navigationTitle("Cash Flow")
@@ -244,6 +244,8 @@ struct VerdictCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 0)
+                    // Proud when it went well; appalled (the app's namesake) when it didn't.
+                    if !compact, income > 0 { SpotArt(name: within ? "within" : "over", height: 96) }
                     if compact { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary) }
                 }
                 if income > 0 {

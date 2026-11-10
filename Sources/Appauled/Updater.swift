@@ -34,7 +34,7 @@ final class Updater {
     var available: Release? { if case .available(let r) = state { return r }; return nil }
 
     private let lastCheckKey = "lastUpdateCheck"
-    private var isTest: Bool { ProcessInfo.processInfo.environment["TONY_AWARDS_UPDATE_TEST"] != nil }
+    private var isTest: Bool { ProcessInfo.processInfo.environment["APPAULED_UPDATE_TEST"] != nil }
 
     /// At launch: a quiet check, once a day. A new version just shows a button in the sidebar.
     func start() {
@@ -47,7 +47,7 @@ final class Updater {
             }
             return
         }
-        guard ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] == nil else { return }
+        guard ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] == nil else { return }
         let last = UserDefaults.standard.double(forKey: lastCheckKey)
         guard Date.now.timeIntervalSince1970 - last > 20 * 3600 else { return }
         Task { await check() }
@@ -111,7 +111,7 @@ final class Updater {
         guard let requirement = Self.ownRequirement() else {
             return fail("This copy of the app can't update itself. Ask Paul for a fresh copy.")
         }
-        let work = FileManager.default.temporaryDirectory.appendingPathComponent("TonyAwardsUpdate-\(UUID().uuidString)", isDirectory: true)
+        let work = FileManager.default.temporaryDirectory.appendingPathComponent("AppauledUpdate-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: work) }
         do {
             state = .installing(release, "Downloading version \(release.version)…")

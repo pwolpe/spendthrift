@@ -1,23 +1,23 @@
 import SwiftUI
 import AppKit
 
-/// Test automation, active only when TONY_AWARDS_SNAPSHOT is set (never for Tony).
-///   TONY_AWARDS_HOME=<dir>      use a scratch data folder
-///   TONY_AWARDS_IMPORT=a:b:c    files to import
-///   TONY_AWARDS_SNAPSHOT=<dir>  save a PNG of each screen there, log results, then quit
-///   TONY_AWARDS_ASK=<question>  question to ask on the Ask screen
-///   TONY_AWARDS_SUGGEST_ONLY=1  log how every place was sorted, then quit
+/// Test automation, active only when APPAULED_SNAPSHOT is set (never for Tony).
+///   APPAULED_HOME=<dir>      use a scratch data folder
+///   APPAULED_IMPORT=a:b:c    files to import
+///   APPAULED_SNAPSHOT=<dir>  save a PNG of each screen there, log results, then quit
+///   APPAULED_ASK=<question>  question to ask on the Ask screen
+///   APPAULED_SUGGEST_ONLY=1  log how every place was sorted, then quit
 @MainActor
 enum DebugHooks {
     static let env = ProcessInfo.processInfo.environment
-    static var askQuestion: String? { env["TONY_AWARDS_ASK"] }
+    static var askQuestion: String? { env["APPAULED_ASK"] }
     private static var storiesWaited = false
-    /// TONY_AWARDS_OFF="donut,trend": leave parts of the Overview out, to track down a drawing problem.
-    private static let offParts = Set((env["TONY_AWARDS_OFF"] ?? "").split(separator: ",").map(String.init))
+    /// APPAULED_OFF="donut,trend": leave parts of the Overview out, to track down a drawing problem.
+    private static let offParts = Set((env["APPAULED_OFF"] ?? "").split(separator: ",").map(String.init))
     static func off(_ part: String) -> Bool { offParts.contains(part) }
 
     static func startIfRequested() {
-        guard let outDir = env["TONY_AWARDS_SNAPSHOT"] else { return }
+        guard let outDir = env["APPAULED_SNAPSHOT"] else { return }
         Task { await run(outDir: URL(fileURLWithPath: outDir)) }
     }
 
@@ -30,7 +30,7 @@ enum DebugHooks {
         try? await Task.sleep(for: .seconds(2))
         if store.accounts.isEmpty { await snap("01-welcome", outDir) { WelcomeView(isDropTargeted: false, scrolls: false) } }
 
-        let files = (env["TONY_AWARDS_IMPORT"] ?? "").split(separator: ":").map { URL(fileURLWithPath: String($0)) }
+        let files = (env["APPAULED_IMPORT"] ?? "").split(separator: ":").map { URL(fileURLWithPath: String($0)) }
         let started = Date.now
         if !files.isEmpty {
             store.importFiles(files)
@@ -57,9 +57,9 @@ enum DebugHooks {
             let t = txns[0]
             print("DEBUG SUGGEST \(t.description) → \(t.merchant) | \(t.category.rawValue) | \(t.source.rawValue)\(t.needsCheck ? " ?" : "") [\(key)] x\(txns.count)")
         }
-        if env["TONY_AWARDS_SUGGEST_ONLY"] != nil { NSApp.terminate(nil); return }
-        // TONY_AWARDS_CHAT="first question|a follow-up|another": a conversation with Ask the Academy.
-        if let chat = env["TONY_AWARDS_CHAT"] {
+        if env["APPAULED_SUGGEST_ONLY"] != nil { NSApp.terminate(nil); return }
+        // APPAULED_CHAT="first question|a follow-up|another": a conversation with Ask the Academy.
+        if let chat = env["APPAULED_CHAT"] {
             var turns: [ChatAnalyst.Turn] = []
             for q in chat.split(separator: "|").map(String.init) {
                 let started = Date.now
@@ -71,7 +71,7 @@ enum DebugHooks {
             }
             NSApp.terminate(nil); return
         }
-        if env["TONY_AWARDS_SELFTEST"] != nil { await selfTest(files: files); NSApp.terminate(nil); return }
+        if env["APPAULED_SELFTEST"] != nil { await selfTest(files: files); NSApp.terminate(nil); return }
 
         await snap("03-review", outDir) { ReviewView(scrolls: false) }
         store.confirm(store.reviewItems.map(\.key))
@@ -198,7 +198,7 @@ enum DebugHooks {
         for _ in 0..<240 {
             try? await Task.sleep(for: .milliseconds(500))
             let s = BudgetStore.shared
-            if !s.isSuggesting && !s.isImporting && !DailyTony.shared.isGenerating { break }
+            if !s.isSuggesting && !s.isImporting && !DailyPicture.shared.isGenerating { break }
         }
         try? await Task.sleep(for: .seconds(1))
     }

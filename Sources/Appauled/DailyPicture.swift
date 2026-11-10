@@ -8,15 +8,15 @@ import FoundationModels
 /// the picture prepared during the last visit, or one of the starters that ship with the app.
 /// Meanwhile, out of sight, the next one is drawn from his real photo for the next time he opens it.
 @MainActor @Observable
-final class DailyTony {
-    static let shared = DailyTony()
+final class DailyPicture {
+    static let shared = DailyPicture()
 
     private(set) var image: NSImage?
     private(set) var caption: String = ""
     private(set) var isGenerating = false
     private(set) var isAIImage = false
 
-    let headshot: NSImage? = DailyTony.photo.flatMap(NSImage.init(data:))
+    let headshot: NSImage? = DailyPicture.photo.flatMap(NSImage.init(data:))
 
     /// Cartoon Tony: baked in at build time, or made on first launch.
     private(set) var cartoon: NSImage? = Bundle.main.url(forResource: "tony-cartoon", withExtension: "png").flatMap(NSImage.init(contentsOf:))
@@ -68,7 +68,7 @@ final class DailyTony {
     }
 
     private let folder: URL = {
-        let dir = BudgetPaths().root.appendingPathComponent("Daily Tony", isDirectory: true)
+        let dir = BudgetPaths().root.appendingPathComponent("Pictures", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
@@ -241,7 +241,7 @@ final class DailyTony {
         // Keep the last thirty; older ones go, with their files.
         while saved.count > 30 { try? FileManager.default.removeItem(at: folder.appendingPathComponent(saved.removeFirst().file)) }
         gallery = saved
-        if ProcessInfo.processInfo.environment["TONY_AWARDS_SNAPSHOT"] != nil {
+        if ProcessInfo.processInfo.environment["APPAULED_SNAPSHOT"] != nil {
             print("DEBUG PICTURE next: \(pick.merchant) [\(used), \(style.id), \(who)] \(scene.caption)\n  scene: \(scene.scene)")
         }
     }
@@ -249,9 +249,9 @@ final class DailyTony {
 
 // MARK: - The banner on the Overview
 
-struct DailyTonyCard: View {
+struct BannerCard: View {
     private var store: BudgetStore { .shared }
-    @State private var daily = DailyTony.shared
+    @State private var daily = DailyPicture.shared
 
     var body: some View {
         Color.black
@@ -279,7 +279,7 @@ struct DailyTonyCard: View {
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(Color(red: 1, green: 0.84, blue: 0.4))
                             .textCase(.uppercase)
-                        Text(daily.caption.isEmpty ? "Hi, Tony." : daily.caption)
+                        Text(daily.caption.isEmpty ? "Today's daydream" : daily.caption)
                             .font(.system(size: 28, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .fixedSize(horizontal: false, vertical: true)

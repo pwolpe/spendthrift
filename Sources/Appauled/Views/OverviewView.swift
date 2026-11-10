@@ -22,7 +22,7 @@ struct OverviewView: View {
 
     private var content: some View {
             VStack(alignment: .leading, spacing: 20) {
-                if !DebugHooks.off("daily") { DailyTonyCard() }
+                if !DebugHooks.off("daily") { BannerCard() }
                 DownloadsBanner()
                 if !store.reviewItems.isEmpty, !store.isSuggesting { reviewBanner }
                 if !store.missingStatements.isEmpty, !store.isImporting { missingBanner }
@@ -54,7 +54,7 @@ struct OverviewView: View {
                     if !DebugHooks.off("stories") { storiesThisMonth(m) }
                     if !DebugHooks.off("ceremony") { CeremonyCard(month: m) }
                 } else {
-                    TonySays(title: "Nothing here yet", message: "Drop a statement into this window and the show begins.")
+                    TonySays(title: "Nothing here yet", message: "Drop a statement into this window and the show begins.", art: "welcome")
                 }
             }
             .padding(28)
