@@ -344,6 +344,56 @@ struct AskView: View {
     }
 }
 
+/// Turns every place named in an answer into a link to that place's page.
+@MainActor
+enum PlaceLinker {
+    private static var cache: (count: Int, names: [String])?
+
+    /// Every place name, longest first, so "Westside Market NYC" wins over "Westside Market".
+    static func names() -> [String] {
+        let store = BudgetStore.shared
+        if let cache, cache.count == store.transactions.count { return cache.names }
+        let names = Set(store.transactions.map(\.merchant)).filter { $0.count >= 4 }.sorted { $0.count > $1.count }
+        cache = (store.transactions.count, names)
+        return names
+    }
+
+    static func url(for name: String) -> URL? {
+        var parts = URLComponents()
+        parts.scheme = "appauled-place"
+        parts.host = "open"
+        parts.queryItems = [URLQueryItem(name: "name", value: name)]
+        return parts.url
+    }
+
+    static func name(from url: URL) -> String? {
+        guard url.scheme == "appauled-place" else { return nil }
+        return URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "name" }?.value
+    }
+
+    static func link(_ text: String) -> AttributedString {
+        var out = AttributedString(text)
+        var taken: [Range<String.Index>] = []
+        for name in names() {
+            var from = text.startIndex
+            while let found = text.range(of: name, options: [.caseInsensitive, .diacriticInsensitive], range: from..<text.endIndex) {
+                from = found.upperBound
+                // Whole words only, and never inside a longer name already linked.
+                let before = found.lowerBound > text.startIndex ? text[text.index(before: found.lowerBound)] : " "
+                let after = found.upperBound < text.endIndex ? text[found.upperBound] : " "
+                guard !before.isLetter, !before.isNumber, !after.isLetter, !after.isNumber,
+                      !taken.contains(where: { $0.overlaps(found) }),
+                      let lower = AttributedString.Index(found.lowerBound, within: out),
+                      let upper = AttributedString.Index(found.upperBound, within: out) else { continue }
+                taken.append(found)
+                out[lower..<upper].link = url(for: name)
+                out[lower..<upper].underlineStyle = .single
+            }
+        }
+        return out
+    }
+}
+
 private struct AnswerBubble: View {
     let answer: Answer
 
@@ -360,9 +410,16 @@ private struct AnswerBubble: View {
                 TonyAvatar(size: 32)
                 Card(padding: 16) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(answer.headline).font(.title3.weight(.semibold))
+                        // Any place named in the answer is a link to everything spent there.
+                        Text(PlaceLinker.link(answer.headline)).font(.title3.weight(.semibold))
+                            .tint(Theme.accent)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
+                            .environment(\.openURL, OpenURLAction { url in
+                                guard let name = PlaceLinker.name(from: url) else { return .systemAction }
+                                BudgetStore.shared.showPlace(name)
+                                return .handled
+                            })
                         if answer.chart.count >= 2 { AnswerChart(bars: answer.chart, isLine: answer.chartIsLine) }
                         if !answer.rows.isEmpty {
                             VStack(spacing: 8) {
@@ -370,7 +427,16 @@ private struct AnswerBubble: View {
                                     HStack(spacing: 10) {
                                         if let c = row.category { CategoryIcon(category: c, size: 24) }
                                         VStack(alignment: .leading, spacing: 0) {
-                                            Text(row.label).lineLimit(1)
+                                            if PlaceLinker.names().contains(row.label) {
+                                                Button(row.label) { BudgetStore.shared.showPlace(row.label) }
+                                                    .buttonStyle(.plain)
+                                                    .foregroundStyle(Theme.accent)
+                                                    .underline()
+                                                    .lineLimit(1)
+                                                    .help("Everything at \(row.label)")
+                                            } else {
+                                                Text(row.label).lineLimit(1)
+                                            }
                                             if !row.detail.isEmpty {
                                                 Text(row.detail).font(.caption).foregroundStyle(.secondary)
                                             }

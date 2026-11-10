@@ -35,7 +35,10 @@ codesign --force --sign "$SIGN" --timestamp=none "$APP"
 echo "→ Drawing icon (cartoon Tony via Image Playground)"
 # Image Playground only runs in a foreground app, so launch the bundle normally.
 rm -f "$BUILD/icon-1024.png"
-open -W -n "$APP" --args --make-icon "$BUILD/icon-1024.png" --cartoon "$ROOT/Resources/tony-avatar.png" || true
+# A finished icon in Resources wins (Paul, appalled at a receipt, drawn by an image model);
+# otherwise the app draws its own.
+if [ -f "$ROOT/Resources/icon-1024.png" ]; then cp "$ROOT/Resources/icon-1024.png" "$BUILD/icon-1024.png"; fi
+[ -f "$BUILD/icon-1024.png" ] || open -W -n "$APP" --args --make-icon "$BUILD/icon-1024.png" --cartoon "$ROOT/Resources/tony-avatar.png" || true
 if [ -f "$BUILD/icon-1024.png" ]; then
   ICONSET="$BUILD/AppIcon.iconset"
   rm -rf "$ICONSET"; mkdir -p "$ICONSET"

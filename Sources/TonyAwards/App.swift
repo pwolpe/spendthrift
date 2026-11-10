@@ -11,7 +11,8 @@ struct TonyAwardsApp: App {
                 .environment(BudgetStore.shared)
                 .frame(minWidth: 920, minHeight: 620)
         }
-        .defaultSize(width: 1140, height: 780)
+        // Wide enough for the pages and the question pane side by side.
+        .defaultSize(width: 1480, height: 900)
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {

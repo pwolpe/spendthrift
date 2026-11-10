@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(BudgetStore.self) private var store
     @State private var isDropTargeted = false
+    @State private var decidedAboutAsk = false
 
     var body: some View {
         NavigationSplitView {
@@ -54,6 +55,12 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+        // The question pane is open from the start when there is room for it beside the pages.
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            guard !decidedAboutAsk, width > 0 else { return }
+            decidedAboutAsk = true
+            if width >= 1320 { store.showsAsk = true }
         }
         .tint(Theme.accent)
         .overlay {
