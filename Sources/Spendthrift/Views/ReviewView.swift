@@ -29,7 +29,8 @@ struct ReviewView: View {
                 }
             } else {
                 header
-                if let reason = CategorySuggester.unavailableReason, store.reviewItems.contains(where: { $0.info.category == nil }) {
+                // Only worth saying when the on-device model is what the app is relying on.
+                if !CloudAI.isEnabled, let reason = CategorySuggester.unavailableReason, store.reviewItems.contains(where: { $0.info.category == nil }) {
                     Label(reason, systemImage: "apple.intelligence")
                         .font(.callout)
                         .padding(12)
@@ -59,7 +60,7 @@ struct ReviewView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if store.isSuggesting {
-                    Label("Still sorting a few more…", systemImage: "apple.intelligence")
+                    Label("Still sorting a few more…", systemImage: CloudAI.isEnabled ? "sparkles" : "apple.intelligence")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .symbolEffect(.pulse)

@@ -107,7 +107,7 @@ struct TransactionsView: View {
                 CategoryPill(category: t.isUnknown ? nil : t.category, sparkle: t.needsCheck && !t.isUnknown) { c in
                     store.setCategory(c, for: [t.id], wholePlace: true)
                 }
-                .help(t.needsCheck ? "Sorted by Apple Intelligence. Click to change." : "Click to change the category for \(t.merchant)")
+                .help(t.needsCheck ? (t.source == .ai ? "Sorted by Apple Intelligence. Click to change." : "The AI's best guess. Click to change.") : "Click to change the category for \(t.merchant)")
             }
             .width(min: 150, ideal: 190)
 
