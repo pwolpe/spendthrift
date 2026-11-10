@@ -246,6 +246,10 @@ struct VerdictCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 0)
+                    if income > 0 {
+                        Stamp(text: within ? "WITHIN MEANS" : "OVER", color: color, size: compact ? 10 : 14)
+                            .padding(.trailing, compact ? 4 : 10)
+                    }
                     if compact { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary) }
                 }
                 if income > 0 {
@@ -574,6 +578,10 @@ struct CardCoverageCard: View {
                     Text(verdict(toFind: toFind, notAdded: notAdded, loose: loose))
                         .font(.body.weight(.medium))
                         .fixedSize(horizontal: false, vertical: true)
+                    if toFind + notAdded + loose == 0 {
+                        Spacer(minLength: 8)
+                        Stamp(text: "TIED OUT")
+                    }
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)

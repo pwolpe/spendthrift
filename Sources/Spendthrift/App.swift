@@ -38,6 +38,8 @@ struct SpendthriftApp: App {
                 Button("Find a Place…") { BudgetStore.shared.selection = .places }.keyboardShortcut("f")
                 Divider()
                 Button("Ask a Question") { BudgetStore.shared.showsAsk.toggle() }.keyboardShortcut("k")
+                Button("Last Month's Recap") { if let month = BudgetStore.shared.lastFullMonth { BudgetStore.shared.playRecap(of: month) } }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
                 Divider()
                 Button("Double-Check") { BudgetStore.shared.selection = .review }.keyboardShortcut("5")
                 Button("Accounts") { BudgetStore.shared.selection = .accounts }.keyboardShortcut("6")

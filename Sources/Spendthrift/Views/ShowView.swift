@@ -125,7 +125,7 @@ struct ShowView: View {
 
     // MARK: The premiere
 
-    private var cards: [PremiereCard.Kind] { PremiereCard.Kind.available(in: store) }
+    private var cards: [PremiereCard.Kind] { PremiereCard.Kind.available(in: store, month: store.premiereMonth) }
 
     private var premiere: some View {
         let list = cards
@@ -139,7 +139,7 @@ struct ShowView: View {
             .padding(.top, 16)
             Spacer(minLength: 10)
             if !list.isEmpty {
-                PremiereCard(kind: list[index]) { store.stage = nil }
+                PremiereCard(kind: list[index], month: store.premiereMonth) { store.stage = nil }
                     .id(list[index])
                     .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
                                             removal: .move(edge: .leading).combined(with: .opacity)))
@@ -182,7 +182,13 @@ struct PremiereCard: View {
     enum Kind: Hashable {
         case opening, where_, standout, repeats, trips, noticed, verdict, finale
 
-        @MainActor static func available(in store: BudgetStore) -> [Kind] {
+        @MainActor static func available(in store: BudgetStore, month: Month? = nil) -> [Kind] {
+            // One month looked back on: what it came to, where it went, what stood out, what was noticed.
+            if let month {
+                var list: [Kind] = [.opening, .where_, .standout]
+                if !store.noticed(in: .month(month)).isEmpty { list.append(.noticed) }
+                return list + [.finale]
+            }
             var list: [Kind] = [.opening, .where_]
             if store.transactions.contains(where: \.countsAsSpending) { list.append(.standout) }
             if store.subscriptions().count >= 2 { list.append(.repeats) }
@@ -196,15 +202,19 @@ struct PremiereCard: View {
 
     private var store: BudgetStore { .shared }
     let kind: Kind
+    /// Set when this is the recap of one month rather than of everything just imported.
+    var month: Month? = nil
     var done: () -> Void = {}
 
-    /// The last twelve months there is data for: recent enough to be about now.
+    /// The last twelve months there is data for: recent enough to be about now. (Or the one month.)
     private var recent: [Transaction] {
+        if let month { return store.transactions.filter { $0.month == month } }
         guard let last = store.months.last else { return [] }
         let start = last.adding(-11)
         return store.transactions.filter { $0.month >= start }
     }
     private var span: String {
+        if let month { return month.name }
         let months = min(store.months.count, 12)
         return months >= 12 ? "the last twelve months" : months == 1 ? "this month" : "the last \(months) months"
     }
@@ -212,7 +222,7 @@ struct PremiereCard: View {
     var body: some View {
         VStack(spacing: 22) {
             switch kind {
-            case .opening: opening
+            case .opening: if month != nil { monthOpening } else { opening }
             case .where_: whereItWent
             case .standout: standout
             case .repeats: repeats
@@ -239,6 +249,24 @@ struct PremiereCard: View {
     }
     private func big(_ text: String) -> some View {
         Text(text).font(.system(size: 76, weight: .bold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.5).lineLimit(1)
+    }
+
+    @ViewBuilder private var monthOpening: some View {
+        if let month {
+            let total = store.totalSpent(in: month)
+            let before = store.months.contains(month.adding(-1)) ? store.totalSpent(in: month.adding(-1)) : nil
+            let earlier = (1...6).map { month.adding(-$0) }.filter(store.months.contains).map { store.totalSpent(in: $0) }
+            SpotArt(name: "v-review", height: 200)
+            eyebrow("\(month.name) is in the books")
+            big(Money.format(total, cents: false))
+            headline("spent in \(month.name)")
+            if let before, before > 0 {
+                let diff = total - before
+                let usual = earlier.isEmpty ? nil : earlier.reduce(0, +) / Double(earlier.count)
+                line("\(Money.format(abs(diff), cents: false)) \(diff <= 0 ? "less" : "more") than \(month.adding(-1).name)"
+                     + (usual.map { ", against a usual month of about \(Money.format($0, cents: false))." } ?? "."))
+            }
+        }
     }
 
     @ViewBuilder private var opening: some View {
@@ -351,12 +379,14 @@ struct PremiereCard: View {
     }
 
     @ViewBuilder private var noticed: some View {
-        let found = store.discoveries.prefix(3)
+        let scoped = month.map { store.noticed(in: .month($0)) } ?? store.noticed(in: .last12)
+        let found = scoped.prefix(3)
         eyebrow("I read every charge")
-        headline("A few things you may not know")
+        headline(month.map { "What I noticed in \($0.name)" } ?? "A few things you may not know")
         VStack(alignment: .leading, spacing: 16) {
-            ForEach(Array(found)) { item in
-                let total = store.transactions(in: item).reduce(0) { $0 + $1.amount }
+            ForEach(Array(found), id: \.item.id) { entry in
+                let item = entry.item
+                let total = entry.charges.reduce(0) { $0 + $1.amount }
                 HStack(alignment: .top, spacing: 14) {
                     Image(systemName: item.symbol).font(.system(size: 30)).foregroundStyle(Theme.accent).frame(width: 40)
                     VStack(alignment: .leading, spacing: 3) {
@@ -394,15 +424,16 @@ struct PremiereCard: View {
 
     @ViewBuilder private var finale: some View {
         let picture = DailyPicture.shared
-        eyebrow("And one more thing")
+        eyebrow(month == nil ? "And one more thing" : "One for the road")
         if let image = picture.image {
             Image(nsImage: image).resizable().aspectRatio(21.0 / 9.0, contentMode: .fit)
                 .clipShape(.rect(cornerRadius: 20, style: .continuous))
                 .shadow(color: .black.opacity(0.2), radius: 18, y: 8)
         }
-        headline(CloudAI.isEnabled ? "Every time you open the app, a new picture about something you really bought" : "Everything is added up")
+        headline(month.map { "That was \($0.name). On to \($0.adding(1).name)." }
+                 ?? (CloudAI.isEnabled ? "Every time you open the app, a new picture about something you really bought" : "Everything is added up"))
         Button(action: done) {
-            Text("Take Me In").font(.title3.weight(.semibold)).padding(.horizontal, 22).padding(.vertical, 6)
+            Text(month == nil ? "Take Me In" : "Done").font(.title3.weight(.semibold)).padding(.horizontal, 22).padding(.vertical, 6)
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.extraLarge)

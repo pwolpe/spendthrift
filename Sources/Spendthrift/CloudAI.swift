@@ -347,6 +347,30 @@ struct CloudItem {
     var notes: [String] = []
 }
 
+extension CloudSorter {
+    /// The same places sorted twice, independently and at the same moment. Where the two readings
+    /// agree, the answer stands. Where they differ, the model plainly isn't sure, so the place is
+    /// marked as a guess and goes to Double-Check instead of one answer being picked silently.
+    /// (Sorting the same statements on two days used to give different totals; this is why.)
+    static func sortTwice(_ items: [CloudItem], examples: [MerchantRule]) async -> [String: CloudVerdict]? {
+        async let first = sort(items, examples: examples)
+        async let second = sort(items, examples: examples)
+        guard let a = await first else { return await second }
+        guard let b = await second else { return a }
+        var out = a
+        for (key, verdict) in a {
+            guard let other = b[key] else { continue }
+            if other.category != verdict.category {
+                // Prefer the reading that was itself unsure of nothing; either way, flag it.
+                let kept = verdict.confident || !other.confident ? verdict : other
+                out[key] = CloudVerdict(name: kept.name, category: kept.category, confident: false, domain: kept.domain ?? other.domain)
+            }
+        }
+        for (key, verdict) in b where out[key] == nil { out[key] = verdict }
+        return out
+    }
+}
+
 struct CloudVerdict: Sendable {
     let name: String
     let category: Category
@@ -741,7 +765,7 @@ enum CloudImage {
     }
 
     /// One sentence saying what is going on in the picture, and the dry line printed under it.
-    static func scene(merchant: String, category: String, amount: Double, cast: [String] = ["Tony"]) async -> Scene? {
+    static func scene(merchant: String, category: String, amount: Double, cast: [String] = ["Tony"], trip: String? = nil, tripPlace: String? = nil) async -> Scene? {
         let system = """
         You design the picture at the top of Spendthrift, a playful personal budgeting app starring two friends, \
         Tony and Paul. Each picture is a cartoon of one or both of them in a Walter Mitty daydream: an ordinary purchase he really made, \
@@ -783,7 +807,10 @@ enum CloudImage {
         let who = cast.count > 1
             ? " This picture stars two friends, \(cast.joined(separator: " and ")), together: start the scene with \"they are\" and give each of them something to do. Say by name which of them holds the receipt. The caption may name them both."
             : " This picture stars \(cast[0]) alone: \"he\" is \(cast[0]), the only one of the two friends in the picture, and he is the one holding the receipt. Do not mention or include \(cast[0] == "Tony" ? "Paul" : "Tony"), and do not use either name in the scene or the receipt sentence: write \"he\"."
-        let user = "Purchase: \(merchant) (\(category)), \(Money.format(amount)). This time, make the daydream \(flavor).\(who) Hats, helmets and masks stay off his head so the whole face shows."
+        // A purchase from a trip is set where the trip was: that is what makes someone ask how it knew.
+        let place = [trip, tripPlace].compactMap { $0 }.joined(separator: ", ")
+        let away = place.isEmpty ? "" : " This was bought on a trip: \(place). Set the daydream unmistakably there: its landscape, landmarks, weather and local color, with this business as part of the scene."
+        let user = "Purchase: \(merchant) (\(category)), \(Money.format(amount)). This time, make the daydream \(flavor).\(away)\(who) Hats, helmets and masks stay off his head so the whole face shows."
         let reply = await Timeout.run(40) {
             try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 3_000, temperature: 1.0, timeout: 35)
         }

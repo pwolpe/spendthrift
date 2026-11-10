@@ -44,7 +44,37 @@ final class BudgetStore {
     var showsAsk = false
     /// The show that plays over the window during a big import: the work, then the premiere.
     enum Stage { case working, premiere }
-    var stage: Stage?
+    var stage: Stage? { didSet { if stage == nil { premiereMonth = nil } } }
+    /// Set while the premiere on screen is the recap of one month, not of a first import.
+    var premiereMonth: Month?
+
+    /// The month that just ended, if there is anything in it to look back on.
+    var lastFullMonth: Month? {
+        let previous = Month(date: .now).adding(-1)
+        if months.contains(previous) { return previous }
+        // Statements run behind the calendar: otherwise, the newest month that isn't the newest of all.
+        return months.dropLast().last
+    }
+
+    func playRecap(of month: Month) {
+        premiereMonth = month
+        withAnimation(.easeInOut(duration: 0.4)) { stage = .premiere }
+    }
+
+    /// The first time the app is opened in a new month, the month just ended gets its recap.
+    func recapIfNewMonth() {
+        let key = "recappedMonth"
+        let previous = Month(date: .now).adding(-1)
+        guard stage == nil, !isImporting else { return }
+        // Someone who has no statements yet has nothing to look back on; start counting from here.
+        guard !accounts.isEmpty, spending(in: previous).count >= 5 else {
+            if accounts.isEmpty { UserDefaults.standard.set(previous.key, forKey: key) }
+            return
+        }
+        guard UserDefaults.standard.string(forKey: key) != previous.key, ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] == nil else { return }
+        UserDefaults.standard.set(previous.key, forKey: key)
+        playRecap(of: previous)
+    }
     var transactionFilter = TransactionFilter()
     /// The Overview looks at one month or at a whole year; the same page either way.
     var overviewShowsYear = ProcessInfo.processInfo.environment["SPENDTHRIFT_YEAR"] != nil
@@ -442,7 +472,7 @@ final class BudgetStore {
                     while running < 40, !batches.isEmpty {
                         let batch = batches.removeFirst()
                         running += 1
-                        group.addTask { (batch, await CloudSorter.sort(batch, examples: examples)) }
+                        group.addTask { (batch, await CloudSorter.sortTwice(batch, examples: examples)) }
                     }
                 }
                 start()
@@ -1005,6 +1035,22 @@ final class BudgetStore {
     }
 
     /// Opens the page for one place: everything ever spent there.
+    /// A charge from this same day in an earlier year, worth being reminded of: the largest that
+    /// wasn't a bill or a subscription.
+    func onThisDay(_ today: Date = .now) -> (years: Int, charge: Transaction)? {
+        let cal = Calendar.current
+        let now = cal.dateComponents([.year, .month, .day], from: today)
+        let routine = Set(subscriptions().map(\.merchant))
+        var best: (years: Int, charge: Transaction)?
+        for t in transactions where t.countsAsSpending && t.amount >= 15 {
+            let c = cal.dateComponents([.year, .month, .day], from: t.date)
+            guard c.month == now.month, c.day == now.day, let year = c.year, let thisYear = now.year, year < thisYear,
+                  !routine.contains(t.merchant), ![Category.home, .bills, .fees].contains(t.category) else { continue }
+            if best == nil || t.amount > best!.charge.amount { best = (thisYear - year, t) }
+        }
+        return best
+    }
+
     /// Everything that counted as spending in one month: what a bar on a chart stands for.
     func showSpending(in month: Month) {
         showCharges(TransactionFilter(ids: Set(spending(in: month).map(\.id)), title: "Spending in \(month.title)"))
@@ -1828,6 +1874,26 @@ final class BudgetStore {
             guard seen.insert(t.merchant).inserted else { return nil }
             return DailyPicture.Highlight(merchant: t.merchant, category: t.category, amount: t.amount, date: t.date)
         }
+    }
+
+    /// Charges from trips of the last two years that would make a good picture: for each trip, its
+    /// larger charges at places with a name (not the airline or the card's foreign fee).
+    func tripHighlights() -> [DailyPicture.Highlight] {
+        guard let latest = transactions.last?.date else { return [] }
+        let cutoff = latest.addingTimeInterval(-730 * 86_400)
+        var out: [DailyPicture.Highlight] = []
+        for story in stories where story.kind == .trip {
+            let dull = ["withdrawal", "atm", "fee", "payment", "transfer", "unknown"]
+            let charges = transactions(in: story).filter { t in
+                t.countsAsSpending && t.amount >= 5 && t.date >= cutoff && t.category != .fees && !dull.contains { t.merchant.lowercased().contains($0) }
+            }
+            var seen: Set<String> = []
+            for t in charges.sorted(by: { $0.amount > $1.amount }) where seen.insert(t.merchant).inserted {
+                out.append(DailyPicture.Highlight(merchant: t.merchant, category: t.category, amount: t.amount, date: t.date, trip: story.name, tripPlace: story.place))
+                if seen.count >= 4 { break }
+            }
+        }
+        return out
     }
 
     /// Tells the person, once, about anything new worth knowing in the latest month: a price that

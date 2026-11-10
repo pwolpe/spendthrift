@@ -277,6 +277,9 @@ struct AskView: View {
                         if answers.isEmpty { intro }
                         ForEach(answers) { answer in
                             AnswerBubble(answer: answer).id(answer.id)
+                                // The slip feeds out from the top, whole: readable at once, no waiting on lines.
+                                .transition(.asymmetric(insertion: .scale(scale: 1, anchor: .top).combined(with: .move(edge: .top)).combined(with: .opacity),
+                                                        removal: .opacity))
                         }
                         if thinking {
                             HStack(spacing: 10) {
@@ -368,7 +371,7 @@ struct AskView: View {
             // With the cloud model this is a conversation; otherwise one question at a time, on the Mac.
             if let (answer, turn) = await ChatAnalyst.answer(q, history: turns, store: store) {
                 turns.append(turn)
-                withAnimation(.snappy) { answers.append(answer); thinking = false }
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) { answers.append(answer); thinking = false }
                 return
             }
             let query = await QueryParser.parse(q, months: store.months)

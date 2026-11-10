@@ -77,12 +77,13 @@ final class DailyPicture {
     private var imageFile: URL { folder.appendingPathComponent("\(todayKey).png") }
     private var captionFile: URL { folder.appendingPathComponent("\(todayKey).txt") }
     private var lastHighlights: [Highlight] = []
+    private var lastTrips: [Highlight] = []
 
     /// Coming back to the app is another chance to prepare the next picture, if this launch hasn't yet.
     func retryIfNeeded() {
         guard !preparedThisLaunch, !isGenerating, !lastHighlights.isEmpty else { return }
-        let highlights = lastHighlights
-        Task { await prepareNext(highlights: highlights) }
+        let highlights = lastHighlights, trips = lastTrips
+        Task { await prepareNext(highlights: highlights, trips: trips) }
     }
 
     /// The caricature as a PNG no larger than 1024 pixels, to send along as the reference for a drawing.
@@ -108,6 +109,9 @@ final class DailyPicture {
         let category: Category
         let amount: Double
         var date: Date?
+        /// The trip this was bought on, and where it was, when the app knows.
+        var trip: String? = nil
+        var tripPlace: String? = nil
     }
 
     // MARK: The pictures
@@ -126,6 +130,8 @@ final class DailyPicture {
         var who: String?
         /// What the purchase cost: the real number is what makes the picture land.
         var amount: Double?
+        /// The trip the purchase was part of, when the picture is set there.
+        var trip: String?
         /// True when someone in the picture holds the receipt. Pictures drawn before that was the rule
         /// stay on disk but are no longer shown.
         var receipt: Bool?
@@ -133,10 +139,13 @@ final class DailyPicture {
 
     /// What the picture is about ("Dunkin' · Nov 7"), shown under it. Nil for a starter.
     private(set) var source: String?
+    /// The trip the picture on show is set on, if it is one of those.
+    private(set) var trip: String?
     private(set) var current: Picture?
     @ObservationIgnored private var preparedThisLaunch = false
     /// For tests: who the next picture stars, and permission to draw another in the same launch.
     @ObservationIgnored var forcedCast: String?
+    @ObservationIgnored var forcedTrip = false
     func allowAnother() { preparedThisLaunch = false }
 
     private init() { showOnOpen() }
@@ -174,7 +183,7 @@ final class DailyPicture {
             label = day.map { "\(merchant) · \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? merchant
             if let amount = picture.amount { label = (label ?? merchant) + " · " + Money.format(amount) }
         }
-        let apply = { self.image = loaded; self.caption = picture.caption; self.source = label; self.current = picture; self.isAIImage = true }
+        let apply = { self.image = loaded; self.caption = picture.caption; self.source = label; self.current = picture; self.isAIImage = true; self.trip = picture.trip }
         if animated { withAnimation(.easeInOut(duration: 0.5)) { apply() } } else { apply() }
         return true
     }
@@ -208,8 +217,9 @@ final class DailyPicture {
 
     /// Once per launch, out of sight: choose the best image model there is today, pick a real recent
     /// purchase, and draw the picture that will be waiting the next time the app opens.
-    func prepareNext(highlights: [Highlight]) async {
+    func prepareNext(highlights: [Highlight], trips: [Highlight] = []) async {
         lastHighlights = highlights
+        if !trips.isEmpty { lastTrips = trips }
         guard CloudAI.isEnabled, !preparedThisLaunch, !isGenerating, !highlights.isEmpty, let photo = Self.photo else { return }
         // Who stars this time: Tony, Paul, or the two of them, a third of the time each. Whoever has
         // appeared least in the recent pictures goes next, and never the same as last time.
@@ -233,10 +243,15 @@ final class DailyPicture {
         var saved = gallery
         let lately = Set(saved.suffix(8).compactMap(\.merchant))
         let recent = Array(highlights.prefix(15))
-        let pick = recent.filter { !lately.contains($0.merchant) }.randomElement() ?? recent.randomElement()!
+        var pick = recent.filter { !lately.contains($0.merchant) }.randomElement() ?? recent.randomElement()!
+        // About one picture in three goes back to a trip: the two of them there, holding a receipt from it.
+        let latelyTrips = Set(saved.suffix(6).compactMap(\.trip))
+        let fresh = lastTrips.filter { !lately.contains($0.merchant) && !($0.trip.map(latelyTrips.contains) ?? false) }
+        if pick.trip == nil, let memory = fresh.randomElement(), forcedTrip || Int.random(in: 0..<3) == 0 { pick = memory }
         async let chosen = CloudImage.bestModel()
         let names = cast.map(\.name)
-        async let planned = CloudImage.scene(merchant: pick.merchant, category: pick.category.displayName, amount: pick.amount, cast: names)
+        async let planned = CloudImage.scene(merchant: pick.merchant, category: pick.category.displayName, amount: pick.amount, cast: names,
+                                             trip: pick.trip, tripPlace: pick.tripPlace)
         let model = await chosen
         guard let scene = await planned else {
             if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG PICTURE no scene came back for \(pick.merchant)") }
@@ -267,7 +282,7 @@ final class DailyPicture {
         let file = "tony-\(Int(Date.now.timeIntervalSince1970)).png"
         try? drawn.write(to: folder.appendingPathComponent(file))
         saved.append(Picture(file: file, caption: scene.caption, merchant: pick.merchant,
-                             date: pick.date.map { DateParsing.iso.string(from: $0) }, seen: false, model: used, style: style.id, who: who, amount: pick.amount, receipt: true))
+                             date: pick.date.map { DateParsing.iso.string(from: $0) }, seen: false, model: used, style: style.id, who: who, amount: pick.amount, trip: pick.trip, receipt: true))
         // Keep the last thirty; older ones go, with their files.
         while saved.count > 30 { try? FileManager.default.removeItem(at: folder.appendingPathComponent(saved.removeFirst().file)) }
         gallery = saved
@@ -304,7 +319,7 @@ struct BannerCard: View {
 
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("\(daily.source == nil ? "From the daydream file" : "Today's receipt") · \(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))".uppercased())
+                    Text("\(daily.trip.map { "From \($0)" } ?? (daily.source == nil ? "From the daydream file" : "Today's receipt")) · \(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))".uppercased())
                         .font(Theme.mono(11, .bold))
                         .tracking(1.2)
                         .foregroundStyle(Theme.accent)
@@ -319,20 +334,75 @@ struct BannerCard: View {
                     }
                 }
                 Spacer(minLength: 0)
-                Button {
-                    daily.showRandom()
-                } label: {
-                    Label("Another One", systemImage: "wand.and.sparkles")
+                HStack(spacing: 8) {
+                    Button { PictureSharing.share(daily) } label: { Image(systemName: "square.and.arrow.up") }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .help("Send this picture to someone")
+                    Button {
+                        daily.showRandom()
+                    } label: {
+                        Label("Another One", systemImage: "wand.and.sparkles")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
             }
             .padding(.horizontal, 6)
         }
         // Once the statements are in, quietly get the next picture ready.
         .task(id: "\(store.hasLoadedTransactions)-\(store.isImporting)-\(store.recentHighlights().first?.merchant ?? "")") {
             guard store.hasLoadedTransactions, !store.isImporting else { return }
-            await daily.prepareNext(highlights: store.recentHighlights())
+            await daily.prepareNext(highlights: store.recentHighlights(), trips: store.tripHighlights())
         }
+    }
+}
+
+// MARK: - Sending the picture to a friend
+
+/// The day's picture with its caption underneath, as one image, handed to the Mac's share menu.
+/// Only the picture and its caption go: nothing else from the app.
+@MainActor
+enum PictureSharing {
+    static func card(_ daily: DailyPicture) -> NSImage? {
+        guard let image = daily.image else { return nil }
+        let view = VStack(alignment: .leading, spacing: 18) {
+            Image(nsImage: image).resizable().aspectRatio(21.0 / 9.0, contentMode: .fit)
+                .clipShape(.rect(cornerRadius: 22, style: .continuous))
+            Text(daily.caption).font(.system(size: 34, weight: .bold, design: .serif))
+                .foregroundStyle(Color(red: 0.13, green: 0.12, blue: 0.11))
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                if let source = daily.source {
+                    Text(source.uppercased()).font(Theme.mono(15, .semibold)).tracking(1).foregroundStyle(Color(red: 0.42, green: 0.40, blue: 0.37))
+                }
+                Spacer()
+                Text("Spendthrift").font(.system(size: 20, weight: .bold, design: .serif)).foregroundStyle(Theme.inkFill)
+            }
+        }
+        .padding(34)
+        .frame(width: 1200)
+        .background(Color(red: 0.969, green: 0.957, blue: 0.929))
+        .environment(\.colorScheme, .light)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        return renderer.nsImage
+    }
+
+    /// Writes the card to a temporary file; nil if there is no picture.
+    static func file(_ daily: DailyPicture) -> URL? {
+        guard let card = card(daily), let data = IconRenderer.png(card) else { return nil }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Spendthrift Share", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent("Spendthrift.png")
+        guard (try? data.write(to: url, options: .atomic)) != nil else { return nil }
+        return url
+    }
+
+    static func share(_ daily: DailyPicture) {
+        guard let url = file(daily), let window = NSApp.keyWindow, let view = window.contentView else { return }
+        // The menu opens where the button was clicked.
+        let point = view.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        NSSharingServicePicker(items: [url]).show(relativeTo: NSRect(x: point.x - 10, y: point.y - 10, width: 20, height: 20), of: view, preferredEdge: .minY)
     }
 }

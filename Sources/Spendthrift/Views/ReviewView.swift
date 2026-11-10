@@ -88,6 +88,7 @@ private struct ReviewRow: View {
     let item: ReviewItem
     @State private var said = ""
     @State private var failed = false
+    @State private var filed = false
     @FocusState private var typing: Bool
 
     private func submit() {
@@ -128,16 +129,20 @@ private struct ReviewRow: View {
                 Spacer(minLength: 12)
                 CategoryPill(category: item.info.category) { store.setCategory($0, forPlace: item.key) }
                 Button {
-                    store.confirm([item.key])
+                    // The stamp lands, then the row leaves. Other rows stay live the whole time.
+                    filed = true
+                    let key = item.key
+                    Task { try? await Task.sleep(for: .milliseconds(380)); store.confirm([key]) }
                 } label: {
                     Image(systemName: "checkmark")
                         .font(.body.weight(.semibold))
                         .frame(width: 22, height: 18)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(item.info.category == nil)
+                .disabled(item.info.category == nil || filed)
                 .help("Looks right")
             }
+            .overlay(alignment: .center) { if filed { Stamp(text: "FILED", color: Theme.accent, size: 20, angle: -6) } }
             // What it actually was: each charge with its day, the account it was on and the line as the
             // statement prints it. Click one to see it in the original statement.
             VStack(spacing: 0) {

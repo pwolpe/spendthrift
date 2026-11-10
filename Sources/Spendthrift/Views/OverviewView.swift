@@ -25,6 +25,7 @@ struct OverviewView: View {
     private var content: some View {
             VStack(alignment: .leading, spacing: 20) {
                 if !DebugHooks.off("daily") { BannerCard() }
+                OnThisDayLine()
                 CloudTroubleBanner()
                 DownloadsBanner()
                 if !store.reviewItems.isEmpty, !store.isSuggesting { reviewBanner }
@@ -45,20 +46,22 @@ struct OverviewView: View {
                 } else if let m = currentMonth {
                     header(m)
                     beyondEveryday(m)
-                    // Two balanced columns: this month on the left (where it went, and to whom),
-                    // the run of months and what's ahead on the right.
+                    // Two balanced columns: where this month went on the left; what stood out and the run
+                    // of months on the right. (Places have their own page now.)
                     HStack(alignment: .top, spacing: 20) {
                         VStack(spacing: 20) {
                             if !DebugHooks.off("donut") { breakdownCard(m) }
-                            if !DebugHooks.off("places") { topPlacesCard(m) }
                         }
                         VStack(spacing: 20) {
                             NoticedCard(scope: .month(m))
                             if !DebugHooks.off("trend") { trendCard(m) }
-                            ForecastCard()
-                            if !DebugHooks.off("coming") { comingUpCard }
                         }
                         .frame(minWidth: 300, maxWidth: 420)
+                    }
+                    // What's ahead, side by side: the estimate for next month and the charges already due.
+                    HStack(alignment: .top, spacing: 20) {
+                        ForecastCard()
+                        if !DebugHooks.off("coming") { comingUpCard }
                     }
                     if !DebugHooks.off("stories") { storiesThisMonth(m) }
                     if !DebugHooks.off("ceremony") { CeremonyCard(month: m) }
@@ -567,6 +570,36 @@ struct ForecastCard: View {
 }
 
 /// What the analyst noticed reading every charge. Each line opens the charges behind it.
+/// One line from the person's own history: what they were buying on this day in an earlier year.
+struct OnThisDayLine: View {
+    private var store: BudgetStore { .shared }
+
+    var body: some View {
+        if let memory = store.onThisDay() {
+            let ago = ["One year", "Two years", "Three years", "Four years", "Five years", "Six years"]
+            let when = memory.years <= ago.count ? ago[memory.years - 1] : "\(memory.years) years"
+            Button { store.showPlace(memory.charge.merchant) } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "clock.arrow.circlepath").foregroundStyle(Theme.accent)
+                    Text("ON THIS DAY").font(Theme.mono(10, .bold)).tracking(1.2).foregroundStyle(Theme.accent)
+                    (Text("\(when) ago today: ") + Text(Money.format(memory.charge.amount)).fontWeight(.semibold)
+                     + Text(" at ") + Text(memory.charge.merchant).fontWeight(.semibold) + Text("."))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                .font(.callout)
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(Theme.sheet, in: .rect(cornerRadius: 11, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.hairline) }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Everything you've spent at \(memory.charge.merchant)")
+        }
+    }
+}
+
 struct NoticedCard: View {
     private var store: BudgetStore { .shared }
     /// The month or year on screen: only what was noticed in it is shown, with that stretch's amounts.

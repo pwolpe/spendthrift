@@ -31,6 +31,8 @@ enum Theme {
     /// Akane, madder red: money consumed, and the rare real warning.
     static let spent = Color(red: 0.78, green: 0.33, blue: 0.34)
     static let hairline = Color.primary.opacity(0.09)
+    /// The same ink at full strength in light and dark: for fills that carry white text.
+    static let inkFill = Color(red: 0.20, green: 0.30, blue: 0.58)
     /// Typewriter figures, for anything printed on a receipt.
     static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight, design: .monospaced) }
 }
@@ -116,6 +118,33 @@ struct ReceiptLine<Label: View>: View {
 extension ReceiptLine where Label == Text {
     init(_ title: String, value: String, valueColor: Color = .primary, bold: Bool = false) {
         self.init(value: value, valueColor: valueColor, bold: bold) { Text(title) }
+    }
+}
+
+/// A rubber stamp, thumped onto the page when something is settled: TIED OUT, WITHIN MEANS, FILED.
+/// It lands in a fifth of a second and then just sits there; nothing waits on it.
+struct Stamp: View {
+    let text: String
+    var color: Color = Theme.good
+    var size: CGFloat = 13
+    var angle: Double = -8
+    @State private var landed = false
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: size, weight: .heavy, design: .monospaced))
+            .tracking(size * 0.14)
+            .foregroundStyle(color)
+            .padding(.horizontal, size * 0.75)
+            .padding(.vertical, size * 0.38)
+            .overlay { RoundedRectangle(cornerRadius: size * 0.34, style: .continuous).strokeBorder(color, lineWidth: max(1.5, size / 6)) }
+            .overlay { RoundedRectangle(cornerRadius: size * 0.2, style: .continuous).strokeBorder(color.opacity(0.55), lineWidth: 0.75).padding(size * 0.2) }
+            .opacity(landed ? 0.82 : 0)
+            .scaleEffect(landed ? 1 : 1.9)
+            .rotationEffect(.degrees(angle))
+            .onAppear { withAnimation(.spring(response: 0.22, dampingFraction: 0.55)) { landed = true } }
+            .accessibilityLabel(text.capitalized)
+            .allowsHitTesting(false)
     }
 }
 

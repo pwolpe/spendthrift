@@ -123,6 +123,7 @@ struct ContentView: View {
             DebugHooks.startIfRequested()
             await DailyPicture.shared.ensureCartoon()
             TonyArt.shared.prepare()
+            store.recapIfNewMonth()
             await store.catchUp()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -146,45 +147,36 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        // Four pages answer four questions; everything else is a detail of one of them.
-        List(selection: Binding(get: {
+        // The rows draw their own selection, in the app's ink blue rather than the Mac's accent color.
+        let current: SidebarItem = {
             switch store.selection ?? .overview {
-            case .report, .ask: return SidebarItem.overview
+            case .report, .ask: return .overview
             case .categories: return .accounts
             case let other: return other
             }
-        }, set: { store.selection = $0 })) {
+        }()
+        List {
             Section {
-                Label("Overview", systemImage: "chart.pie.fill")
-                    .tag(SidebarItem.overview)
-                Label("Cash Flow", systemImage: "arrow.left.arrow.right.circle.fill")
-                    .tag(SidebarItem.cashflow)
-                Label("Trips & Events", systemImage: "airplane.departure")
-                    .badge(Text(store.stories.isEmpty ? "" : "\(store.stories.count)").foregroundStyle(.tertiary))
-                    .tag(SidebarItem.stories)
-                Label("Places", systemImage: "storefront.fill")
-                    .tag(SidebarItem.places)
-                Label("Transactions", systemImage: "list.bullet.rectangle.portrait.fill")
-                    .tag(SidebarItem.transactions)
-                Label("Statements", systemImage: "doc.text.magnifyingglass")
-                    .badge(Text(store.sourceFiles.isEmpty ? "" : "\(store.sourceFiles.count)").foregroundStyle(.tertiary))
-                    .tag(SidebarItem.statements)
+                SidebarRow(item: .overview, title: "Overview", symbol: "chart.pie.fill", current: current)
+                SidebarRow(item: .cashflow, title: "Cash Flow", symbol: "arrow.left.arrow.right.circle.fill", current: current)
+                SidebarRow(item: .stories, title: "Trips & Events", symbol: "airplane.departure", current: current, count: store.stories.count, quiet: true)
+                SidebarRow(item: .places, title: "Places", symbol: "storefront.fill", current: current)
+                SidebarRow(item: .transactions, title: "Transactions", symbol: "list.bullet.rectangle.portrait.fill", current: current)
+                SidebarRow(item: .statements, title: "Statements", symbol: "doc.text.magnifyingglass", current: current, count: store.sourceFiles.count, quiet: true)
             }
             Section("Fine-Tune") {
                 // Only there when there is something to look at.
                 if !store.reviewItems.isEmpty || store.selection == .review {
-                    Label("Double-Check", systemImage: "checkmark.seal.fill")
-                        .badge(store.reviewItems.count)
-                        .tag(SidebarItem.review)
+                    SidebarRow(item: .review, title: "Double-Check", symbol: "checkmark.seal.fill", current: current, count: store.reviewItems.count)
                 }
-                // The badge counts statements that seem to be missing: the thing most worth noticing.
-                Label("Setup", systemImage: "slider.horizontal.3")
-                    .badge(store.missingStatements.reduce(0) { $0 + $1.months.count }
-                           + store.cardCoverage.filter { $0.accounts.isEmpty && $0.uncoveredPayments > 0 }.count
-                           + store.cardCoverage.reduce(0) { $0 + $1.toFind.count })
-                    .tag(SidebarItem.accounts)
+                // The count is statements that seem to be missing: the thing most worth noticing.
+                SidebarRow(item: .accounts, title: "Setup", symbol: "slider.horizontal.3", current: current,
+                           count: store.missingStatements.reduce(0) { $0 + $1.months.count }
+                               + store.cardCoverage.filter { $0.accounts.isEmpty && $0.uncoveredPayments > 0 }.count
+                               + store.cardCoverage.reduce(0) { $0 + $1.toFind.count })
             }
         }
+        .listStyle(.sidebar)
         .disabled(store.accounts.isEmpty)
         .safeAreaInset(edge: .top) {
             // The name is also the way to the story behind it.
@@ -225,6 +217,50 @@ struct SidebarView: View {
             .padding(14)
             .animation(.default, value: status)
         }
+    }
+}
+
+/// One page in the sidebar. It draws its own selection so the highlight is the app's ink blue.
+struct SidebarRow: View {
+    private var store: BudgetStore { .shared }
+    let item: SidebarItem
+    let title: String
+    let symbol: String
+    let current: SidebarItem
+    var count = 0
+    /// A count that is only information (how many trips), not something asking for attention.
+    var quiet = false
+    @State private var hovering = false
+
+    var body: some View {
+        let selected = item == current
+        Button { store.selection = item } label: {
+            HStack(spacing: 9) {
+                Image(systemName: symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(selected ? Color.white : Theme.accent)
+                    .frame(width: 22)
+                Text(title).foregroundStyle(selected ? Color.white : Color.primary)
+                Spacer(minLength: 4)
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.caption.weight(.semibold)).monospacedDigit()
+                        .foregroundStyle(selected ? Color.white.opacity(0.85) : (quiet ? Color.secondary.opacity(0.7) : Color.secondary))
+                        .padding(.horizontal, quiet ? 0 : 7).padding(.vertical, quiet ? 0 : 2)
+                        .background(quiet || selected ? Color.clear : Color.primary.opacity(0.08), in: .capsule)
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Theme.inkFill : (hovering ? Color.primary.opacity(0.06) : Color.clear), in: .rect(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .listRowInsets(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: 0))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 }
 
