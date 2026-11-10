@@ -137,6 +137,13 @@ enum KnownMerchants {
         ("ADOBE", "Adobe", .subscriptions), ("MICROSOFT", "Microsoft", .subscriptions),
         ("ANTHROPIC", "Claude", .subscriptions), ("CLAUDE.AI", "Claude", .subscriptions), ("OPENAI", "OpenAI", .subscriptions),
         ("GOOGLE *", "Google", .subscriptions),
+        // Wine & spirits
+        ("TOTAL WINE", "Total Wine", .wine), ("BEVMO", "BevMo", .wine), ("WINE.COM", "Wine.com", .wine), ("VIVINO", "Vivino", .wine),
+        ("DRIZLY", "Drizly", .wine), ("ASTOR WINES", "Astor Wines & Spirits", .wine), ("KLWINES", "K&L Wine Merchants", .wine),
+        ("BINNY", "Binny's", .wine), ("SPEC'S", "Spec's", .wine), ("RESERVEBAR", "ReserveBar", .wine), ("FLAVIAR", "Flaviar", .wine),
+        ("SEELBACHS", "Seelbachs", .wine), ("WINE & SPIRITS", "Wine & Spirits Shop", .wine), ("WINE AND SPIRITS", "Wine & Spirits Shop", .wine),
+        ("WINES & SPIRITS", "Wine & Spirits Shop", .wine), ("WINE & LIQUOR", "Wine & Liquor Shop", .wine), ("WINE AND LIQUOR", "Wine & Liquor Shop", .wine),
+        ("LIQUOR STORE", "Liquor Store", .wine), ("LIQUORS", "Liquor Store", .wine),
         // Groceries
         ("WHOLEFDS", "Whole Foods", .groceries), ("WHOLE FOODS", "Whole Foods", .groceries),
         ("TRADER JOE", "Trader Joe's", .groceries), ("SAFEWAY", "Safeway", .groceries), ("KROGER", "Kroger", .groceries),

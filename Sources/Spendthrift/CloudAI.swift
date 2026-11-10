@@ -435,6 +435,9 @@ enum CloudSorter {
         Rules:
         - "direction" says whether money went out or came in. A refund goes in the category of what was bought.
         - Restaurants, bars, cafes and food delivery are Dining; supermarkets, butchers and food shops are Groceries.
+        - Wine shops, liquor stores, wineries and vineyards, distilleries, whiskey and spirits sellers, wine clubs and \
+        wine auctions (bottles bought to keep or take home, in person or online) are "Wine & Spirits", never Groceries \
+        or Shopping. A drink at a bar, a restaurant or a music venue is still Dining, whatever its name.
         - Software, apps and online services billed regularly are Subscriptions. Property tax, mortgage, rent, condo \
         fees, furniture and repairs are Home. Insurance, phone, internet and power are Bills & Utilities.
         - Name a credit card bill payment "<Issuer> Card Payment" (for example "Chase Card Payment").
@@ -531,7 +534,8 @@ enum DecisionSorter {
     static func handles(_ model: String) -> Bool { model.hasPrefix("cloudflare/clef") }
 
     private static let meanings: [Category: String] = [
-        .groceries: "Supermarkets, food markets, butchers, bakeries selling food to take home, wine and liquor shops",
+        .groceries: "Supermarkets, food markets, butchers, bakeries selling food to take home",
+        .wine: "Wine shops, liquor stores, wineries, distilleries, wine clubs and wine auctions: bottles bought to keep or take home (not drinks at a bar)",
         .dining: "Restaurants, bars, cafes, coffee shops, fast food, food delivery, concessions",
         .shopping: "Retail stores and online shopping: clothes, electronics, books, general merchandise, Amazon",
         .transportation: "Gas, parking, tolls, taxis, Uber and Lyft, public transit, car repair and car payments",

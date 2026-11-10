@@ -16,6 +16,9 @@ struct Category: Hashable, Identifiable, Codable {
 
     static let groceries = Category("Groceries")
     static let dining = Category("Dining")
+    /// Bottles bought to keep or take home: wine shops, liquor stores, wineries, distilleries, wine clubs.
+    /// (A drink at a bar is Dining.) Apart from Groceries because for some people it is a real line of its own.
+    static let wine = Category("Wine & Spirits")
     static let shopping = Category("Shopping")
     static let transportation = Category("Car & Transportation")
     static let bills = Category("Bills & Utilities")
@@ -45,6 +48,7 @@ struct Category: Hashable, Identifiable, Codable {
     private static let builtInLook: [(Category, symbol: String, color: Color)] = [
         (.groceries, "cart.fill", dye(0.41, 0.66, 0.50)),            // wakatake
         (.dining, "fork.knife", dye(0.86, 0.51, 0.29)),              // kaki
+        (.wine, "wineglass.fill", dye(0.52, 0.23, 0.40)),            // ebi-zome, the dye named for wild grapes
         (.shopping, "bag.fill", dye(0.84, 0.50, 0.57)),              // kobai
         (.transportation, "car.fill", dye(0.24, 0.43, 0.63)),        // ai
         (.bills, "bolt.fill", dye(0.88, 0.70, 0.27)),                // yamabuki

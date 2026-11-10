@@ -158,6 +158,13 @@ enum DebugHooks {
             if let m = store.months.first(where: { $0.year == wanted && $0.month == 7 }) { show(.month(m)) }
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_WINE=1: move bottle shops into Wine & Spirits, print what moved and the total, then quit.
+        if env["SPENDTHRIFT_WINE"] != nil {
+            await store.adoptWineCategory(force: true)
+            let wine = store.transactions.filter { $0.category == .wine }
+            print("WINE TOTAL \(Set(wine.map(\.merchant)).count) places, \(wine.count) charges, \(Int(wine.reduce(0) { $0 + $1.amount }))")
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_TRIPPIC=<part of a trip's name>: draw that trip's picture, then quit.
         if let wanted = env["SPENDTHRIFT_TRIPPIC"] {
             if let story = store.stories.first(where: { $0.name.localizedCaseInsensitiveContains(wanted) }) {

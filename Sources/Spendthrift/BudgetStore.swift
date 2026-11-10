@@ -601,6 +601,7 @@ final class BudgetStore {
     /// new since the last import): look up the remaining guesses, then read for things to notice.
     func catchUp() async {
         guard CloudAI.isEnabled, !isImporting, !isSuggesting, !accounts.isEmpty else { return }
+        await adoptWineCategory()
         await lookUpGuesses()
         await guessWhatTheyWere()
         await findStoriesIfNeeded()
@@ -645,6 +646,55 @@ final class BudgetStore {
                 }
                 withAnimation(.snappy) { changed() }
             }
+        }
+    }
+
+    // MARK: - A category added after a library was sorted
+
+    /// "Wine & Spirits" arrived after people's statements were already sorted, when wine shops went
+    /// under Groceries. Once, the places that might belong to it are shown to the model again, and only
+    /// the ones it files there are moved. Nothing else changes category, and anything the person
+    /// chose themselves is left alone.
+    func adoptWineCategory(force: Bool = false) async {
+        let flag = "adoptedWineCategory"
+        guard CloudAI.isEnabled, !isImporting, !isSuggesting, force || !UserDefaults.standard.bool(forKey: flag) else { return }
+        guard !library.merchants.values.contains(where: { $0.category == .wine }) || force else { UserDefaults.standard.set(true, forKey: flag); return }
+        let used = Dictionary(grouping: library.entries, by: \.merchantKey)
+        let hints = ["wine", "liquor", "spirit", "whisk", "bourbon", "cellar", "vineyard", "winery", "vino", "distill", "bottle", "vintner", "champagne"]
+        var waiting: [(item: CloudItem, weight: Double)] = []
+        for (key, info) in library.merchants where !info.confirmed && info.source != .user {
+            guard let entries = used[key], !entries.isEmpty, let category = info.category else { continue }
+            let text = (info.name + " " + info.sample).lowercased()
+            // Where a bottle shop would have been filed before, or anything that sounds like one.
+            guard [Category.groceries, .shopping, .other].contains(category) || hints.contains(where: text.contains) else { continue }
+            let total = entries.reduce(0) { $0 + $1.amount }
+            guard total > 0 else { continue }
+            var item = CloudItem(key: key, description: info.sample, averageAmount: total / Double(entries.count), count: entries.count, bankCategory: nil)
+            item.appGuess = "\(info.name): \(category.rawValue)"
+            waiting.append((item, total))
+        }
+        let batches = waiting.sorted { $0.weight > $1.weight }.prefix(900).map(\.item).chunked(into: 15)
+        var moved = 0, answered = 0
+        await withTaskGroup(of: [String: CloudVerdict]?.self) { group in
+            for batch in batches { group.addTask { await CloudSorter.sortTwice(batch, examples: []) } }
+            for await verdicts in group {
+                guard let verdicts else { continue }
+                answered += 1
+                for (key, verdict) in verdicts where verdict.category == .wine && library.merchants[key]?.confirmed == false {
+                    if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
+                        print("DEBUG WINE \(library.merchants[key]?.name ?? key) [\(library.merchants[key]?.category?.rawValue ?? "-")] \(verdict.confident ? "" : "(guess)")")
+                    }
+                    library.merchants[key]?.category = .wine
+                    library.merchants[key]?.source = verdict.confident ? .cloud : .cloudGuess
+                    moved += 1
+                }
+            }
+        }
+        // Only count it done if the model was reachable; otherwise try again next time.
+        if answered > 0 || batches.isEmpty { UserDefaults.standard.set(true, forKey: flag) }
+        if moved > 0 {
+            withAnimation(.snappy) { changed() }
+            showToast("New category: Wine & Spirits. \(moved) \(moved == 1 ? "place" : "places") moved into it from Groceries and Shopping.", symbol: "wineglass.fill")
         }
     }
 
