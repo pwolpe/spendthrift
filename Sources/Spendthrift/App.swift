@@ -19,6 +19,10 @@ struct SpendthriftApp: App {
                 Button("Add Statement…") { BudgetStore.shared.presentOpenPanel() }
                     .keyboardShortcut("o")
             }
+            // About tells the story of the app rather than showing the standard small panel.
+            CommandGroup(replacing: .appInfo) {
+                Button("About Spendthrift") { BudgetStore.shared.showsStory = true }
+            }
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { Updater.shared.checkFromMenu() }
             }

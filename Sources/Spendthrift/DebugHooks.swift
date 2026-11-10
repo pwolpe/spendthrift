@@ -167,6 +167,7 @@ enum DebugHooks {
         // SPENDTHRIFT_PIECES=1: pictures of the small parts (masthead, a chat answer, a charge's receipt), then quit.
         if env["SPENDTHRIFT_PIECES"] != nil {
             await snap("30-masthead", outDir, width: 230) { Masthead().padding(16) }
+            await snap("35-story", outDir, width: 700) { StoryView(scrolls: false) }
             let q = "Where did most of my money go in October?"
             let query = await QueryParser.parse(q, months: store.months)
             var answer = AnswerEngine.answer(q, query: query, store: store)

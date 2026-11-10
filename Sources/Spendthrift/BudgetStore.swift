@@ -30,6 +30,8 @@ final class BudgetStore {
     var chargesFocus: TransactionFilter?
     /// Non-nil while one place's page is open over whatever page was showing.
     var placeFocus: String?
+    /// True while the story of how the app came to be is open.
+    var showsStory = false
     /// Non-nil while a charge's original statement is open over the window.
     var originalPeek: OriginalPeek?
     /// Which file the Statements page shows, and the charge to point at in it.

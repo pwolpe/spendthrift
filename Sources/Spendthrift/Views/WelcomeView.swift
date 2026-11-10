@@ -53,6 +53,11 @@ struct WelcomeView: View {
             }
             .frame(maxWidth: 560)
 
+            // For anyone wondering who the two people in the pictures are.
+            Button("Who are Tony and Paul?") { BudgetStore.shared.showsStory = true }
+                .buttonStyle(.link)
+                .font(.callout)
+
             Spacer(minLength: 24)
         }
         .frame(maxWidth: .infinity)

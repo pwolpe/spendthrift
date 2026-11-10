@@ -101,6 +101,9 @@ struct ContentView: View {
             OriginalPeekSheet(peek: peek)
                 .tint(Theme.accent)
         }
+        .sheet(isPresented: Binding(get: { store.showsStory }, set: { store.showsStory = $0 })) {
+            StoryView().tint(Theme.accent)
+        }
         .alert("A heads-up about your data", isPresented: Binding(get: { store.startupNotice != nil }, set: { if !$0 { store.startupNotice = nil } })) {
             Button("OK") { store.startupNotice = nil }
         } message: {
@@ -180,7 +183,10 @@ struct SidebarView: View {
         }
         .disabled(store.accounts.isEmpty)
         .safeAreaInset(edge: .top) {
-            Masthead()
+            // The name is also the way to the story behind it.
+            Button { store.showsStory = true } label: { Masthead().contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .help("How Spendthrift came to be")
                 .padding(.horizontal, 16)
                 .padding(.top, 6)
                 .padding(.bottom, 10)
