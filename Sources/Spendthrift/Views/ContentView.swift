@@ -142,7 +142,7 @@ struct SidebarView: View {
     private var status: String? {
         if let progress = store.importProgress { return "Reading statements… \(progress.done) of \(progress.total)" }
         if store.isImporting { return "Reading your statement…" }
-        if store.isSuggesting { return "Sorting new places…" }
+        if store.isSuggesting { return "Sorting new payees…" }
         return nil
     }
 
@@ -160,7 +160,7 @@ struct SidebarView: View {
                 SidebarRow(item: .overview, title: "Overview", symbol: "chart.pie.fill", current: current)
                 SidebarRow(item: .cashflow, title: "Cash Flow", symbol: "arrow.left.arrow.right.circle.fill", current: current)
                 SidebarRow(item: .stories, title: "Trips & Events", symbol: "airplane.departure", current: current, count: store.stories.count, quiet: true)
-                SidebarRow(item: .places, title: "Places", symbol: "storefront.fill", current: current)
+                SidebarRow(item: .places, title: "Payees", symbol: "storefront.fill", current: current)
                 SidebarRow(item: .transactions, title: "Transactions", symbol: "list.bullet.rectangle.portrait.fill", current: current)
                 SidebarRow(item: .statements, title: "Statements", symbol: "doc.text.magnifyingglass", current: current, count: store.sourceFiles.count, quiet: true)
             }

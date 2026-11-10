@@ -695,7 +695,7 @@ final class BudgetStore {
         if answered > 0 || batches.isEmpty { done() }
         if moved > 0 {
             withAnimation(.snappy) { changed() }
-            showToast("New category: Wine & Spirits. \(moved) \(moved == 1 ? "place" : "places") moved into it from Groceries and Shopping.", symbol: "wineglass.fill")
+            showToast("New category: Wine & Spirits. \(moved) \(moved == 1 ? "payee" : "payees") moved into it from Groceries and Shopping.", symbol: "wineglass.fill")
         }
     }
 
@@ -918,7 +918,7 @@ final class BudgetStore {
                 library.merchants[key]?.confirmed = true
             }
             for i in library.entries.indices where keys.contains(library.entries[i].merchantKey) { library.entries[i].override = nil }
-            let name = keys.count == 1 ? chosen[0].merchant : "\(keys.count) places"
+            let name = keys.count == 1 ? chosen[0].merchant : "\(keys.count) payees"
             showToast("\(name) is now \(category.displayName), every time.", symbol: category.symbol)
             learnFromCorrection()
         } else {

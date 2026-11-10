@@ -549,7 +549,7 @@ private struct PlacesCard: View {
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Top Places")
+                SectionHeader(title: "Top Payees")
                 ForEach(Array(places.enumerated()), id: \.element.id) { i, place in
                     Button { BudgetStore.shared.showPlace(place.name) } label: {
                     HStack(spacing: 12) {

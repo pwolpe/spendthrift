@@ -73,14 +73,14 @@ struct PlacesView: View {
         MaybeScroll(scrolls: scrolls) {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Places").font(.system(size: 30, weight: .bold, design: .serif))
-                    Text("Everywhere your money went. Type a name to see what you spent there.")
+                    Text("Payees").font(.system(size: 30, weight: .bold, design: .serif))
+                    Text("Everyone and everything you paid. Type a name to see what you spent.")
                         .font(.title3).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 12) {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Find a place: Pastis, Barry's, Amazon…", text: $store.placeSearch)
+                        TextField("Find a payee: Pastis, Barry's, Amazon…", text: $store.placeSearch)
                             .textFieldStyle(.plain)
                             .font(.title3)
                             .focused($searching)
@@ -102,7 +102,7 @@ struct PlacesView: View {
                 }
 
                 if list.isEmpty {
-                    TonySays(title: "No place by that name",
+                    TonySays(title: "No payee by that name",
                              message: "Nothing matches “\(store.placeSearch)”\(store.placeSpan == .all ? "" : " in \(store.placeSpan.rawValue.lowercased())"). Try part of the name, or how it's spelled on your statement.",
                              art: "nothing")
                 } else {
@@ -135,7 +135,7 @@ struct PlacesView: View {
                         }
                     }
                     if list.count > 300, !finding {
-                        Text("Showing the 300 biggest of \(list.count) places. Type a name to find any of the rest.")
+                        Text("Showing the 300 biggest of \(list.count) payees. Type a name to find any of the rest.")
                             .font(.callout).foregroundStyle(.secondary)
                     }
                 }
@@ -144,8 +144,8 @@ struct PlacesView: View {
             .frame(maxWidth: 900, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .navigationTitle("Places")
-        .navigationSubtitle(list.count == 1 ? "1 place" : "\(list.count) places")
+        .navigationTitle("Payees")
+        .navigationSubtitle(list.count == 1 ? "1 payee" : "\(list.count) payees")
         .onAppear { searching = true }
     }
 }

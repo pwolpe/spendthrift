@@ -188,7 +188,7 @@ enum AwardEngine {
             places.append((name, txns.reduce(0.0) { $0 + $1.amount }, txns.count, txns[0].category))
         }
         if let venue = places.max(by: { $0.total < $1.total }), venue.total > 0 {
-            awards.append(Award(title: "Biggest single place", winner: venue.name, value: Money.format(venue.total, cents: false),
+            awards.append(Award(title: "Biggest single payee", winner: venue.name, value: Money.format(venue.total, cents: false),
                                 category: venue.cat, symbol: "building.2.fill"))
             usedWinners.insert(venue.name)
         }

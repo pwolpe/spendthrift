@@ -18,7 +18,7 @@ struct SettingsView: View {
                     Vignette(name: "v-settings", size: 68)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Smarter AI").font(.title2.weight(.bold))
-                        Text("With an OpenRouter key, a powerful AI model sorts every place it doesn't already know, reads statements in any layout, and understands questions better. Without one, the app uses Apple Intelligence on this Mac.")
+                        Text("With an OpenRouter key, a powerful AI model sorts every payee it doesn't already know, reads statements in any layout, and understands questions better. Without one, the app uses Apple Intelligence on this Mac.")
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -67,8 +67,8 @@ struct SettingsView: View {
                     .onChange(of: model) { CloudAI.model = model }
                     Toggle("Read statements the app can't read by itself", isOn: $readsStatements)
                         .onChange(of: readsStatements) { CloudAI.readsStatements = readsStatements }
-                    Toggle("Look up unfamiliar places on the web", isOn: Binding(get: { WebLookup.isOn }, set: { WebLookup.isOn = $0 }))
-                        .help("Sends the statement text for places the model couldn't identify to a web search. About 3 cents a place, the biggest 40 per import.")
+                    Toggle("Look up unfamiliar payees on the web", isOn: Binding(get: { WebLookup.isOn }, set: { WebLookup.isOn = $0 }))
+                        .help("Sends the statement text for payees the model couldn't identify to a web search. About 3 cents a payee, the biggest 40 per import.")
                     Button("Test Connection") { Task { await test(announce: true) } }
                         .disabled(testing)
                 }
@@ -85,7 +85,7 @@ struct SettingsView: View {
             }
 
             Section("What leaves this Mac") {
-                Text("• To sort a place: the bank's text for it (like “TST*BLUE DOOR CAFE”), the typical amount, and how often it appears.\n• To read a statement: its text, with your name, address, email and account numbers blanked first.\n• To answer a question: the question itself.\n\nYour totals, balances and the saved data file are never sent. The key is stored in a private file on this Mac, not in the app.")
+                Text("• To sort a payee: the bank's text for it (like “TST*BLUE DOOR CAFE”), the typical amount, and how often it appears.\n• To read a statement: its text, with your name, address, email and account numbers blanked first.\n• To answer a question: the question itself.\n\nYour totals, balances and the saved data file are never sent. The key is stored in a private file on this Mac, not in the app.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

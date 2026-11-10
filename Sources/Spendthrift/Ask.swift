@@ -206,7 +206,7 @@ enum AnswerEngine {
                 .map { (name: $0.key, total: $0.value.reduce(0) { $0 + $1.amount }, count: $0.value.count, cat: $0.value[0].category) }
                 .sorted { $0.total > $1.total }.prefix(8)
             return Answer(question: question, query: q,
-                          headline: grouped.first.map { "\($0.name) is your top place \(what) in \(range), at \(Money.format($0.total))." }
+                          headline: grouped.first.map { "\($0.name) is your top payee \(what) in \(range), at \(Money.format($0.total))." }
                               ?? "No spending found \(what) in \(range).",
                           rows: grouped.map { ($0.name, $0.count == 1 ? "1 visit" : "\($0.count) visits", Money.format($0.total), $0.cat) })
         case .topCategories:
@@ -241,7 +241,7 @@ struct AskView: View {
 
     private var examples: [String] {
         guard CloudAI.isEnabled, let latest = store.months.last else {
-            return ["How much did I spend on dining last month?", "What are my subscriptions?", "Top places this year",
+            return ["How much did I spend on dining last month?", "What are my subscriptions?", "Top payees this year",
                     "What did I buy at Amazon?", "Average monthly grocery spending"]
         }
         var list = ["Why was \(latest.name) so high?", "Where does most of my money go?", "Show dining month by month",

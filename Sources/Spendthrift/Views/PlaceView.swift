@@ -31,7 +31,7 @@ struct PlaceView: View {
                     spellings(all)
                     list(all)
                 } else {
-                    TonySays(title: "Nothing here any more", message: "This place was renamed or combined with another one.")
+                    TonySays(title: "Nothing here any more", message: "This payee was renamed or combined with another one.")
                 }
             }
             .padding(28)
@@ -56,21 +56,21 @@ struct PlaceView: View {
                     .frame(minHeight: 40)
                     .fixedSize(horizontal: false, vertical: true)
                     .onSubmit { rename(keys) }
-                    .help("Click to rename. Give two places the same name and they become one.")
+                    .help("Click to rename. Give two payees the same name and they become one.")
                 HStack(spacing: 10) {
                     CategoryPill(category: first.isUnknown ? nil : first.category) { category in
                         for key in keys { store.setCategory(category, forPlace: key) }
                     }
                     let others = similar()
                     if !others.isEmpty {
-                        Menu("Same Place As…") {
+                        Menu("Same Payee As…") {
                             ForEach(others, id: \.self) { other in
                                 Button(other) { store.combinePlaces(other, into: name) }
                             }
                         }
                         .menuStyle(.borderlessButton)
                         .fixedSize()
-                        .help("Fold another spelling of this place into this one")
+                        .help("Fold another spelling of this payee into this one")
                     }
                 }
             }
@@ -83,7 +83,7 @@ struct PlaceView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "text.bubble").foregroundStyle(.secondary).padding(.top, 3)
             VStack(alignment: .leading, spacing: 4) {
-                TextField("Add a note about this place (optional)", text: $note, axis: .vertical)
+                TextField("Add a note about this payee (optional)", text: $note, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...4)
                     .onSubmit { store.setNote(note, forPlace: name) }
@@ -271,7 +271,7 @@ struct ChargesView: View {
                     if places.count > 1 {
                         Card {
                             VStack(alignment: .leading, spacing: 10) {
-                                SectionHeader(title: "Where", subtitle: "Click a place for everything you've ever spent there.")
+                                SectionHeader(title: "Where", subtitle: "Click a payee for everything you've ever paid them.")
                                 ForEach(Array(places.prefix(8).enumerated()), id: \.element.name) { i, place in
                                     Button { store.showPlace(place.name) } label: {
                                         HStack(spacing: 12) {
@@ -286,7 +286,7 @@ struct ChargesView: View {
                                     .buttonStyle(.plain)
                                     if i < min(places.count, 8) - 1 { Divider().padding(.leading, 40) }
                                 }
-                                if places.count > 8 { Text("and \(places.count - 8) more places below").font(.caption).foregroundStyle(.tertiary) }
+                                if places.count > 8 { Text("and \(places.count - 8) more payees below").font(.caption).foregroundStyle(.tertiary) }
                             }
                         }
                     }

@@ -57,7 +57,7 @@ struct TransactionsView: View {
             if !selection.isEmpty, store.showsAsk { withAnimation(.snappy(duration: 0.25)) { store.showsAsk = false } }
             if !selection.isEmpty { showInspector = true }
         }
-        .searchable(text: $search, prompt: "Search places or categories")
+        .searchable(text: $search, prompt: "Search payees or categories")
         .navigationTitle("Transactions")
         .navigationSubtitle(rows.count == 1 ? "1 transaction" : "\(rows.count) transactions")
         // One pane on the right at a time: while the question pane is open, the details pane stays
@@ -91,7 +91,7 @@ struct TransactionsView: View {
             }
             .width(min: 90, ideal: 105, max: 125)
 
-            TableColumn("Place", value: \.merchant) { t in
+            TableColumn("Payee", value: \.merchant) { t in
                 HStack(spacing: 10) {
                     MerchantIcon(name: t.merchant, category: t.category, size: 26)
                     VStack(alignment: .leading, spacing: 1) {
@@ -126,7 +126,7 @@ struct TransactionsView: View {
             let chosen = store.transactions.filter { ids.contains($0.id) }
             if let first = chosen.first {
                 let places = Set(chosen.map(\.merchantKey))
-                Menu(places.count == 1 ? "Change Category for \(first.merchant)" : "Change Category for \(places.count) Places") {
+                Menu(places.count == 1 ? "Change Category for \(first.merchant)" : "Change Category for \(places.count) Payees") {
                     CategoryChoices { store.setCategory($0, for: ids, wholePlace: true) }
                 }
                 Menu(chosen.count == 1 ? "Change Only This Charge" : "Change Only These \(chosen.count) Charges") {
@@ -196,7 +196,7 @@ private struct FilterBar: View {
                 }
             }
             if let key = store.transactionFilter.merchantKey {
-                chip(store.place(key)?.name ?? "One place", symbol: "mappin.circle.fill") { store.transactionFilter.merchantKey = nil }
+                chip(store.place(key)?.name ?? "One payee", symbol: "mappin.circle.fill") { store.transactionFilter.merchantKey = nil }
             }
             if let name = store.transactionFilter.merchant {
                 chip(name, symbol: "mappin.circle.fill") { store.transactionFilter.merchant = nil }
@@ -282,7 +282,7 @@ struct TransactionInspector: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .multilineTextAlignment(.center)
                             .onSubmit { store.renamePlace(t.merchantKey, to: name) }
-                            .help("Click to rename this place")
+                            .help("Click to rename this payee")
                         Text(t.date.formatted(date: .complete, time: .omitted))
                             .font(Theme.mono(11))
                             .foregroundStyle(.secondary)

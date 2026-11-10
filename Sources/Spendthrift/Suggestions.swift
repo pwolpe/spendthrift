@@ -371,13 +371,13 @@ enum CategorySuggester {
         switch SystemLanguageModel.default.availability {
         case .available: return nil
         case .unavailable(.appleIntelligenceNotEnabled):
-            return "Apple Intelligence is turned off. Turn it on in System Settings → Apple Intelligence & Siri and I'll sort new places for you."
+            return "Apple Intelligence is turned off. Turn it on in System Settings → Apple Intelligence & Siri and I'll sort new payees for you."
         case .unavailable(.modelNotReady):
             return "Apple Intelligence is still getting ready on this Mac (it downloads in the background). I'll sort the rest as soon as it's done."
         case .unavailable(.deviceNotEligible):
-            return "This Mac doesn't support Apple Intelligence, so places I don't recognize need a category from you."
+            return "This Mac doesn't support Apple Intelligence, so payees I don't recognize need a category from you."
         case .unavailable:
-            return "Apple Intelligence isn't available right now, so places I don't recognize need a category from you."
+            return "Apple Intelligence isn't available right now, so payees I don't recognize need a category from you."
         }
     }
 

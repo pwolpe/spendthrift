@@ -308,8 +308,8 @@ struct OverviewView: View {
                     Text("Everything is sorted. \(n) \(n == 1 ? "guess is" : "guesses are") worth a glance.")
                         .font(.headline)
                     // Say who did the sorting: the cloud model when a key is in, Apple's on-device model otherwise.
-                    Text(CloudAI.isEnabled ? "The AI sorted every place, and flagged \(n == 1 ? "the one" : "the ones") it wasn't sure about."
-                                           : "Apple Intelligence sorted \(n == 1 ? "a place" : "some places") it hadn't seen before.")
+                    Text(CloudAI.isEnabled ? "The AI sorted every payee, and flagged \(n == 1 ? "the one" : "the ones") it wasn't sure about."
+                                           : "Apple Intelligence sorted \(n == 1 ? "a payee" : "some payees") it hadn't seen before.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -448,7 +448,7 @@ struct OverviewView: View {
         let top = store.topMerchants(in: m)
         return Card {
             VStack(alignment: .leading, spacing: 14) {
-                SectionHeader(title: "Top places")
+                SectionHeader(title: "Top payees")
                 ForEach(Array(top.enumerated()), id: \.offset) { _, item in
                     Button {
                         store.showPlace(item.name)
@@ -547,7 +547,7 @@ struct ForecastCard: View {
                         if !estimate.because.isEmpty {
                             Text(estimate.because).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
-                        Label("Notes you leave on places and charges make this sharper.", systemImage: "text.bubble")
+                        Label("Notes you leave on payees and charges make this sharper.", systemImage: "text.bubble")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }

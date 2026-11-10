@@ -43,7 +43,7 @@ struct ShowView: View {
                 if let progress { counter(progress.done, progress.done == 1 ? "statement" : "statements") }
                 counter(store.transactions.count, "charges")
                 counter(store.accounts.count, store.accounts.count == 1 ? "account" : "accounts")
-                counter(Set(store.transactions.map(\.merchant)).count, "places")
+                counter(Set(store.transactions.map(\.merchant)).count, "payees")
             }
             VStack(spacing: 8) {
                 ForEach(Array(facts.suffix(4).enumerated()), id: \.element) { index, fact in
@@ -112,10 +112,10 @@ struct ShowView: View {
         if let favorite = Dictionary(grouping: spending, by: \.merchant).max(by: { $0.value.count < $1.value.count }), favorite.value.count >= 5 {
             candidates.append("A regular: \(favorite.key), \(favorite.value.count) times")
         }
-        if store.isLookingUp { candidates.append("Looking up the places I didn't recognize…") }
+        if store.isLookingUp { candidates.append("Looking up the payees I didn't recognize…") }
         if store.isSuggesting {
             let unsure = Set(all.filter(\.needsCheck).map(\.merchant)).count
-            if unsure > 0 { candidates.append("Working out what \(unsure) unfamiliar places are…") }
+            if unsure > 0 { candidates.append("Working out what \(unsure) unfamiliar payees are…") }
         }
         let subscriptions = store.subscriptions().count
         if subscriptions >= 3 { candidates.append("\(subscriptions) charges that repeat every month") }
@@ -276,7 +276,7 @@ struct PremiereCard: View {
         big(all.count.formatted())
         headline(all.count == 1 ? "charge, read and sorted" : "charges, read and sorted")
         if let first = all.first?.date {
-            line("\(store.accounts.count) \(store.accounts.count == 1 ? "account" : "accounts"), \(Set(all.map(\.merchant)).count.formatted()) places, going back to \(first.formatted(.dateTime.month(.wide).year())).")
+            line("\(store.accounts.count) \(store.accounts.count == 1 ? "account" : "accounts"), \(Set(all.map(\.merchant)).count.formatted()) payees, going back to \(first.formatted(.dateTime.month(.wide).year())).")
         }
     }
 
@@ -457,7 +457,7 @@ struct KeyEntry: View {
                     .foregroundStyle(Theme.good)
             } else {
                 Label("First, turn on the magic", systemImage: "wand.and.stars").font(.headline)
-                Text("Spendthrift uses a powerful AI model to read any statement, recognize every place, find your trips and draw the pictures. Paste an OpenRouter key and it does the rest. It costs a few cents per statement.")
+                Text("Spendthrift uses a powerful AI model to read any statement, recognize every payee, find your trips and draw the pictures. Paste an OpenRouter key and it does the rest. It costs a few cents per statement.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

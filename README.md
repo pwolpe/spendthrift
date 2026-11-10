@@ -121,6 +121,10 @@ is checked by a second model that reads the receipt back; a picture whose receip
 to read is redrawn (up to three tries). Pictures are drawn and kept on that person's Mac only. The
 starter pictures that ship with the app have no receipts.
 
+## Words
+
+The app calls anyone or anything money went to a **payee** (a shop, a subscription, a landlord, a person paid by Zelle). The code and this file still say "place" and "merchant" in places; they mean the same thing.
+
 ## The look
 
 Paper and ink, and one emblem: the till receipt. `ReceiptPaper`, `ReceiptRule`, `ReceiptLine` and
