@@ -106,7 +106,7 @@ final class Updater {
         func fail(_ message: String) { state = .failed(message); if isTest { print("UPDATE FAILED \(message)"); NSApp.terminate(nil) } }
         guard app.pathExtension == "app" else { return fail("Updates only work in the finished app.") }
         if app.path.contains("/AppTranslocation/") || !FileManager.default.isWritableFile(atPath: app.deletingLastPathComponent().path) {
-            return fail("To update, first drag The Tony Awards into your Applications folder and open it from there.")
+            return fail("To update, first drag Appauled into your Applications folder and open it from there.")
         }
         guard let requirement = Self.ownRequirement() else {
             return fail("This copy of the app can't update itself. Ask Paul for a fresh copy.")

@@ -9,6 +9,8 @@ struct BudgetPaths {
             root = URL(fileURLWithPath: override, isDirectory: true)   // for testing with sample data
         } else {
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            // The folder keeps its original name ("Tony Awards", from before the app was called Appauled)
+            // so that everything already saved, and the AI key, are still found.
             root = support.appendingPathComponent("Tony Awards", isDirectory: true)
         }
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

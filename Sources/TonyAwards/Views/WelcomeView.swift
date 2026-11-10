@@ -17,7 +17,7 @@ struct WelcomeView: View {
                 TonyFigure(height: 230)
                 Text("Hi, Tony.")
                     .font(.system(size: 44, weight: .bold, design: .rounded))
-                Text("Welcome to The Tony Awards, honoring excellence in spending.")
+                Text("Welcome to Appauled, honoring excellence in spending.")
                     .font(.title3)
                     .foregroundStyle(.secondary)
             }

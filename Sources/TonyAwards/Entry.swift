@@ -3,7 +3,7 @@ import SwiftUI
 import AppKit
 
 /// Normal launches open the app. The build script also runs
-/// `open -W "The Tony Awards.app" --args --make-icon <out.png> --cartoon <cartoon.png>`
+/// `open -W "Appauled.app" --args --make-icon <out.png> --cartoon <cartoon.png>`
 /// to bake cartoon Tony into the icon. Image Playground only works in a foreground app,
 /// so this mode shows a small window while it works.
 @main
@@ -100,7 +100,7 @@ enum Entry {
         app.setActivationPolicy(.regular)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 110),
                               styleMask: [.titled], backing: .buffered, defer: false)
-        window.title = "The Tony Awards"
+        window.title = "Appauled"
         window.contentView = NSHostingView(rootView:
             HStack(spacing: 14) {
                 ProgressView()

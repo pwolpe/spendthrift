@@ -1,10 +1,10 @@
 #!/bin/bash
-# Builds build/The Tony Awards.app and build/TheTonyAwards.zip. No downloads, no dependencies.
+# Builds build/Appauled.app and build/Appauled.zip. No downloads, no dependencies.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$ROOT/build"
-APP="$BUILD/The Tony Awards.app"
+APP="$BUILD/Appauled.app"
 CARTOON="$ROOT/Resources/tony-cartoon.png"   # made once by Image Playground, then reused
 
 mkdir -p "$BUILD"
@@ -21,7 +21,7 @@ swift build -c release --package-path "$ROOT" --arch arm64
 BIN="$(swift build -c release --package-path "$ROOT" --arch arm64 --show-bin-path)/TonyAwards"
 
 # 2. Assemble the bundle.
-echo "→ Assembling The Tony Awards.app"
+echo "→ Assembling Appauled.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/TonyAwards"
@@ -51,6 +51,7 @@ if [ -f "$CARTOON" ]; then cp "$CARTOON" "$APP/Contents/Resources/tony-cartoon.p
 cp "$ROOT/Resources/tony.jpg" "$APP/Contents/Resources/tony.jpg"
 if [ -f "$ROOT/Resources/paul.jpg" ]; then cp "$ROOT/Resources/paul.jpg" "$APP/Contents/Resources/paul.jpg"; fi
 cp "$ROOT/Resources/tony-avatar.png" "$APP/Contents/Resources/tony-avatar.png"
+if [ -f "$ROOT/Resources/paul-avatar.png" ]; then cp "$ROOT/Resources/paul-avatar.png" "$APP/Contents/Resources/paul-avatar.png"; fi
 mkdir -p "$APP/Contents/Resources/Starters" && cp "$ROOT/Resources/Starters/"* "$APP/Contents/Resources/Starters/"
 
 # 4. Re-sign after adding resources. First drop "downloaded from the internet" marks and other
@@ -59,11 +60,11 @@ xattr -cr "$APP"
 codesign --force --sign "$SIGN" --timestamp=none "$APP"
 
 # 5. Zip for AirDrop / USB.
-rm -f "$BUILD/TheTonyAwards.zip"
-ditto -c -k --keepParent --norsrc --noextattr "$APP" "$BUILD/TheTonyAwards.zip"
+rm -f "$BUILD/Appauled.zip"
+ditto -c -k --keepParent --norsrc --noextattr "$APP" "$BUILD/Appauled.zip"
 
 echo "✓ Built $APP (signed: $SIGN)"
-echo "✓ Zipped $BUILD/TheTonyAwards.zip (version $VERSION)"
+echo "✓ Zipped $BUILD/Appauled.zip (version $VERSION)"
 if [ ! -f "$CARTOON" ]; then
   echo "ℹ︎ No cartoon yet (Apple Intelligence unavailable here). The app will make one on first launch."
 fi

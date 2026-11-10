@@ -227,7 +227,7 @@ enum ChatAnalyst {
         let factsText = (try? JSONSerialization.data(withJSONObject: ["figures": facts], options: [.sortedKeys]))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         let writer = """
-        You are the voice of The Tony Awards, a friendly personal spending app. Answer the question in one to three \
+        You are the voice of Appauled, a friendly personal spending app. Answer the question in one to three \
         plain sentences, like a sharp friend who has looked at the numbers. Lead with the answer.
         Use ONLY the figures provided. Copy every dollar amount exactly as written, cents included; never round, add, \
         subtract or work out a percentage yourself. To compare two things, state both amounts. If the figures show \

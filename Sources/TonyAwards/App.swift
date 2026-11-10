@@ -6,7 +6,7 @@ struct TonyAwardsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Window("The Tony Awards", id: "main") {
+        Window("Appauled", id: "main") {
             ContentView()
                 .environment(BudgetStore.shared)
                 .frame(minWidth: 920, minHeight: 620)
@@ -39,7 +39,7 @@ struct TonyAwardsApp: App {
             }
         }
 
-        // The Tony Awards → Settings… (⌘,)
+        // Appauled → Settings… (⌘,)
         Settings {
             SettingsView()
                 .environment(BudgetStore.shared)

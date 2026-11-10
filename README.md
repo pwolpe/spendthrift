@@ -1,4 +1,6 @@
-# The Tony Awards
+# Appauled
+
+*(Formerly The Tony Awards. The awards theme, Tony and Paul all stay; the data folder and the signing certificate keep their original names.)*
 
 A Mac app made for Tony, honoring excellence in spending. Tony drops in statements from any bank or
 card and sees where his money goes. No terminal, no Finder, no accounts to link.
@@ -35,7 +37,7 @@ Image Playground) and has no dependencies.
 
 ## Smarter AI (optional, recommended)
 
-**The Tony Awards → Settings…** takes an OpenRouter key (stored in a private file only his account can read, never in the
+**Appauled → Settings…** takes an OpenRouter key (stored in a private file only his account can read, never in the
 app, its data, or this repository). Make Tony his own key at openrouter.ai with a spending limit.
 With a key:
 
@@ -97,15 +99,15 @@ Requires Command Line Tools or Xcode for macOS 26, on an Apple Silicon Mac.
 scripts/build.sh
 ```
 
-Output: `build/The Tony Awards.app` and `build/TheTonyAwards.zip`. The build briefly opens a small
+Output: `build/Appauled.app` and `build/Appauled.zip`. The build briefly opens a small
 window to draw the icon (Tony in a gold medallion on stage).
 
 ## Sending it to Tony, and sending updates
 
 **First time**
 
-1. Run `scripts/build.sh` and AirDrop `build/TheTonyAwards.zip` to Tony (or share it by iCloud/Messages).
-2. He double-clicks the zip, drags **The Tony Awards** into **Applications**, then onto the **Dock**.
+1. Run `scripts/build.sh` and AirDrop `build/Appauled.zip` to Tony (or share it by iCloud/Messages).
+2. He double-clicks the zip, drags **Appauled** into **Applications**, then onto the **Dock**.
 3. The app isn't notarized, so the first launch is blocked: double-click it once, click **Done**, then
    **System Settings → Privacy & Security → Open Anyway**.
 4. When asked, **Allow** access to the Downloads folder (so new statements are offered automatically).
@@ -122,7 +124,7 @@ picture.
 
 That builds, signs and publishes the zip to the public repository
 [pwolpe/tony-awards-releases](https://github.com/pwolpe/tony-awards-releases). Tony's app checks it
-once a day (or from **The Tony Awards → Check for Updates…**), shows a "Version 1.1 is ready" button,
+once a day (or from **Appauled → Check for Updates…**), shows a "Version 1.1 is ready" button,
 and on one click downloads it, checks the signature, replaces itself and reopens. The check sends
 nothing about Tony; it only asks GitHub for the latest version number.
 
@@ -176,7 +178,7 @@ To back up or move Tony to a new Mac, copy that folder.
 A self-driving test mode, enabled only through environment variables:
 
 ```sh
-open -W -n "build/The Tony Awards.app" --stdout run.log \
+open -W -n "build/Appauled.app" --stdout run.log \
   --env TONY_AWARDS_HOME=/tmp/tony-test \
   --env TONY_AWARDS_SNAPSHOT=/tmp/tony-test/snaps \
   --env "TONY_AWARDS_IMPORT=a.csv:b.pdf:c.qfx"
@@ -186,4 +188,4 @@ It imports the files, logs how every place was sorted, the awards, notes and sam
 and saves pictures of the main screens. Add `--env TONY_AWARDS_SELFTEST=1` to exercise category
 changes, re-import, undo-style removal and saving (prints PASS/FAIL lines). `TONY_AWARDS_HOME`
 alone runs the app against a scratch folder. To preview how a statement will be read:
-`"build/The Tony Awards.app/Contents/MacOS/TonyAwards" --inspect file.pdf`
+`"build/Appauled.app/Contents/MacOS/TonyAwards" --inspect file.pdf`

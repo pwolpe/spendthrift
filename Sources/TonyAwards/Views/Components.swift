@@ -68,6 +68,24 @@ struct TonyAvatar: View {
     }
 }
 
+/// Tony and Paul together: the app's two stars, wherever it introduces itself.
+struct CastAvatars: View {
+    var size: CGFloat = 38
+
+    var body: some View {
+        HStack(spacing: -size * 0.28) {
+            TonyAvatar(size: size)
+            if let paul = DailyTony.shared.paulAvatar {
+                Image(nsImage: paul).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+                    .overlay(Circle().strokeBorder(Theme.gold, lineWidth: max(1.5, size / 22)))
+                    .shadow(color: .black.opacity(0.15), radius: size / 12, y: size / 30)
+            }
+        }
+    }
+}
+
 /// The whole caricature, cut out from its background so it can stand on any screen.
 @MainActor @Observable
 final class TonyArt {

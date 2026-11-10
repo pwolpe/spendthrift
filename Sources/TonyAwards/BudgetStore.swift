@@ -1028,7 +1028,7 @@ final class BudgetStore {
     func backUpToDesktop() {
         saveNow()
         let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
-        let target = desktop.appendingPathComponent("Tony Awards Backup \(DateParsing.iso.string(from: .now)).json")
+        let target = desktop.appendingPathComponent("Appauled Backup \(DateParsing.iso.string(from: .now)).json")
         try? FileManager.default.removeItem(at: target)
         do {
             try FileManager.default.copyItem(at: paths.libraryFile, to: target)

@@ -160,9 +160,9 @@ struct SidebarView: View {
         .disabled(store.accounts.isEmpty)
         .safeAreaInset(edge: .top) {
             HStack(spacing: 10) {
-                TonyAvatar(size: 38)
+                CastAvatars(size: 36)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("The Tony Awards").font(.system(.headline, design: .serif))
+                    Text("Appauled").font(.system(.headline, design: .serif))
                     Text("Excellence in spending").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()

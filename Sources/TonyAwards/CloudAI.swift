@@ -58,7 +58,7 @@ enum CloudAI {
         request.httpMethod = "POST"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("The Tony Awards", forHTTPHeaderField: "X-Title")
+        request.setValue("Appauled", forHTTPHeaderField: "X-Title")
         var body: [String: Any] = [
             // A decision model can't write text; jobs that need writing use the default model.
             "model": DecisionSorter.handles(model) ? defaultModel : model,
@@ -708,14 +708,14 @@ enum CloudImage {
     /// One sentence saying what Tony is doing, and the nomination line that goes with it.
     static func scene(merchant: String, category: String, amount: Double, cast: [String] = ["Tony"]) async -> Scene? {
         let system = """
-        You design the picture at the top of The Tony Awards, a playful personal budgeting app made for Tony. \
-        Each picture is a cartoon of Tony in a Walter Mitty daydream: an ordinary purchase he really made, \
+        You design the picture at the top of Appauled, a playful personal budgeting app starring two friends, \
+        Tony and Paul. Each picture is a cartoon of one or both of them in a Walter Mitty daydream: an ordinary purchase he really made, \
         blown up into a wildly heroic, absurd, joyful fantasy. Seeing it should make him laugh out loud, because \
         it is so specifically about where he really just spent money.
 
         Given the purchase, reply with JSON only: {"scene": "...", "caption": "..."}
 
-        scene: one or two sentences, starting with "he is", describing the daydream: what Tony is, what he is \
+        scene: one or two sentences, starting with "he is", describing the daydream: what he is (or they are), what he is \
         doing, what he wears and where. Tie it concretely to this exact business: what it sells, its colors, its \
         setting, what people do there. Then exaggerate it into an adventure. Examples: a coffee and donut shop -> \
         "he is a triumphant explorer in a pith helmet, planting a flag on the summit of a mountain of glazed \
@@ -803,7 +803,7 @@ enum CloudImage {
         request.httpMethod = "POST"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("The Tony Awards", forHTTPHeaderField: "X-Title")
+        request.setValue("Appauled", forHTTPHeaderField: "X-Title")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,

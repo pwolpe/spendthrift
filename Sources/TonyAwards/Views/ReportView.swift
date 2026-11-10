@@ -257,7 +257,7 @@ struct ReportContent: View {
                 }
                 TaxTimeCard(months: Set(data.months))
             }
-            Text("Prepared by The Tony Awards on \(Date.now.formatted(date: .long, time: .omitted)). Payments between accounts are left out of spending.")
+            Text("Prepared by Appauled on \(Date.now.formatted(date: .long, time: .omitted)). Payments between accounts are left out of spending.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity)
@@ -276,7 +276,7 @@ struct ReportContent: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(heroTitle)
                     .font(.system(size: 34, weight: .bold, design: .serif))
-                Text(data.subtitle.isEmpty ? "The Tony Awards" : "The Tony Awards · \(data.subtitle)")
+                Text(data.subtitle.isEmpty ? "Appauled" : "Appauled · \(data.subtitle)")
                     .font(.title3)
                     .foregroundStyle(.secondary)
             }
@@ -781,7 +781,7 @@ enum ReportExporter {
     static func savePDF(data: ReportData, store: BudgetStore) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
-        panel.nameFieldStringValue = "Tony Awards – \(data.period.title).pdf"
+        panel.nameFieldStringValue = "Appauled – \(data.period.title).pdf"
         panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
         guard panel.runModal() == .OK, let url = panel.url else { return }
         if write(data: data, store: store, to: url) {

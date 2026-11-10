@@ -25,7 +25,7 @@ enum CartoonMaker {
     }
 }
 
-/// Draws the Tony Awards icon: cartoon Tony in a gold medallion on a pedestal, on stage.
+/// Draws the app icon: cartoon Tony in a gold medallion on a pedestal, on stage.
 enum IconRenderer {
     static func icon(face: NSImage?, isCartoon: Bool) -> NSImage {
         let size: CGFloat = 1024

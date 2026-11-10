@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>The Tony Awards</string>
+    <string>Appauled</string>
     <key>CFBundleDisplayName</key>
-    <string>The Tony Awards</string>
+    <string>Appauled</string>
     <key>CFBundleIdentifier</key>
     <string>com.pwolpe.tonyawards</string>
     <key>CFBundleExecutable</key>
@@ -27,7 +27,7 @@
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSDownloadsFolderUsageDescription</key>
-    <string>The Tony Awards looks in your Downloads folder for new bank statements so you can add them with one click.</string>
+    <string>Appauled looks in your Downloads folder for new bank statements so you can add them with one click.</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>

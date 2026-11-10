@@ -106,7 +106,7 @@ private struct AccountCard: View {
         .confirmationDialog("Remove \(account.name)?", isPresented: $confirmRemove) {
             Button("Remove Account", role: .destructive) { store.removeAccount(account.id) }
         } message: {
-            Text("Its transactions will be removed from The Tony Awards. What you taught me about each place is kept.")
+            Text("Its transactions will be removed from Appauled. What you taught me about each place is kept.")
         }
         .confirmationDialog("Swap purchases and payments for \(account.name)?", isPresented: $confirmFlip) {
             Button("Swap Them") { store.flipAmounts(account.id) }
