@@ -254,6 +254,10 @@ enum KnownMerchants {
     static let flows: [(pattern: String, name: String, category: Category, flow: Int)] = [
         // Investments
         ("DIST SBS", "Blackstone Distributions", .investmentIncome, 0),
+        // Borrowed money is not income, and paying it back is not a capital call: a fund loan's advance
+        // and paydown are named for what they are before the fund's own name is looked at.
+        ("CAPITAL CALL LOAN ADVANCE", "Investment Loan Advance", .investmentLoan, 0),
+        ("LOAN PAYDOWN BLACKSTONE", "Investment Loan Principal", .investmentLoan, 0),
         ("BLACKSTONE FUND", "Blackstone Fund Distributions", .investmentIncome, -1),
         ("BLACKSTONE FUND", "Blackstone Capital Calls", .investing, 1),
         ("WEBCAPCALL", "Blackstone Capital Calls", .investing, 0), ("CAPITAL CALL", "Capital Call", .investing, 0),
