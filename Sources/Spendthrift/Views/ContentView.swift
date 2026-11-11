@@ -25,6 +25,7 @@ struct ContentView: View {
                         case .stories: StoriesView()
                         case .places: PlacesView()
                         case .orders: OrdersView()
+                        case .apart: SetApartView()
                         case .transactions: TransactionsView()
                         case .statements: StatementsView()
                         case .review: ReviewView()
@@ -165,6 +166,10 @@ struct SidebarView: View {
                 // Only there once an order history has been added: a closer look, never a requirement.
                 if !store.orderRows.isEmpty || store.selection == .orders {
                     SidebarRow(item: .orders, title: "Orders", symbol: "shippingbox.fill", current: current)
+                }
+                // Someone else's money looked after here: followed on its own page, counted nowhere else.
+                if store.accounts.contains(where: { $0.apart != nil }) || store.selection == .apart {
+                    SidebarRow(item: .apart, title: "Kept Apart", symbol: "tray.full.fill", current: current)
                 }
                 SidebarRow(item: .transactions, title: "Transactions", symbol: "list.bullet.rectangle.portrait.fill", current: current)
                 SidebarRow(item: .statements, title: "Statements", symbol: "doc.text.magnifyingglass", current: current, count: store.sourceFiles.count, quiet: true)

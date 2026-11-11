@@ -16,6 +16,8 @@ final class BudgetStore {
 
     // Derived (rebuilt whenever the library changes)
     private(set) var transactions: [Transaction] = []
+    /// Everything on accounts kept apart from the person's own totals, oldest first.
+    private(set) var setApart: [Transaction] = []
     private(set) var months: [Month] = []
     private(set) var reviewItems: [ReviewItem] = []
     private(set) var cardCoverage: [CardCoverage] = []
@@ -546,6 +548,10 @@ final class BudgetStore {
 
         var list: [Transaction] = []
         list.reserveCapacity(library.entries.count)
+        // Accounts kept apart (someone else's money looked after here) are built the same way but
+        // never join the main list, so no total anywhere in the app can pick them up by accident.
+        let apartAccounts = Set(library.accounts.filter { $0.apart != nil }.map(\.id))
+        var apartList: [Transaction] = []
         for e in library.entries {
             guard let date = date(e.date) else { continue }
             let info = library.merchants[e.merchantKey]
@@ -562,7 +568,9 @@ final class BudgetStore {
                 source: e.override != nil ? .user : (info?.source ?? .ai),
                 needsCheck: e.override == nil && unchecked, isOverride: e.override != nil))
             if let note = e.note, !note.isEmpty { list[list.count - 1].note = note }
+            if apartAccounts.contains(e.accountID) { apartList.append(list.removeLast()) }
         }
+        setApart = apartList.sorted { $0.date < $1.date }
         for issuer in coverage.keys {
             coverage[issuer]?.statementSpend = cardSpend[issuer] ?? 0
             coverage[issuer]?.accounts = library.accounts.filter { cardAccount[$0.id] == issuer }.map(\.name)
@@ -2297,6 +2305,19 @@ final class BudgetStore {
     }
 
     // MARK: - Accounts
+
+    /// Keeps an account apart from the person's own totals under a name ("Mom"), or brings it back (nil).
+    func keepApart(_ id: UUID, as label: String?) {
+        guard let i = library.accounts.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = label?.trimmingCharacters(in: .whitespaces)
+        library.accounts[i].apart = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        withAnimation(.snappy) { changed() }
+        if let name = library.accounts[i].apart {
+            showToast("\(library.accounts[i].name) is kept apart as “\(name)”. It no longer counts in your spending or income.", symbol: "tray.full.fill")
+        } else {
+            showToast("\(library.accounts[i].name) counts in your totals again.", symbol: "tray.and.arrow.down.fill")
+        }
+    }
 
     func renameAccount(_ id: UUID, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)

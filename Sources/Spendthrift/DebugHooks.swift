@@ -260,6 +260,7 @@ enum DebugHooks {
                     if let pick { await snap(name, outDir, width: 380) { TransactionInspector(transaction: pick, scrolls: false) } }
                 }
             }
+            if !store.setApart.isEmpty { await snap("50-kept-apart", outDir) { SetApartView(scrolls: false) } }
             await snap("36-statements", outDir) { StatementsView(scrolls: false) }
             if let month = store.lastFullMonth {
                 for (i, kind) in PremiereCard.Kind.available(in: store, month: month).enumerated() {

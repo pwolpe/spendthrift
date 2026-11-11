@@ -302,6 +302,10 @@ struct Account: Codable, Identifiable, Hashable {
     var statementMonths: Set<String>?
     /// Earlier card numbers of this same account (a card that was reissued), so their statements still land here.
     var formerSignatures: [String]?
+    /// Set when this account is someone else's money looked after here (a parent's account, a
+    /// trust): what to call it ("Mom"). Its statements are kept and it can be followed on its own
+    /// page, but nothing in it counts toward the person's own spending, income or investing.
+    var apart: String?
 
     init(name: String, signature: String) { self.name = name; self.signature = signature }
 
@@ -314,6 +318,7 @@ struct Account: Codable, Identifiable, Hashable {
         invertAmounts = try? c.decodeIfPresent(Bool.self, forKey: .invertAmounts)
         statementMonths = try? c.decodeIfPresent(Set<String>.self, forKey: .statementMonths)
         formerSignatures = try? c.decodeIfPresent([String].self, forKey: .formerSignatures)
+        apart = try? c.decodeIfPresent(String.self, forKey: .apart)
     }
 }
 
@@ -505,7 +510,7 @@ struct Toast: Identifiable, Equatable {
 }
 
 enum SidebarItem: Hashable {
-    case overview, cashflow, stories, places, orders, transactions, statements, report, ask, review, categories, accounts
+    case overview, cashflow, stories, places, orders, apart, transactions, statements, report, ask, review, categories, accounts
 }
 
 /// A charge whose original statement is being shown.

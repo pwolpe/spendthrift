@@ -58,7 +58,14 @@ private struct AccountCard: View {
                         .help("Click to rename")
                     Menu {
                         Button("Show Transactions", systemImage: "list.bullet") {
-                            store.showCharges(TransactionFilter(accountID: account.id))
+                            if account.apart != nil { store.selection = .apart } else { store.showCharges(TransactionFilter(accountID: account.id)) }
+                        }
+                        if account.apart != nil {
+                            Button("Count in My Totals Again", systemImage: "tray.and.arrow.down") { store.keepApart(account.id, as: nil) }
+                        } else {
+                            Button("Keep Apart from My Totals…", systemImage: "tray.full") {
+                                if let name = SetApartView.askName(for: account.name) { store.keepApart(account.id, as: name) }
+                            }
                         }
                         Button("Amounts Look Backwards…", systemImage: "arrow.up.arrow.down") { confirmFlip = true }
                         Divider()
