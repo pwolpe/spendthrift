@@ -241,6 +241,34 @@ final class BudgetStore {
     /// Charges on accounts kept apart: not the person's own, so not part of this tie-out either.
     private var apartEntryIDs: Set<UUID> { Set(setApart.map(\.id)) }
 
+    /// The page in front of the person, in a sentence, for the question pane to read a question by.
+    var screenContext: String? {
+        guard !accounts.isEmpty else { return nil }
+        if let place = placeFocus { return "the page for one payee, \(place)" }
+        if let filter = chargesFocus { return "a list of charges" + (filter.title.map { ": \($0)" } ?? "") }
+        switch selection ?? .overview {
+        case .orders:
+            var parts = ["the Amazon page (the order history: items ordered from Amazon, Whole Foods and Kindle)"]
+            switch orderScope {
+            case .all: parts.append("showing all time")
+            case .year(let year): parts.append("showing the year \(year)")
+            case .month(let month): parts.append("showing \(month.title)")
+            }
+            if let who = orderWho { parts.append("only \(who)'s orders") }
+            if let kind = orderKind { parts.append("only the kind \(kind)") }
+            if !orderSearch.trimmingCharacters(in: .whitespaces).isEmpty { parts.append("searched for “\(orderSearch)”") }
+            return parts.joined(separator: ", ")
+        case .overview, .report, .ask: return "the Overview of their spending"
+        case .cashflow: return "the Cash Flow page (income, spending, investing and taxes)"
+        case .stories: return "the Trips & Events page"
+        case .places: return "the list of payees"
+        case .transactions: return "the list of all transactions"
+        case .statements: return "their statements"
+        case .apart: return "the page of accounts kept apart from their own money"
+        case .review, .categories, .accounts: return nil
+        }
+    }
+
     /// Goes to the Amazon page showing just the order behind one charge.
     func showOrder(of charge: Transaction.ID) {
         guard let order = orders.items(for: charge).first?.orderID else { return }

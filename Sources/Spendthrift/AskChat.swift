@@ -24,6 +24,11 @@ enum ChatAnalyst {
 
     private struct Query {
         var name = "result"
+        /// "charges" (statement lines) or "items" (what was inside orders, from an order history).
+        var source = "charges"
+        var item: String?
+        var kinds: Set<String> = []
+        var who: String?
         var lane = "everyday"
         var categories: Set<Category> = []
         var place: String?
@@ -55,6 +60,11 @@ enum ChatAnalyst {
                 return s
             }
             place = text("place"); account = text("account"); trip = text("trip")
+            source = ((o["source"] as? String) ?? source).lowercased()
+            item = text("item"); who = text("who")
+            for name in (f["kinds"] as? [String]) ?? [] {
+                if let kind = ItemSorter.kinds.first(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) { kinds.insert(kind) }
+            }
             from = text("from").flatMap { DateParsing.parse(String($0.prefix(10)), format: "yyyy-MM-dd") ?? DateParsing.parse($0 + "-01", format: "yyyy-MM-dd") }
             to = text("to").flatMap { s -> Date? in
                 if let d = DateParsing.parse(String(s.prefix(10)), format: "yyyy-MM-dd") { return d }
@@ -65,6 +75,30 @@ enum ChatAnalyst {
             maxAmount = f["max_amount"] as? Double ?? (f["max_amount"] as? Int).map(Double.init)
             direction = ((f["direction"] as? String) ?? direction).lowercased()
         }
+    }
+
+    /// What to say about order items, when an order history is on file: a second thing to ask about.
+    @MainActor
+    private static func itemsPrompt(store: BudgetStore) -> String {
+        guard let first = store.orderRows.first?.date, let last = store.orderRows.last?.date else { return "" }
+        let people = store.orderPeople
+        return """
+
+
+        There is also an ORDER HISTORY: every item in the person's Amazon, Whole Foods and Kindle orders from \
+        \(first.formatted(.dateTime.month(.abbreviated).year())) to \(last.formatted(.dateTime.month(.abbreviated).day().year())), \
+        each with a plain name, a kind of thing, a price and who ordered it\(people.isEmpty ? "" : " (" + people.joined(separator: " or ") + ")"). \
+        To ask about it, give a query "source": "items" (the default is "charges", the statement lines above). \
+        Use items whenever the question is about a particular thing or kind of thing that was bought ("coffee", \
+        "the stroller", "baby stuff", "books", "what did we order in March"), when something was last bought, how \
+        often, what it cost, or who ordered it. "How much do I spend at Amazon" is still charges, with place "amazon". \
+        If a question could mean either, ask for both and say both.
+        With source "items" the filters are: "item" (a word or two from the thing's name; leave empty for all), \
+        "kinds" (any of: \(ItemSorter.kinds.joined(separator: "; "))), "who", "from", "to", "min_amount", "max_amount". \
+        group_by is "none", "kind", "item" (the same thing bought again and again), "month", "year" or "who". \
+        measure is "total", "count" or "list" (the items themselves, dearest first; with "item" set, newest first).
+        Item totals are what was ordered, after refunds. They differ from card charges: points and gift balances pay for some.
+        """
     }
 
     @MainActor
@@ -96,6 +130,20 @@ enum ChatAnalyst {
         Today is \(Date.now.formatted(.dateTime.year().month(.wide).day())). The data covers \(first) to \(last). \
         "This year" is \(Month(date: .now).year). Accounts: \(store.accounts.map(\.name).joined(separator: "; ")).
         Trips and events on record: \(trips.isEmpty ? "none" : trips).
+        """ + itemsPrompt(store: store) + screenPrompt(store: store)
+    }
+
+    /// What the person has in front of them, so "here", "this year" and "these" mean something.
+    /// A hint for reading the question, never a limit on where the answer may come from.
+    @MainActor
+    private static func screenPrompt(store: BudgetStore) -> String {
+        guard let screen = store.screenContext else { return "" }
+        return """
+
+
+        Right now the person is looking at: \(screen). Use that only to read the question: if it says "here", \
+        "this", "these", "on this page", or leaves out what or when it is about, it most likely means what is on \
+        screen. A question that names its own subject or dates is answered as asked, from wherever the answer lies.
         """
     }
 
@@ -108,10 +156,61 @@ enum ChatAnalyst {
         let groups: [(label: String, value: Double, count: Int, category: Category?)]
         let transactions: [Transaction]
         let isMoney: Bool
+        /// For a question about order items: the items themselves.
+        var items: [BudgetStore.OrderRow] = []
+        var ofItems = false
+    }
+
+    /// The same computing, over what was inside the orders.
+    @MainActor
+    private static func computeItems(_ q: Query, store: BudgetStore) -> Computed {
+        let words = (q.item ?? "").lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map { PlacesView.squeeze(String($0)) }.filter { $0.count >= 2 }
+        let matches = store.orderRows.filter { row in
+            guard row.item.cents > 0 else { return false }
+            if let from = q.from, row.date < from { return false }
+            if let to = q.to, row.date > to { return false }
+            if !q.kinds.isEmpty, !q.kinds.contains(row.kind) { return false }
+            if let who = q.who, !(row.item.who?.localizedCaseInsensitiveContains(who) ?? false) { return false }
+            if let lo = q.minAmount, Double(row.net) / 100 < lo { return false }
+            if let hi = q.maxAmount, Double(row.net) / 100 > hi { return false }
+            // Every word asked for has to be somewhere in the name, the listing or the kind.
+            return words.allSatisfy { row.haystack.contains($0) || ($0.hasSuffix("s") && row.haystack.contains(String($0.dropLast()))) }
+        }
+        let value = { (row: BudgetStore.OrderRow) in Double(row.net) / 100 }
+        let total = matches.reduce(0) { $0 + value($1) }
+        func key(_ row: BudgetStore.OrderRow) -> (sort: String, label: String)? {
+            switch q.groupBy {
+            case "kind", "category": return (row.kind, row.kind)
+            case "item", "place": return (row.name.lowercased(), row.name)
+            case "month": return (row.month.key, row.month.title)
+            case "year": return (String(row.month.year), String(row.month.year))
+            case "who", "account": return row.item.who.map { ($0, $0) }
+            default: return nil
+            }
+        }
+        var groups: [(sort: String, label: String, value: Double, count: Int)] = []
+        var index: [String: Int] = [:]
+        if q.groupBy != "none" {
+            for row in matches {
+                guard let k = key(row) else { continue }
+                if let i = index[k.sort] { groups[i].value += value(row); groups[i].count += 1 }
+                else { index[k.sort] = groups.count; groups.append((k.sort, k.label, value(row), 1)) }
+            }
+            let chronological = ["month", "year"].contains(q.groupBy)
+            groups.sort { chronological ? $0.sort < $1.sort : (q.measure == "count" ? ($0.count, $0.value) > ($1.count, $1.value) : $0.value > $1.value) }
+            groups = chronological ? Array(groups.suffix(40)) : Array(groups.prefix(q.top))
+        }
+        // Asked about one thing: when it was bought matters more than which time cost most.
+        let listed = q.item != nil ? matches.sorted { $0.date > $1.date } : matches.sorted { $0.net > $1.net }
+        return Computed(name: q.name, total: q.measure == "count" ? Double(matches.count) : total, count: matches.count,
+                        groups: groups.map { ($0.label, q.measure == "count" ? Double($0.count) : $0.value, $0.count, nil) },
+                        transactions: [], isMoney: q.measure != "count",
+                        items: Array(listed.prefix(q.measure == "list" || q.groupBy == "none" ? q.top : 0)), ofItems: true)
     }
 
     @MainActor
     private static func compute(_ q: Query, store: BudgetStore) -> Computed {
+        if q.source == "items", !store.orderRows.isEmpty { return computeItems(q, store: store) }
         let tripIDs: Set<UUID>? = q.trip.flatMap { name in
             store.stories.first { $0.name.localizedCaseInsensitiveContains(name) || name.localizedCaseInsensitiveContains($0.name) }
         }.map { Set($0.entryIDs) }
@@ -193,6 +292,13 @@ enum ChatAnalyst {
         if !c.groups.isEmpty {
             out["groups"] = c.groups.map { ["label": $0.label, "value": c.isMoney ? money($0.value) : String(Int($0.value)), "charges": $0.count] as [String: Any] }
         }
+        if !c.items.isEmpty {
+            out["from"] = "the order history (items ordered, after refunds; not card charges)"
+            out["items"] = c.items.prefix(15).map {
+                ["date": $0.date.formatted(.dateTime.month(.wide).day().year()), "item": $0.name, "amount": money(Double($0.net) / 100),
+                 "kind": $0.kind, "ordered_by": $0.item.who ?? ""] as [String: Any]
+            }
+        }
         if !c.transactions.isEmpty {
             out["largest_transactions"] = c.transactions.prefix(15).map {
                 ["date": $0.date.formatted(.dateTime.month(.wide).day().year()), "place": $0.merchant, "amount": money(abs($0.amount)), "category": $0.category.displayName] as [String: Any]
@@ -235,6 +341,8 @@ enum ChatAnalyst {
         Use ONLY the figures provided. Copy every dollar amount exactly as written, cents included; never round, add, \
         subtract or work out a percentage yourself. To compare two things, state both amounts. If the figures show \
         nothing matched, say so simply and suggest what to try. No lists, no headings, no emoji.
+        Figures marked as from the order history are things that were ordered: say "ordered" or "bought", not \
+        "charged", and give the date when the question is about when.
         """
         let written = await Timeout.run(45) {
             try? await CloudAI.complete(job: "Answering questions", system: writer, user: "\(conversation)Question: \(question)\n\nFigures computed by the app:\n\(factsText)\(notesText)",
@@ -254,10 +362,15 @@ enum ChatAnalyst {
         var bars: [ChartBar] = []
         if !shown.groups.isEmpty {
             rows = shown.groups.prefix(12).map { g in
-                (g.label, g.count == 1 ? "1 charge" : "\(g.count) charges", shown.isMoney ? Money.format(g.value) : String(Int(g.value)), g.category)
+                (g.label, shown.ofItems ? (g.count == 1 ? "1 item" : "\(g.count) items") : (g.count == 1 ? "1 charge" : "\(g.count) charges"), shown.isMoney ? Money.format(g.value) : String(Int(g.value)), g.category)
             }
             if shown.groups.count >= 2, (plan["chart"] as? String) != "none" {
                 bars = shown.groups.prefix(24).map { ChartBar(label: $0.label, value: $0.value, category: $0.category) }
+            }
+        } else if !shown.items.isEmpty {
+            rows = shown.items.prefix(10).map {
+                ($0.name, [$0.date.formatted(.dateTime.month(.abbreviated).day().year()), $0.item.who].compactMap { $0 }.joined(separator: " · "),
+                 Money.format(Double($0.net) / 100), nil)
             }
         } else {
             rows = shown.transactions.prefix(10).map {

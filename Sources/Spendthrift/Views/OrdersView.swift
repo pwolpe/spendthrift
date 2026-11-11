@@ -418,6 +418,11 @@ struct OrdersView: View {
                 .chartXAxis { AxisMarks { value in
                     AxisValueLabel { if let y = value.as(String.self), bars.count <= 14 || (Int(y) ?? 0) % 2 == 0 { Text("’" + y.suffix(2)) } }
                 } }
+                // Click a year's bar to step into that year.
+                .chartOverlay { proxy in barTaps(proxy) { label in
+                    if let year = Int(label), bars.contains(where: { $0.year == year }) { store.orderScope = .year(year) }
+                } }
+                .help("Click a bar to open that year")
             }
         case .year(let year):
             let last = through.map { Month(date: $0) }
@@ -429,7 +434,23 @@ struct OrdersView: View {
                         .cornerRadius(3).foregroundStyle(Theme.inkFill.gradient)
                 }
                 .chartXScale(domain: (1...12).map { Month(year: year, month: $0).shortName })
+                // Click a month's bar to step into that month.
+                .chartOverlay { proxy in barTaps(proxy) { label in
+                    if let month = months.first(where: { $0.shortName == label }), (byMonth[month] ?? 0) > 0 { store.orderScope = .month(month) }
+                } }
+                .help("Click a bar to open that month")
             }
+        }
+    }
+
+    /// Turns a click on a bar chart into the label of the bar under it.
+    private func barTaps(_ proxy: ChartProxy, _ act: @escaping (String) -> Void) -> some View {
+        GeometryReader { geo in
+            Rectangle().fill(.clear).contentShape(Rectangle())
+                .onTapGesture { point in
+                    guard let frame = proxy.plotFrame.map({ geo[$0] }), let label: String = proxy.value(atX: point.x - frame.origin.x) else { return }
+                    withAnimation(.snappy(duration: 0.25)) { act(label) }
+                }
         }
     }
 
@@ -479,8 +500,8 @@ struct OrdersView: View {
                     Text("THE BIGGEST THINGS").font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
                     ForEach(Array(biggest)) { row in
                         Button { store.orderOnly = row.item.orderID } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Circle().fill(Self.color(of: row.kind)).frame(width: 8, height: 8)
+                            HStack(alignment: .center, spacing: 8) {
+                                ProductThumb(asin: row.item.asin, kind: row.kind, size: 26)
                                 Text(row.name).font(.callout).lineLimit(1)
                                 Spacer(minLength: 8)
                                 Text(row.date.formatted(.dateTime.month(.abbreviated).year())).font(.caption).foregroundStyle(.secondary)
@@ -694,7 +715,14 @@ private struct OrderRowView: View {
         let count = order.rows.count
         VStack(alignment: .leading, spacing: 0) {
             Button(action: toggle) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
+                    // The first few things in the box, overlapping like a small pile.
+                    HStack(spacing: -14) {
+                        ForEach(Array(order.rows.prefix(3).enumerated()), id: \.element.id) { index, row in
+                            ProductThumb(asin: row.item.asin, kind: row.kind, size: 38).zIndex(Double(3 - index))
+                        }
+                    }
+                    .frame(width: 38 + CGFloat(min(count, 3) - 1) * 24, alignment: .leading)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(order.rows.prefix(3).map(\.name).joined(separator: ", ") + (count > 3 ? ", and \(count - 3) more" : ""))
                             .font(.body.weight(.medium)).lineLimit(1)
@@ -716,8 +744,8 @@ private struct OrderRowView: View {
             if isOpen {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(order.rows) { row in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Circle().fill(OrdersView.color(of: row.kind)).frame(width: 8, height: 8)
+                        HStack(alignment: .center, spacing: 10) {
+                            ProductThumb(asin: row.item.asin, kind: row.kind, size: 44)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(row.item.quantity > 1 ? "\(row.item.quantity) × \(row.name)" : row.name).font(.callout)
                                 if row.name != row.item.name {
@@ -761,8 +789,8 @@ private struct ItemRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: toggle) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Circle().fill(OrdersView.color(of: row.kind)).frame(width: 8, height: 8)
+                HStack(alignment: .center, spacing: 12) {
+                    ProductThumb(asin: row.item.asin, kind: row.kind, size: 38)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.item.quantity > 1 ? "\(row.item.quantity) × \(row.name)" : row.name)
                             .font(.body.weight(.medium)).lineLimit(1)

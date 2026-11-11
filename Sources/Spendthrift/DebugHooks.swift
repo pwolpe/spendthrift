@@ -323,6 +323,12 @@ enum DebugHooks {
         if env["SPENDTHRIFT_SUGGEST_ONLY"] != nil { NSApp.terminate(nil); return }
         // SPENDTHRIFT_CHAT="first question|a follow-up|another": a conversation with Ask the Academy.
         if let chat = env["SPENDTHRIFT_CHAT"] {
+            // SPENDTHRIFT_CHAT_ON=amazon:2026 asks as if that page were in front.
+            if let on = env["SPENDTHRIFT_CHAT_ON"], on.hasPrefix("amazon") {
+                store.selection = .orders
+                if let year = Int(on.dropFirst(7)) { store.orderScope = .year(year) }
+                print("CHAT screen: \(store.screenContext ?? "none")")
+            }
             var turns: [ChatAnalyst.Turn] = []
             for q in chat.split(separator: "|").map(String.init) {
                 let started = Date.now
