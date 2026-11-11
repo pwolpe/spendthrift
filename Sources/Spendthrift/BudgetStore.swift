@@ -128,6 +128,77 @@ final class BudgetStore {
         }
         Task { await sortRemaining() }
         Task { await notePeriodsIfNeeded() }
+        Task { await loadOrders() }
+    }
+
+    // MARK: - Orders
+
+    /// What order-history exports said was inside each order, and which charge paid for which.
+    private(set) var orders = OrderBook()
+
+    private func loadOrders() async {
+        let file = paths.ordersFile
+        let saved = await Task.detached { OrderBook.load(file) }.value
+        guard !saved.items.isEmpty else { return }
+        orders = saved
+        if saved.matches.isEmpty { await rematchOrders() }
+    }
+
+    /// The charges an order export could explain: spending at the shops it covers.
+    private var orderCharges: [OrderMatcher.Charge] {
+        library.entries.compactMap { entry in
+            guard entry.amount > 0, let shop = OrderMatcher.shop(of: entry.description) else { return nil }
+            return .init(id: entry.id, date: entry.date, cents: Int((entry.amount * 100).rounded()), shop: shop)
+        }
+    }
+
+    /// Lines the charges up with the orders again (new statements or a new export can both change the answer).
+    func rematchOrders() async {
+        guard !orders.items.isEmpty else { return }
+        let charges = orderCharges, items = orders.items, file = paths.ordersFile
+        let matches = await Task.detached { OrderMatcher.match(charges, to: items) }.value
+        guard items == orders.items else { return }   // another export arrived meanwhile; its own pass will follow
+        orders.matches = matches
+        let book = orders
+        Task.detached { book.save(to: file) }
+    }
+
+    /// For tests: add files and return when they're in.
+    func importFilesAndWait(_ urls: [URL]) async { await importFilesAsync(urls) }
+
+    /// For tests: how the charges at these shops matched, and whether every exact match adds up.
+    func orderReport() -> [String] {
+        var tally: [String: (count: Int, total: Double)] = [:]
+        var wrong = 0
+        for entry in library.entries where entry.amount > 0 {
+            guard let shop = OrderMatcher.shop(of: entry.description) else { continue }
+            let match = orders.matches[entry.id.uuidString]
+            let key = "\(shop.rawValue) \(match?.kind.rawValue ?? "unmatched")"
+            tally[key, default: (0, 0)].count += 1
+            tally[key, default: (0, 0)].total += entry.amount
+            if let match, match.kind == .exact,
+               match.items.reduce(0, { $0 + orders.items[$1].cents }) != Int((entry.amount * 100).rounded()) { wrong += 1 }
+        }
+        return ["\(orders.items.count) items, \(orders.matches.count) charges matched"]
+            + tally.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.count) charges, \(Int($0.value.total))" }
+            + ["exact matches whose items don't add up: \(wrong)"]
+    }
+
+    /// Reads order-history files (one export, or several people's) and matches them to the charges.
+    func addOrders(from files: [URL], quietly: Bool = false) async {
+        let read = await Task.detached { OrderExport.read(files) }.value
+        guard !read.isEmpty else {
+            if !quietly { showToast("That order history had no orders in it.", symbol: "shippingbox") }
+            return
+        }
+        orders.merge(read)
+        await rematchOrders()
+        let charges = orderCharges
+        let explained = charges.filter { orders.matches[$0.id.uuidString] != nil }.count
+        let count = Set(read.map(\.orderID)).count
+        if !quietly {
+            showToast("Read \(count.formatted()) orders. \(explained) of \(charges.count) charges from those shops now have their items.", symbol: "shippingbox")
+        }
     }
 
     // MARK: - Persistence
@@ -1254,8 +1325,8 @@ final class BudgetStore {
     }
 
     /// A dropped folder means "everything in here": look inside (two levels) for statements.
-    nonisolated private static func expand(_ urls: [URL]) -> (files: [URL], fromFolder: Set<URL>) {
-        var files: [URL] = [], fromFolder: Set<URL> = []
+    nonisolated private static func expand(_ urls: [URL]) -> (files: [URL], fromFolder: Set<URL>, orders: [URL]) {
+        var files: [URL] = [], fromFolder: Set<URL> = [], orders: [URL] = []
         let fm = FileManager.default
 
         /// Banks often hand over a year of statements as one zip. Opens it; nil if it isn't one.
@@ -1271,6 +1342,8 @@ final class BudgetStore {
         }
         /// Everything readable inside a folder (or an opened zip), a few levels down, zips included.
         func walk(_ folder: URL, depth: Int) {
+            // A shop's order-history export isn't a statement: take its order files and leave the rest alone.
+            if let found = OrderExport.files(in: folder) { orders += found; return }
             guard depth < 4, let items = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey],
                                                                      options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return }
             for item in items.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where files.count < 500 {
@@ -1293,11 +1366,13 @@ final class BudgetStore {
                 walk(url, depth: 0)
             } else if url.pathExtension.lowercased() == "zip", let inside = unzipped(url) {
                 walk(inside, depth: 0)
+            } else if OrderExport.isOrderFile(url) {
+                orders.append(url)
             } else {
                 files.append(url)
             }
         }
-        return (files.sorted { $0.lastPathComponent < $1.lastPathComponent }, fromFolder)
+        return (files.sorted { $0.lastPathComponent < $1.lastPathComponent }, fromFolder, orders)
     }
 
     /// Asks for a locked PDF's password. Nothing is stored: it's used once to open the file.
@@ -1327,7 +1402,11 @@ final class BudgetStore {
     /// - automatic: the app found these in Downloads by itself. Nothing may interrupt Tony then:
     ///   no password prompt, no column picker, no error sheet. Anything that needs him waits in the banner.
     private func importFilesAsync(_ dropped: [URL], automatic: Bool = false) async {
-        let (urls, fromFolder) = Self.expand(dropped)
+        let (urls, fromFolder, orderFiles) = Self.expand(dropped)
+        if !orderFiles.isEmpty {
+            await addOrders(from: orderFiles, quietly: automatic)
+            if urls.isEmpty { return }
+        }
         var issues: [ImportIssue] = []
         var added = 0, touched: [String] = [], verified = 0, mismatches: [String] = [], scanned = 0
         var batch: (entries: Set<UUID>, accounts: Set<UUID>, hashes: Set<String>) = ([], [], [])
@@ -1452,6 +1531,7 @@ final class BudgetStore {
         joinReissuedCards()
         importProgress = nil
         isImporting = false
+        if added > 0 { Task { await rematchOrders() } }
         if dropped.count > 0, urls.isEmpty {
             issues.append(ImportIssue(file: dropped[0].lastPathComponent, reason: "There were no statements in that folder."))
         }

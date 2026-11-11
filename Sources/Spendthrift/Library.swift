@@ -29,6 +29,8 @@ struct BudgetPaths {
     }()
 
     var libraryFile: URL { root.appendingPathComponent("library.json") }
+    /// What online order exports said was in each order (see `OrderBook`).
+    var ordersFile: URL { root.appendingPathComponent("orders.json") }
     var backupFolder: URL { root.appendingPathComponent("Backups", isDirectory: true) }
     /// Every statement exactly as it was added, so a charge can be shown in its original.
     var statementsFolder: URL { root.appendingPathComponent("Statements", isDirectory: true) }

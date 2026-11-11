@@ -173,6 +173,14 @@ enum DebugHooks {
             } else { print("TRIPPIC no trip named \(wanted)") }
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_ORDERS=a:b: read order-history exports, print how the charges match, then quit.
+        if let given = env["SPENDTHRIFT_ORDERS"] {
+            let started = Date.now
+            await store.importFilesAndWait(given.split(separator: ":").map { URL(fileURLWithPath: String($0)) })
+            print("ORDERS \(String(format: "%.2f", Date.now.timeIntervalSince(started)))s")
+            for line in store.orderReport() { print("ORDERS \(line)") }
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_TIEOUT=1: how each card's payments tie to its statements, then quit.
         if env["SPENDTHRIFT_TIEOUT"] != nil {
             await store.notePeriodsIfNeeded()
