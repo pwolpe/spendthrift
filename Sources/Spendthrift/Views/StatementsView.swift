@@ -208,8 +208,9 @@ private struct AccountTile: View {
         let withCharges = files.reduce(into: Set<Month>()) { $0.formUnion($1.monthsCovered) }
         let last = withCharges.max(), first = withCharges.min()
         let covered = withCharges.union(alsoCovered)
-        // The last two years, a square a month: filled where a statement covers it.
-        let strip: [Month] = last.map { l in (0..<24).reversed().map { l.adding(-$0) }.filter { $0 >= (first ?? l) } } ?? []
+        // Every month from the first statement to the last, a mark a month: filled where a statement covers it.
+        // Years of history make it a fine barcode; a hole still shows.
+        let strip: [Month] = (first.flatMap { f in last.map { l in Array(sequence(first: f) { $0 < l ? $0.adding(1) : nil }) } } ?? [])
         let kinds = Array(Set(files.map(\.kind))).sorted().joined(separator: ", ")
         Button(action: open) {
             VStack(alignment: .leading, spacing: 12) {
@@ -234,9 +235,9 @@ private struct AccountTile: View {
                     }
                 }
                 if strip.count > 1 {
-                    HStack(spacing: 3) {
+                    HStack(spacing: strip.count > 60 ? 0.5 : strip.count > 30 ? 1.5 : 3) {
                         ForEach(strip) { m in
-                            RoundedRectangle(cornerRadius: 2)
+                            RoundedRectangle(cornerRadius: strip.count > 30 ? 0.5 : 2)
                                 .fill(covered.contains(m) ? Theme.accent.opacity(0.75) : (missing.contains(m) ? Theme.caution.opacity(0.8) : Color.primary.opacity(0.10)))
                                 .frame(height: 9)
                                 .help(m.title + (covered.contains(m) ? "" : (missing.contains(m) ? ": a statement seems to be missing" : ": no charges, so no statement")))

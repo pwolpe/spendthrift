@@ -152,56 +152,94 @@ struct CoverageCard: View {
         return rows
     }
 
+    /// How far back the person wants their records to go. Every account is measured against it.
+    @AppStorage("coverageSinceYear") private var sinceYear = 0
+
+    /// Months in a row said as one stretch: "Mar to Jun 2021", so a long list stays readable.
+    static func stretches(_ months: [Month]) -> String {
+        var runs: [(Month, Month)] = []
+        for m in months.sorted() {
+            if let last = runs.last, last.1.adding(1) == m { runs[runs.count - 1].1 = m } else { runs.append((m, m)) }
+        }
+        return runs.map { a, b in
+            a == b ? "\(a.shortName) \(a.year)" : a.year == b.year ? "\(a.shortName) to \(b.shortName) \(b.year)" : "\(a.shortName) \(a.year) to \(b.shortName) \(b.year)"
+        }.joined(separator: ", ")
+    }
+
     var body: some View {
         let rows = rows
         let all = store.months
-        if let last = all.last, all.count > 1 {
-            let first = max(all.first!, last.adding(-23))
-            let months = sequence(first: first) { $0 < last ? $0.adding(1) : nil }.map { $0 }
-            let missingCount = rows.reduce(0) { $0 + $1.missing.count }
+        if let last = all.last, let earliest = all.first, all.count > 1 {
+            // Until a goal is chosen: the first year with more than a stray month or two in it.
+            let firstFull = Dictionary(grouping: all, by: \.year).filter { $0.value.count >= 3 }.keys.min() ?? earliest.year
+            let since = sinceYear == 0 ? firstFull : min(sinceYear, last.year)
+            let years = Array(since...last.year)
+            let start = Month(year: since, month: 1)
+            let missingCount = rows.reduce(0) { $0 + $1.missing.filter { $0 >= start }.count }
             let never = rows.filter(\.neverAdded)
+            let reaching = rows.filter { !$0.neverAdded && ($0.have.min() ?? last) <= start }.count
+            let real = rows.filter { !$0.neverAdded }.count
             Card {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .firstTextBaseline) {
                         SectionHeader(title: "What's here, month by month",
-                                      subtitle: missingCount == 0 && never.isEmpty ? "Every account has every month. Nothing is missing."
-                                        : "An orange square is a month with no statement. Download it from the bank and drop it in.")
+                                      subtitle: "\(reaching) of \(real) accounts go back to January \(String(since))."
+                                        + (missingCount == 0 && never.isEmpty ? " No month in between is missing." : " An orange square is a month with no statement."))
                         Spacer()
-                        if missingCount == 0 && never.isEmpty {
-                            Label("Complete", systemImage: "checkmark.seal.fill").foregroundStyle(.green).font(.callout.weight(.semibold))
+                        // The goal: how far back the records should reach.
+                        Picker("Back to", selection: Binding(get: { since }, set: { sinceYear = $0 })) {
+                            ForEach(Array((min(earliest.year, since) - 3)...last.year).reversed(), id: \.self) { Text("Back to \(String($0))").tag($0) }
                         }
+                        .labelsHidden().fixedSize()
+                        .help("How far back you want your statements to go")
                     }
-                    Grid(alignment: .leading, horizontalSpacing: 3, verticalSpacing: 6) {
+                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 9) {
                         GridRow {
-                            Text("").gridColumnAlignment(.leading)
-                            ForEach(months) { m in
-                                Text(m.month == 1 || m == months.first ? "\(String(m.shortName.prefix(1)))\n’\(String(format: "%02d", m.year % 100))" : String(m.shortName.prefix(1)))
-                                    .font(.system(size: 9, weight: .medium))
-                                    .multilineTextAlignment(.center)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity)
+                            Text("")
+                            HStack(spacing: 5) {
+                                ForEach(years, id: \.self) { year in
+                                    Text(years.count > 12 ? "’" + String(format: "%02d", year % 100) : String(year))
+                                        .font(Theme.mono(10, .medium)).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+                                }
                             }
                         }
                         ForEach(rows) { row in
-                            GridRow {
-                                Text(row.name)
-                                    .font(.callout.weight(.medium))
-                                    .lineLimit(1)
-                                    .frame(width: 190, alignment: .leading)
-                                ForEach(months) { m in
-                                    cell(row, m)
+                            GridRow(alignment: .center) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(row.name).font(.callout.weight(.medium)).lineLimit(1)
+                                    status(row, start: start, last: last)
+                                }
+                                .frame(width: 200, alignment: .leading)
+                                // A block of twelve for each year, so a whole decade reads at a glance.
+                                HStack(spacing: 5) {
+                                    ForEach(years, id: \.self) { year in
+                                        HStack(spacing: 1.5) {
+                                            ForEach(1...12, id: \.self) { cell(row, Month(year: year, month: $0), last: last) }
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                    }
                                 }
                             }
                         }
                     }
+                    HStack(spacing: 14) {
+                        key(Theme.accent.opacity(0.85), "Statement here")
+                        key(Theme.caution.opacity(0.9), "Missing")
+                        key(Color.primary.opacity(0.07), "No charges that month")
+                        HStack(spacing: 5) {
+                            RoundedRectangle(cornerRadius: 2).strokeBorder(Color.primary.opacity(0.22), style: StrokeStyle(lineWidth: 1, dash: [2, 2])).frame(width: 10, height: 12)
+                            Text("Before the first statement here")
+                        }
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
                     if missingCount > 0 || !never.isEmpty {
                         Divider()
                         HStack(alignment: .top, spacing: 16) {
                         SpotArt(name: "missing", height: 96)
                         VStack(alignment: .leading, spacing: 6) {
                             Text("To download").font(.callout.weight(.semibold))
-                            ForEach(rows.filter { !$0.missing.isEmpty }) { row in
-                                Label("\(row.name): \(row.missing.sorted().map(\.title).joined(separator: ", "))", systemImage: "arrow.down.doc")
+                            ForEach(rows.filter { !$0.missing.filter { $0 >= start }.isEmpty }) { row in
+                                Label("\(row.name): \(Self.stretches(row.missing.filter { $0 >= start }))", systemImage: "arrow.down.doc")
                                     .font(.callout)
                                     .foregroundStyle(Theme.caution)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -221,20 +259,45 @@ struct CoverageCard: View {
         }
     }
 
-    @ViewBuilder
-    private func cell(_ row: Row, _ m: Month) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 3, style: .continuous)
-        Group {
-            if row.neverAdded || row.missing.contains(m) {
-                shape.fill(Theme.caution.opacity(0.25)).overlay(shape.strokeBorder(Theme.caution, lineWidth: 1.5))
-                    .help("\(row.name): no statement for \(m.title)")
-            } else if row.have.contains(m) {
-                shape.fill(Theme.accent.opacity(0.85)).help("\(row.name): \(m.title) is here")
+    /// One line under the account's name: does it reach the goal, and is anything missing on the way?
+    @ViewBuilder private func status(_ row: Row, start: Month, last: Month) -> some View {
+        let missing = row.missing.filter { $0 >= start }.count
+        if row.neverAdded {
+            Text("No statements here").font(.caption).foregroundStyle(Theme.caution)
+        } else if let first = row.have.min() {
+            if missing > 0 {
+                Text("\(missing) \(missing == 1 ? "month" : "months") missing").font(.caption).foregroundStyle(Theme.caution)
+            } else if first <= start {
+                Label("Complete since \(start.shortName) \(String(start.year))", systemImage: "checkmark.circle.fill")
+                    .font(.caption).foregroundStyle(Theme.good).labelStyle(.titleAndIcon)
             } else {
-                shape.fill(Color.primary.opacity(0.06))
+                Text("Starts \(first.shortName) \(String(first.year)), nothing earlier").font(.caption).foregroundStyle(.secondary)
             }
         }
-        .frame(height: 18)
+    }
+
+    private func key(_ color: Color, _ text: String) -> some View {
+        HStack(spacing: 5) { RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 10, height: 12); Text(text) }
+    }
+
+    @ViewBuilder
+    private func cell(_ row: Row, _ m: Month, last: Month) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 2, style: .continuous)
+        Group {
+            if m > last {
+                Color.clear
+            } else if row.neverAdded || row.missing.contains(m) {
+                shape.fill(Theme.caution.opacity(0.9)).help("\(row.name): no statement for \(m.title)")
+            } else if row.have.contains(m) {
+                shape.fill(Theme.accent.opacity(0.85)).help("\(row.name): \(m.title) is here")
+            } else if let first = row.have.min(), m < first {
+                shape.strokeBorder(Color.primary.opacity(0.22), style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                    .help("\(row.name): nothing before \(first.title). If the account was open in \(m.title), that statement isn't here.")
+            } else {
+                shape.fill(Color.primary.opacity(0.07)).help("\(row.name): no charges in \(m.title)")
+            }
+        }
+        .frame(height: 20)
         .frame(maxWidth: .infinity)
     }
 }

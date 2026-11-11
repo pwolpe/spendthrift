@@ -215,7 +215,12 @@ enum PDFStatement {
 
     private static let issuers = ["American Express", "Chase", "Citi", "Capital One", "Bank of America", "Wells Fargo",
                                   "Discover", "U.S. Bank", "Barclays", "Synchrony", "PNC", "TD Bank", "Fidelity",
-                                  "Charles Schwab", "Ally", "USAA", "Navy Federal", "Apple Card", "Goldman Sachs", "Coinbase"]
+                                  "Charles Schwab", "Ally", "USAA", "Navy Federal", "Apple Card", "Goldman Sachs", "Coinbase",
+                                  // A bank missing from this list is named after whichever listed bank its statement
+                                  // mentions first, often a card that was paid from the account.
+                                  "First Republic", "Citizens", "HSBC", "SoFi", "Truist", "Regions", "KeyBank", "Santander",
+                                  "M&T Bank", "Fifth Third", "Huntington", "BMO", "Marcus", "Morgan Stanley", "Merrill",
+                                  "E*TRADE", "Vanguard", "Robinhood", "Wealthfront", "Betterment", "Silicon Valley Bank"]
 
     static func detectIssuer(_ text: String) -> String? {
         let head = String(text.prefix(6000))

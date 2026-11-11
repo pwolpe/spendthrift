@@ -113,6 +113,7 @@ final class BudgetStore {
         library = loaded
         CustomCategories.set(library.customCategories ?? [])
         splitWiresByRecipient()
+        joinSplitBankAccounts()
         rebuild()
         switch result {
         case .restoredFromBackup(let date):
@@ -1667,6 +1668,7 @@ final class BudgetStore {
             }
         }
         joinReissuedCards()
+        joinSplitBankAccounts()
         importProgress = nil
         isImporting = false
         if added > 0 { Task { await rematchOrders() } }
@@ -1772,6 +1774,46 @@ final class BudgetStore {
                     // and the two barely overlap (charges posted around the changeover).
                     let gap = b.first.timeIntervalSince(a.last) / 86_400
                     if gap > -12, gap < 45 { pair = (older, newer); break search }
+                }
+            }
+            guard let pair, let keep = library.accounts.firstIndex(where: { $0.id == pair.new.id }) else { break }
+            for i in library.entries.indices where library.entries[i].accountID == pair.old.id { library.entries[i].accountID = pair.new.id }
+            for i in (library.sources ?? []).indices where library.sources![i].accountID == pair.old.id { library.sources![i].accountID = pair.new.id }
+            library.accounts[keep].formerSignatures = (library.accounts[keep].formerSignatures ?? []) + [pair.old.signature] + (pair.old.formerSignatures ?? [])
+            library.accounts[keep].statementMonths = (library.accounts[keep].statementMonths ?? []).union(pair.old.statementMonths ?? [])
+            library.accounts.removeAll { $0.id == pair.old.id }
+            joined = true
+        }
+        if joined { changed() }
+    }
+
+    /// One bank account that ended up as several: same account digits, statements for different
+    /// months of the same run. It happens when a bank is renamed or bought (the number carries
+    /// over), or when an old statement was filed under another bank it happened to mention.
+    /// They become one account, under the name of whichever has the newest statement.
+    private func joinSplitBankAccounts() {
+        var joined = false
+        let isBank = { (a: Account) in a.signature.hasPrefix("pdf:") && (a.name.contains("Checking") || a.name.contains("Savings")) }
+        let digits = { (a: Account) in a.signature.components(separatedBy: ":").last ?? "" }
+        let kind = { (a: Account) in a.name.contains("Savings") ? "savings" : "checking" }
+        while true {
+            var months: [UUID: Set<String>] = [:], newest: [UUID: String] = [:]
+            for source in library.sources ?? [] {
+                guard let id = source.accountID, let day = [source.periodEnd, source.lastDate].compactMap({ $0 }).first(where: { $0.count >= 7 }) else { continue }
+                months[id, default: []].insert(String(day.prefix(7)))
+                newest[id] = max(newest[id] ?? "", day)
+            }
+            let banks = library.accounts.filter { isBank($0) && digits($0).count >= 4 && months[$0.id] != nil }
+            var pair: (old: Account, new: Account)?
+            search: for a in banks {
+                for b in banks where a.id != b.id && digits(a) == digits(b) && kind(a) == kind(b) && (newest[a.id] ?? "") < (newest[b.id] ?? "") {
+                    guard let ma = months[a.id], let mb = months[b.id], let firstA = ma.min(), let lastA = ma.max(),
+                          let firstB = mb.min(), let lastB = mb.max() else { continue }
+                    // Two real accounts would each have a statement for the same months. One account split in
+                    // two has (almost) none in common, and the two runs touch or interleave.
+                    let touch = Month(key: lastA).map { $0.adding(2).key >= firstB } ?? false
+                    let touchBack = Month(key: lastB).map { $0.adding(2).key >= firstA } ?? false
+                    if ma.intersection(mb).count <= 1, touch, touchBack { pair = (a, b); break search }
                 }
             }
             guard let pair, let keep = library.accounts.firstIndex(where: { $0.id == pair.new.id }) else { break }
