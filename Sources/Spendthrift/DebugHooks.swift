@@ -178,6 +178,14 @@ enum DebugHooks {
             let started = Date.now
             await store.importFilesAndWait(given.split(separator: ":").map { URL(fileURLWithPath: String($0)) })
             print("ORDERS \(String(format: "%.2f", Date.now.timeIntervalSince(started)))s")
+            if env["SPENDTHRIFT_NO_CLOUD"] == nil {
+                await store.readOrderListings()
+                print("ORDERS listings read in \(String(format: "%.0f", Date.now.timeIntervalSince(started)))s")
+                var byCategory: [String: Int] = [:]
+                for row in store.orderRows { byCategory[row.category.rawValue, default: 0] += 1 }
+                print("ORDERS people \(store.orderPeople) | " + byCategory.sorted { $0.value > $1.value }.map { "\($0.key) \($0.value)" }.joined(separator: ", "))
+                for row in store.orderRows.suffix(400).shuffled().prefix(40) { print("ORDERS   \(row.category.rawValue) | \(row.name) ← \(row.item.name.prefix(70))") }
+            }
             for line in store.orderReport() { print("ORDERS \(line)") }
             NSApp.terminate(nil); return
         }
@@ -211,6 +219,13 @@ enum DebugHooks {
             }
             if !store.orderRows.isEmpty {
                 await snap("45-orders", outDir) { OrdersView(scrolls: false) }
+                if let latest = store.orderRows.last {
+                    store.orderScope = .year(latest.month.year)
+                    await snap("45-orders-year", outDir) { OrdersView(scrolls: false) }
+                    store.orderScope = .month(latest.month.adding(-1)); store.orderList = .items; store.orderWho = store.orderPeople.last
+                    await snap("45-orders-month", outDir) { OrdersView(scrolls: false) }
+                    store.orderScope = .all; store.orderList = .orders; store.orderWho = nil
+                }
                 store.orderSearch = "coffee"
                 await snap("46-orders-search", outDir) { OrdersView(scrolls: false) }
                 store.orderSearch = ""

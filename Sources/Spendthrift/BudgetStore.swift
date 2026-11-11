@@ -138,17 +138,35 @@ final class BudgetStore {
     /// The order items laid out for the Orders page: dated, searchable, each knowing its charge.
     private(set) var orderRows: [OrderRow] = []
     var orderSearch = ""
-    var orderSpan = PlacesView.Span.last12
+    /// The stretch of order history on screen, whose orders, and (after a click on the ring) which category.
+    var orderScope = OrderScope.all
+    var orderWho: String?
+    var orderCategory: Category?
+    var orderList = OrderList.orders
+
+    enum OrderScope: Hashable { case all, year(Int), month(Month) }
+    enum OrderList: String, CaseIterable, Identifiable { case orders = "Orders", items = "Items"; var id: String { rawValue } }
 
     struct OrderRow: Identifiable {
         let id: Int
         let item: OrderItem
         let date: Date
-        /// Name and shelf squeezed to letters and digits, for finding.
+        let month: Month
+        /// What it is in plain words (the model's reading of the listing), or the listing itself until it's read.
+        let name: String
+        let category: Category
+        /// What it cost after any refund on its order, in cents.
+        let net: Int
+        /// Name, listing and category squeezed to letters and digits, for finding.
         let haystack: String
         /// The card charge that paid for it, when one was found.
         let charge: UUID?
     }
+
+    /// The first names on the order histories that were added ("Paul", "Jessica").
+    private(set) var orderPeople: [String] = []
+    /// True while the model is reading product listings.
+    private(set) var isReadingOrders = false
 
     /// How far the order history reaches, set against the charges it could explain.
     struct OrderCoverage {
@@ -166,11 +184,27 @@ final class BudgetStore {
             guard let uuid = UUID(uuidString: id) else { continue }
             for i in match.items { charge[i] = uuid }
         }
+        // A refund comes off every item of its order in proportion.
+        var ordered: [String: Int] = [:]
+        for item in orders.items { ordered[item.orderID, default: 0] += max(0, item.cents) }
+        let refunds = orders.refunds ?? [:], sorted = orders.sorted ?? [:]
+        var dates: [String: Date] = [:]
         orderRows = orders.items.enumerated().compactMap { i, item in
-            guard let date = DateParsing.parse(item.date, format: "yyyy-MM-dd") else { return nil }
-            return OrderRow(id: i, item: item, date: date,
-                            haystack: PlacesView.squeeze(item.name) + " " + PlacesView.squeeze(item.shelf), charge: charge[i])
+            let parsed = dates[item.date] ?? DateParsing.parse(item.date, format: "yyyy-MM-dd")
+            guard let date = parsed else { return nil }
+            dates[item.date] = date
+            let read = sorted[item.name]
+            let category = read.map { Category($0.category) } ?? item.roughCategory
+            let name = read?.name ?? item.name
+            var net = item.cents
+            if let back = refunds[item.orderID], let whole = ordered[item.orderID], whole > 0 {
+                net = max(0, item.cents - Int((Double(item.cents) * Double(min(back, whole)) / Double(whole)).rounded()))
+            }
+            return OrderRow(id: i, item: item, date: date, month: Month(date: date), name: name, category: category, net: net,
+                            haystack: [name, item.name, category.rawValue, item.who ?? ""].map(PlacesView.squeeze).joined(separator: " "),
+                            charge: charge[i])
         }
+        orderPeople = Array(Set(orders.items.compactMap(\.who))).sorted()
         var coverage = OrderCoverage()
         let last = orders.items.map(\.date).max()
         coverage.through = last.flatMap { DateParsing.parse($0, format: "yyyy-MM-dd") }
@@ -207,6 +241,7 @@ final class BudgetStore {
         orders = saved
         refreshOrderRows()
         await rematchOrders()   // statements may have been added since the orders were last lined up
+        await readOrderListings()
     }
 
     /// The charges an order export could explain: spending at the shops it covers.
@@ -228,6 +263,40 @@ final class BudgetStore {
         refreshOrderRows()
         let book = orders
         Task.detached { book.save(to: file) }
+    }
+
+    /// Has the model read every product listing it hasn't yet: what each thing is, and its budget category.
+    /// Newest first, a few requests at a time; each answer is kept as it arrives, so stopping loses nothing.
+    func readOrderListings() async {
+        guard CloudAI.isEnabled, !isReadingOrders else { return }
+        let done = orders.sorted ?? [:]
+        var seen: Set<String> = [], unread: [String] = []
+        for item in orders.items.reversed() where done[item.name] == nil && seen.insert(item.name).inserted { unread.append(item.name) }
+        guard !unread.isEmpty else { return }
+        isReadingOrders = true
+        defer { isReadingOrders = false }
+        let batches = stride(from: 0, to: unread.count, by: 50).map { Array(unread[$0..<min($0 + 50, unread.count)]) }
+        let file = paths.ordersFile
+        var failures = 0
+        await withTaskGroup(of: [String: OrderBook.ItemSort]?.self) { group in
+            var next = 0
+            func start() { if next < batches.count { let batch = batches[next]; next += 1; group.addTask { await ItemSorter.sort(batch) } } }
+            for _ in 0..<6 { start() }
+            for await answer in group {
+                if let answer, !answer.isEmpty {
+                    orders.sorted = (orders.sorted ?? [:]).merging(answer) { _, new in new }
+                    refreshOrderRows()
+                    let book = orders
+                    Task.detached { book.save(to: file) }
+                } else {
+                    failures += 1
+                }
+                if failures < 3 { start() }   // the model is down or out of credit: stop asking
+            }
+        }
+        if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
+            print("DEBUG ORDERS read \(orders.sorted?.count ?? 0) listings, \(failures) failed requests")
+        }
     }
 
     /// For tests: add files and return when they're in.
@@ -253,13 +322,15 @@ final class BudgetStore {
 
     /// Reads order-history files (one export, or several people's) and matches them to the charges.
     func addOrders(from files: [URL], quietly: Bool = false) async {
-        let read = await Task.detached { OrderExport.read(files) }.value
+        let (read, refunds) = await Task.detached { OrderExport.read(files) }.value
         guard !read.isEmpty else {
             if !quietly { showToast("That order history had no orders in it.", symbol: "shippingbox") }
             return
         }
-        orders.merge(read)
+        orders.merge(read, refunds: refunds)
+        refreshOrderRows()
         await rematchOrders()
+        Task { await readOrderListings() }
         let charges = orderCharges
         let explained = charges.filter { orders.matches[$0.id.uuidString] != nil }.count
         let count = Set(read.map(\.orderID)).count

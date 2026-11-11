@@ -19,6 +19,23 @@ struct OrderItem: Codable, Hashable {
     /// What the shop lists for the whole shipment. For groceries this is closer to the
     /// charge than the items are (weighed items, bag fees).
     var listedCents: Int?
+    /// Whose account it was ordered on (a first name), when the export says.
+    var who: String?
+
+    /// Where it's filed before the model has read it: only as fine as the shop's own shelves allow.
+    var roughCategory: Category {
+        switch shop {
+        case .groceries: return .groceries
+        case .digital: return .entertainment
+        case .store:
+            let d = (department ?? "").lowercased()
+            if d.contains("grocery") { return .groceries }
+            if d.contains("health") || d.contains("beauty") { return .health }
+            if ["kitchen", "home", "tools", "lawn", "furniture"].contains(where: d.contains) { return .home }
+            if ["cover", "paperback", "book", "music", "video", "toy"].contains(where: d.contains) { return .entertainment }
+            return .shopping
+        }
+    }
 
     /// The shelf it came off, in plain words, for adding orders up by kind.
     var shelf: String {
@@ -50,6 +67,16 @@ struct OrderBook: Codable {
     var items: [OrderItem] = []
     /// Charge (a `LedgerEntry` id) → the items it paid for. Rebuilt whenever items or charges change.
     var matches: [String: OrderMatch] = [:]
+    /// What the model made of each product listing, by the listing's full text.
+    var sorted: [String: ItemSort]?
+    /// Money that came back, by order.
+    var refunds: [String: Int]?
+
+    /// A listing read by the model: what the thing is in plain words, and where it belongs in the budget.
+    struct ItemSort: Codable, Hashable {
+        var name: String
+        var category: String
+    }
 
     func items(for entry: UUID) -> [OrderItem] {
         (matches[entry.uuidString]?.items ?? []).compactMap { items.indices.contains($0) ? items[$0] : nil }
@@ -57,7 +84,8 @@ struct OrderBook: Codable {
 
     /// Adds an export. Anyone in the household can add theirs: an order belongs to one
     /// export, so its orders replace any earlier copy of the same orders.
-    mutating func merge(_ new: [OrderItem]) {
+    mutating func merge(_ new: [OrderItem], refunds back: [String: Int] = [:]) {
+        refunds = (refunds ?? [:]).merging(back) { _, latest in latest }
         let incoming = Set(new.map(\.orderID))
         items.removeAll { incoming.contains($0.orderID) }
         items += new
@@ -81,6 +109,7 @@ struct OrderBook: Codable {
 enum OrderExport {
     static let retailFile = "Order History.csv"
     static let digitalFile = "Digital Content Orders.csv"
+    static let refundFile = "Refund Details.csv"
 
     /// The order files of an export, if this folder is one (or holds one's order folder).
     /// The rest of an export (delivery photos, cart history) is never looked at.
@@ -89,8 +118,10 @@ enum OrderExport {
         for base in [folder, folder.appendingPathComponent("Your Amazon Orders", isDirectory: true)] {
             let retail = base.appendingPathComponent(retailFile)
             guard fm.fileExists(atPath: retail.path), isOrderFile(retail) else { continue }
-            let digital = base.appendingPathComponent(digitalFile)
-            return fm.fileExists(atPath: digital.path) ? [retail, digital] : [retail]
+            let others = [base.appendingPathComponent(digitalFile),
+                          base.deletingLastPathComponent().appendingPathComponent("Your Returns & Refunds/\(refundFile)"),
+                          base.appendingPathComponent("Your Returns & Refunds/\(refundFile)")]
+            return [retail] + others.filter { fm.fileExists(atPath: $0.path) }
         }
         return nil
     }
@@ -104,11 +135,15 @@ enum OrderExport {
         return head.contains("Order ID") && head.contains("Product Name")
     }
 
-    static func read(_ files: [URL]) -> [OrderItem] {
-        files.flatMap { url -> [OrderItem] in
-            guard let data = try? Data(contentsOf: url), let text = CSVTable.decodeText(data) else { return [] }
+    /// Everything in one export: its items, with the first name on the account, and its refunds by order.
+    static func read(_ files: [URL]) -> (items: [OrderItem], refunds: [String: Int]) {
+        // Several people's exports can arrive together; each folder is one person's.
+        var items: [(folder: String, item: OrderItem)] = [], refunds: [String: Int] = [:], names: [String: [String: Int]] = [:]
+        for url in files {
+            let folder = url.deletingLastPathComponent().path
+            guard let data = try? Data(contentsOf: url), let text = CSVTable.decodeText(data) else { continue }
             var rows = CSV.parse(text)
-            guard rows.count > 1 else { return [] }
+            guard rows.count > 1 else { continue }
             let header = rows.removeFirst()
             let column = Dictionary(header.enumerated().map { ($1.trimmingCharacters(in: .whitespaces), $0) }, uniquingKeysWith: { a, _ in a })
             func cell(_ row: [String], _ name: String) -> String {
@@ -116,8 +151,20 @@ enum OrderExport {
                 let value = row[i].trimmingCharacters(in: .whitespaces)
                 return value == "Not Available" || value == "Not Applicable" ? "" : value
             }
-            return url.lastPathComponent == digitalFile ? digital(rows, cell) : retail(rows, cell)
+            switch url.lastPathComponent {
+            case digitalFile: items += digital(rows, cell).map { (folder, $0) }
+            case refundFile:
+                for row in rows where !cell(row, "Order ID").isEmpty { refunds[cell(row, "Order ID"), default: 0] += cents(cell(row, "Refund Amount")) }
+            default:
+                items += retail(rows, cell).map { (folder, $0) }
+                // The billing address starts with the account holder's name: the only place the export says whose it is.
+                for row in rows {
+                    if let first = cell(row, "Billing Address").split(separator: " ").first, first.allSatisfy(\.isLetter) { names[folder, default: [:]][String(first), default: 0] += 1 }
+                }
+            }
         }
+        let who = names.mapValues { counts in counts.max { ($0.value, $1.key) < ($1.value, $0.key) }?.key }
+        return (items.map { var item = $0.item; item.who = who[$0.folder] ?? nil; return item }, refunds)
     }
 
     /// Amounts come as "12.99", sometimes quoted as "'-1.5'".
@@ -272,5 +319,61 @@ enum OrderMatcher {
             take(best.charge, best.group, .lessCredit)
         }
         return result
+    }
+}
+
+// MARK: - Reading what each item is
+
+/// Product listings are written to be found, not understood ("Cardia 7: Purified Provinal Omega 7
+/// Fatty Acids - Compare to Omega 3-6-9 and See…"). The model reads each one and says what it is
+/// and where it belongs in the budget. Only the listing text is sent: no prices, dates or names.
+enum ItemSorter {
+    static func instructions() -> String {
+        """
+        You tidy a household's online shopping history for a personal budgeting app. Each numbered item is a product \
+        listing exactly as the shop wrote it. For each, give:
+
+        - name: what the thing is, the way a person would say it, under 45 characters. Keep the brand when it is the \
+        point ("Sonos Move 2 speaker", "Aesop hand wash", "Counter Culture coffee beans"), drop sizes, counts, colours \
+        and sales talk. For a book, film or album, the title.
+        - category: exactly one from this list (use the names exactly): \(Category.spendingCases.map(\.rawValue).joined(separator: "; "))
+
+        Rules:
+        - Food, drink and pantry goods to have at home are Groceries. Wine, liquor and spirits are "Wine & Spirits".
+        - Vitamins, supplements, medicine, first aid and fitness gear are "Health & Fitness". Soap, skincare, haircare, \
+        cosmetics, shaving and dental care are "Personal Care".
+        - Cookware, kitchen tools, furniture, bedding, storage, cleaning supplies, light bulbs, tools, hardware and \
+        garden things are Home.
+        - Books, ebooks, audiobooks, music, films, games and toys are Entertainment.
+        - A membership or a plan billed again and again (Prime, Kindle Unlimited, Audible) is Subscriptions.
+        - Clothes, shoes, bags, electronics, chargers, office supplies and anything bought for no particular room of \
+        the house are Shopping. Luggage and travel gear are Travel. Things for the car are "Car & Transportation".
+        - If the person made a category of their own that fits (for example one for children or pets), prefer it.
+        - Use Other only when the listing really doesn't say what the thing is.
+
+        Reply with JSON only: {"results": [{"id": 1, "name": "…", "category": "…"}]} with one result per item.
+        """
+    }
+
+    /// Nil when the model couldn't be reached; listings it skipped are simply absent.
+    static func sort(_ listings: [String]) async -> [String: OrderBook.ItemSort]? {
+        guard !listings.isEmpty else { return [:] }
+        let payload = listings.enumerated().map { ["id": $0 + 1, "listing": String($1.prefix(220))] as [String: Any] }
+        guard let body = try? JSONSerialization.data(withJSONObject: ["items": payload]), let user = String(data: body, encoding: .utf8) else { return nil }
+        let system = instructions()
+        let reply = await Timeout.run(120) {
+            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 60 * listings.count + 2_000)
+        }
+        guard let reply, let results = CloudAI.object(from: reply)?["results"] as? [[String: Any]] else { return nil }
+        var out: [String: OrderBook.ItemSort] = [:]
+        for result in results {
+            guard let id = (result["id"] as? Int) ?? (result["id"] as? String).flatMap(Int.init), (1...listings.count).contains(id),
+                  let wanted = result["category"] as? String,
+                  let category = Category.spendingCases.first(where: { $0.rawValue.caseInsensitiveCompare(wanted) == .orderedSame }) else { continue }
+            var name = ((result["name"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if name.isEmpty || name.count > 70 { name = String(listings[id - 1].prefix(60)) }
+            out[listings[id - 1]] = .init(name: name, category: category.rawValue)
+        }
+        return out
     }
 }
