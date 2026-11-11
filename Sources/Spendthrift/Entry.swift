@@ -37,6 +37,46 @@ enum Entry {
             }
             exit(0)
         }
+        if let i = args.firstIndex(of: "--read-test"), i + 3 < args.count {
+            // Test aid: --read-test <model> <outdir> files… Has one model read each statement the way the
+            // app would ask it to, and writes what it read, so models can be compared on the same pages.
+            let model = args[i + 1], out = URL(fileURLWithPath: args[i + 2], isDirectory: true)
+            try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+            let files = Array(args[(i + 3)...])
+            Task {
+                await CloudAI.$modelOverride.withValue(model) {
+                    await withTaskGroup(of: Void.self) { group in
+                        var next = 0
+                        func start() {
+                            guard next < files.count else { return }
+                            let path = files[next]; next += 1
+                            group.addTask {
+                                let url = URL(fileURLWithPath: path)
+                                guard let doc = PDFDocument(url: url) else { return }
+                                let pages = (0..<min(doc.pageCount, 200)).compactMap { doc.page(at: $0) }
+                                let stored = pages.compactMap(\.string).joined(separator: "\n")
+                                let text = await MainActor.run { pages.map(PDFStatement.positionalText).joined(separator: "\n") }
+                                let closing = PDFStatement.detectClosingDate(stored) ?? .now
+                                let started = Date.now
+                                let reading = await CloudStatementReader.read(text: text, closing: closing)
+                                let rows = (reading?.rows ?? []).map { [$0.date, $0.description, String(format: "%.2f", $0.amount)] }
+                                let result: [String: Any] = ["file": url.lastPathComponent, "read": reading != nil, "verified": reading?.verified ?? false,
+                                                             "seconds": Date.now.timeIntervalSince(started), "rows": rows]
+                                if let data = try? JSONSerialization.data(withJSONObject: result) {
+                                    try? data.write(to: out.appendingPathComponent(url.lastPathComponent + ".json"))
+                                }
+                                print("READTEST \(model) \(url.lastPathComponent) rows \(rows.count) verified \(reading?.verified ?? false) \(String(format: "%.0fs", Date.now.timeIntervalSince(started)))")
+                            }
+                        }
+                        for _ in 0..<6 { start() }
+                        for await _ in group { start() }
+                    }
+                }
+                try? await Task.sleep(for: .seconds(2))   // let the last costs be noted
+                exit(0)
+            }
+            dispatchMain()
+        }
         if let i = args.firstIndex(of: "--check") {
             // Test aid: one line per file saying how it was read.
             Task { @MainActor in

@@ -18,8 +18,11 @@ enum CloudAI {
         ("anthropic/claude-opus-5.5", "Claude Opus 5.5 · most capable"),
     ]
 
+    /// For comparing models: use this one for everything inside the task, whatever Setup says.
+    @TaskLocal static var modelOverride: String?
+
     static var model: String {
-        get { UserDefaults.standard.string(forKey: "cloudModel") ?? defaultModel }
+        get { modelOverride ?? UserDefaults.standard.string(forKey: "cloudModel") ?? defaultModel }
         set { UserDefaults.standard.set(newValue, forKey: "cloudModel") }
     }
     /// Reading whole statements sends more than merchant names, so it has its own switch.
