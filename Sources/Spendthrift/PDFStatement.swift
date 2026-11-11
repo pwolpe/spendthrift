@@ -79,7 +79,11 @@ enum PDFStatement {
         // model read it too (when Tony's Mac has a key). It copes with layouts and scans the patterns
         // don't, and two independent readings that agree are as good as a printed total.
         let selfVerified = best.matched > 0 && best.mismatched.isEmpty
-        if !selfVerified, CloudAI.canReadStatements,
+        // A month when nothing happened: the statement says so itself (it closes on the balance it
+        // opened with). There is nothing to read, and it still proves the month is covered.
+        let emptyCheck = rows.isEmpty ? (emptyStatement(text) ?? positionalText.flatMap(emptyStatement)) : nil
+        let quiet = emptyCheck != nil
+        if !selfVerified, !quiet, CloudAI.canReadStatements,
            let cloud = await CloudStatementReader.read(text: positionalText ?? text, closing: closing) {
             let total = { (list: [CanonicalRow]) in (list.reduce(0) { $0 + $1.amount } * 100).rounded() / 100 }
             let agree = cloud.rows.count == rows.count && total(cloud.rows) == total(rows)
@@ -93,12 +97,12 @@ enum PDFStatement {
             }
         }
         // Without the cloud, and only when pattern matching found nothing, try the on-device model.
-        if rows.isEmpty, CategorySuggester.isAvailable {
+        if rows.isEmpty, !quiet, CategorySuggester.isAvailable {
             // Slow (several seconds a page), so only read pages that look like they list transactions.
             let candidates = pages.filter(looksLikeTransactions)
             rows = await Timeout.run(60 + 45 * Double(candidates.count)) { await aiExtract(pages: candidates, closing: closing) } ?? []
         }
-        guard !rows.isEmpty else { throw PDFError.noTransactions }
+        guard !rows.isEmpty || quiet else { throw PDFError.noTransactions }
 
         let head = String(text.prefix(1500))
         // A card statement mentions "savings" and "checking" in passing (rewards, payment instructions),
@@ -130,6 +134,7 @@ enum PDFStatement {
         } else if positionalText == nil {
             table.check = .scanned
         }
+        if let emptyCheck { table.check = emptyCheck }
         return table
     }
 
@@ -242,6 +247,20 @@ enum PDFStatement {
         return best?.0
     }
 
+    /// A statement that lists nothing: it prints a billing period and its opening and closing
+    /// balances, and no lines. Usually a month when nothing happened (the balances match, so it is
+    /// as good as verified). Rarely the bank printed a changed balance and no lines; that is kept
+    /// too, marked as not adding up, because the month is still accounted for.
+    static func emptyStatement(_ text: String) -> StatementCheck? {
+        func amount(after label: String) -> String? {
+            guard let r = text.range(of: "(?i)\\b(?:\(label)) balance[^0-9$-]{0,40}-?\\$?\\s?([0-9][0-9,]*\\.[0-9]{2})", options: .regularExpression) else { return nil }
+            return text[r].range(of: #"[0-9][0-9,]*\.[0-9]{2}$"#, options: .regularExpression).map { String(text[r][$0]) }
+        }
+        guard !statementMonths(text).isEmpty, let opening = amount(after: "beginning|previous|opening"),
+              let closing = amount(after: "ending|new|closing") else { return nil }
+        return opening == closing ? .verified : .mismatch("the balance changed, but the statement lists no transactions")
+    }
+
     static func detectLast4(_ text: String) -> String? {
         let pattern = #"(?i)(?:ending in|account ending|acct ending|account number|account #|card number)[^0-9]{0,40}?(?:[x*•\d]{1,}[\s-]){0,3}(\d{4,5})\b"#
         guard let re = try? NSRegularExpression(pattern: pattern),
@@ -271,7 +290,7 @@ enum PDFStatement {
             let days = cal.dateComponents([.day], from: start, to: end).day ?? 0
             return (20...40).contains(days) ? (start, end) : nil
         }
-        let named = #"\b([A-Z][a-z]{2})[a-z]*\.? (\d{1,2})(?:, (\d{4}))? ?[–—-] ?([A-Z][a-z]{2})[a-z]*\.? (\d{1,2}), (\d{4})"#
+        let named = #"\b([A-Z][a-z]{2})[a-z]*\.? (\d{1,2})(?:, (\d{4}))?\s*(?:[–—-]|through|to)?\s*([A-Z][a-z]{2})[a-z]*\.? (\d{1,2}), (\d{4})"#
         if let re = try? NSRegularExpression(pattern: named) {
             for m in re.matches(in: head, range: NSRange(head.startIndex..., in: head)) {
                 func group(_ i: Int) -> String? { Range(m.range(at: i), in: head).map { String(head[$0]) } }

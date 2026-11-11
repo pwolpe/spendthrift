@@ -362,7 +362,7 @@ enum ItemSorter {
         guard let body = try? JSONSerialization.data(withJSONObject: ["items": payload]), let user = String(data: body, encoding: .utf8) else { return nil }
         let system = instructions()
         let reply = await Timeout.run(120) {
-            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 60 * listings.count + 2_000)
+            try? await CloudAI.complete(job: "Reading order items", system: system, user: user, json: true, maxTokens: 60 * listings.count + 2_000)
         }
         guard let reply, let results = CloudAI.object(from: reply)?["results"] as? [[String: Any]] else { return nil }
         var out: [String: OrderBook.ItemSort] = [:]

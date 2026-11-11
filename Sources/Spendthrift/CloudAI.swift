@@ -54,7 +54,7 @@ enum CloudAI {
     /// - maxTokens: room for the whole reply, including any thinking the model does before it
     ///   writes. Too little and the answer is cut off mid-sentence, so be generous.
     /// - effort: how hard the model should think first ("low", "medium", "high"); nil = its default.
-    static func complete(system: String, user: String, json: Bool, maxTokens: Int, temperature: Double = 0,
+    static func complete(job: String, system: String, user: String, json: Bool, maxTokens: Int, temperature: Double = 0,
                          timeout: TimeInterval = 90, effort: String? = nil, web: Bool = false) async throws -> String {
         guard let key = CloudKey.load() else { throw CloudError.noKey }
         // SPENDTHRIFT_FAIL_CLOUD=credit|key|offline: behave as if the model had stopped working (for tests).
@@ -74,6 +74,7 @@ enum CloudAI {
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
             "max_tokens": maxTokens,
             "temperature": temperature,
+            "usage": ["include": true],     // the reply then says what it cost
         ]
         if json, !web { body["response_format"] = ["type": "json_object"] }
         // Let the model search the web (used to work out what an unfamiliar business is).
@@ -93,6 +94,7 @@ enum CloudAI {
                           let choices = object["choices"] as? [[String: Any]],
                           let message = choices.first?["message"] as? [String: Any],
                           let content = message["content"] as? String, !content.isEmpty else { throw CloudError.badReply }
+                    CloudSpend.note(job: job, model: (body["model"] as? String) ?? model, usage: object["usage"] as? [String: Any])
                     // Cut off for length: a partial answer is worse than none (half a JSON object).
                     if (choices.first?["finish_reason"] as? String) == "length" {
                         if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG CLOUD reply cut off at \(maxTokens) tokens") }
@@ -126,7 +128,7 @@ enum CloudAI {
     /// A tiny request to prove the key works.
     static func test() async -> String? {
         do {
-            _ = try await complete(system: "Reply with the single word OK.", user: "Hello", json: false, maxTokens: 5, timeout: 30)
+            _ = try await complete(job: "Checking the key", system: "Reply with the single word OK.", user: "Hello", json: false, maxTokens: 5, timeout: 30)
             return nil
         } catch {
             return (error as? LocalizedError)?.errorDescription ?? "Something went wrong."
@@ -394,7 +396,7 @@ enum LogoFinder {
         """
         let listing = names.enumerated().map { "\($0 + 1). \($1)" }.joined(separator: "\n")
         let reply = await Timeout.run(90) {
-            try? await CloudAI.complete(system: system, user: listing, json: true, maxTokens: 60 * names.count + 3_000, timeout: 80)
+            try? await CloudAI.complete(job: "Finding logos", system: system, user: listing, json: true, maxTokens: 60 * names.count + 3_000, timeout: 80)
         }
         guard let reply, let sites = CloudAI.object(from: reply)?["sites"] as? [[String: Any]] else { return nil }
         var out: [String: String] = Dictionary(uniqueKeysWithValues: names.map { ($0, "") }.reduce(into: [(String, String)]()) { acc, pair in
@@ -500,7 +502,7 @@ enum CloudSorter {
               let user = String(data: body, encoding: .utf8) else { return nil }
         let system = instructions(examples: examples)
         let reply = await Timeout.run(120) {
-            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 250 * items.count + 4_000)
+            try? await CloudAI.complete(job: "Sorting payees", system: system, user: user, json: true, maxTokens: 250 * items.count + 4_000)
         }
         guard let reply, let results = CloudAI.object(from: reply)?["results"] as? [[String: Any]] else { return nil }
         var out: [String: CloudVerdict] = [:]
@@ -667,7 +669,7 @@ enum CloudStatementReader {
         var sums: [String: Double] = [:], totals: [String: Double] = [:]
         for chunk in chunks {
             let reply = await Timeout.run(180) {
-                try? await CloudAI.complete(system: system, user: period + chunk, json: true, maxTokens: 40_000, timeout: 170)
+                try? await CloudAI.complete(job: "Reading statements", system: system, user: period + chunk, json: true, maxTokens: 40_000, timeout: 170)
             }
             guard let reply, let object = CloudAI.object(from: reply) else { return nil }
             for t in (object["transactions"] as? [[String: Any]]) ?? [] {
@@ -736,7 +738,7 @@ enum CloudImage {
         around ten seconds over a slower one of similar quality. Reply with JSON only: {"model": "<id exactly as listed>"}
         """
         let reply = await Timeout.run(30) {
-            try? await CloudAI.complete(system: system, user: lines.joined(separator: "\n"), json: true, maxTokens: 2_000, timeout: 25)
+            try? await CloudAI.complete(job: "Daily picture: planning", system: system, user: lines.joined(separator: "\n"), json: true, maxTokens: 2_000, timeout: 25)
         }
         if let reply, let choice = CloudAI.object(from: reply)?["model"] as? String, ids.contains(choice) {
             model = choice
@@ -816,7 +818,7 @@ enum CloudImage {
         let away = place.isEmpty ? "" : " This was bought on a trip: \(place). Set the daydream unmistakably there: its landscape, landmarks, weather and local color, with this business as part of the scene."
         let user = "Purchase: \(merchant) (\(category)), \(Money.format(amount)). This time, make the daydream \(flavor).\(away)\(who) Hats, helmets and masks stay off his head so the whole face shows."
         let reply = await Timeout.run(40) {
-            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 3_000, temperature: 1.0, timeout: 35)
+            try? await CloudAI.complete(job: "Daily picture: planning", system: system, user: user, json: true, maxTokens: 3_000, temperature: 1.0, timeout: 35)
         }
         guard let reply, let o = CloudAI.object(from: reply), var scene = (o["scene"] as? String), !scene.isEmpty else { return nil }
         if let holding = o["receipt"] as? String, !holding.isEmpty { scene += " " + holding }
@@ -885,6 +887,7 @@ enum CloudImage {
             "modalities": ["image", "text"],
             "image_config": ["aspect_ratio": "21:9"],
             "messages": [["role": "user", "content": content]],
+            "usage": ["include": true],
         ]
         var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, timeoutInterval: 150)
         request.httpMethod = "POST"
@@ -895,6 +898,7 @@ enum CloudImage {
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              CloudSpend.note(job: "Daily picture: drawing", model: model, usage: object["usage"] as? [String: Any]) == (),
               let message = (object["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any],
               let images = message["images"] as? [[String: Any]],
               let url = (images.first?["image_url"] as? [String: Any])?["url"] as? String,
@@ -919,6 +923,7 @@ extension CloudImage {
         let body: [String: Any] = [
             "model": DecisionSorter.handles(CloudAI.model) ? CloudAI.defaultModel : CloudAI.model,
             "max_tokens": 1_500,
+            "usage": ["include": true],
             "messages": [["role": "user", "content": [
                 ["type": "text", "text": question],
                 ["type": "image_url", "image_url": ["url": "data:image/\(picture.first == 0xFF ? "jpeg" : "png");base64," + picture.base64EncodedString()]],
@@ -933,6 +938,7 @@ extension CloudImage {
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              CloudSpend.note(job: "Daily picture: checking the receipt", model: (body["model"] as? String) ?? "", usage: object["usage"] as? [String: Any]) == (),
               let message = (object["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any],
               let text = message["content"] as? String, let o = CloudAI.object(from: text) else { return nil }
         let digits = { (s: String) in s.filter { $0.isNumber } }
@@ -997,7 +1003,7 @@ enum Huncher {
         }
         let context = notes.isEmpty ? "" : "\n\nNotes the person has written about other things (context only):\n" + notes.joined(separator: "\n")
         let reply = await Timeout.run(90) {
-            try? await CloudAI.complete(system: system, user: lines.joined(separator: "\n") + context, json: true, maxTokens: 8_000, temperature: 0.2, timeout: 85)
+            try? await CloudAI.complete(job: "Best guesses", system: system, user: lines.joined(separator: "\n") + context, json: true, maxTokens: 8_000, temperature: 0.2, timeout: 85)
         }
         guard let reply, let guesses = CloudAI.object(from: reply)?["guesses"] as? [String: Any] else { return [:] }
         var out: [String: (text: String, category: Category?)] = [:]
@@ -1045,7 +1051,7 @@ enum Explainer {
         """
         let user = "Statement text: \(Redactor.scrub(statementText))\nCurrently called: \(currentName)\nTypical amount: \(Money.format(abs(amount)))\nThe person says: \(said)"
         let reply = await Timeout.run(30) {
-            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 2_000, timeout: 25)
+            try? await CloudAI.complete(job: "Explaining a charge", system: system, user: user, json: true, maxTokens: 2_000, timeout: 25)
         }
         guard let reply, let o = CloudAI.object(from: reply), let category = (o["category"] as? String)?.trimmingCharacters(in: .whitespaces),
               !category.isEmpty else { return nil }
@@ -1089,7 +1095,7 @@ enum WebLookup {
         }
         guard let data = try? JSONSerialization.data(withJSONObject: payload), let user = String(data: data, encoding: .utf8) else { return [:] }
         let reply = await Timeout.run(120) {
-            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 4_000, timeout: 110, web: true)
+            try? await CloudAI.complete(job: "Looking payees up on the web", system: system, user: user, json: true, maxTokens: 4_000, timeout: 110, web: true)
         }
         guard let reply, let results = CloudAI.object(from: reply)?["results"] as? [[String: Any]] else { return [:] }
         var out: [String: CloudVerdict] = [:]
@@ -1143,7 +1149,7 @@ enum Discoverer {
         if !notes.isEmpty { user = "The person's notes:\n" + notes.joined(separator: "\n") + "\n\nCharges:\n" + user }
         let text = user
         let reply = await Timeout.run(200) {
-            try? await CloudAI.complete(system: system, user: text, json: true, maxTokens: 12_000, timeout: 190, effort: "medium")
+            try? await CloudAI.complete(job: "What was noticed", system: system, user: text, json: true, maxTokens: 12_000, timeout: 190, effort: "medium")
         }
         guard let reply, let list = CloudAI.object(from: reply)?["findings"] as? [[String: Any]] else { return nil }
         return list.compactMap { item in
@@ -1194,7 +1200,7 @@ enum Forecaster {
         if !repeating.isEmpty { user += "\n\nCharges that repeat every month:\n" + repeating.joined(separator: "\n") }
         if !notes.isEmpty { user += "\n\nNotes the person wrote:\n" + notes.joined(separator: "\n") }
         let reply = await Timeout.run(40) {
-            try? await CloudAI.complete(system: system, user: user, json: true, maxTokens: 3_000, timeout: 35)
+            try? await CloudAI.complete(job: "Forecast", system: system, user: user, json: true, maxTokens: 3_000, timeout: 35)
         }
         func number(_ any: Any?) -> Double? { (any as? Double) ?? (any as? Int).map(Double.init) ?? (any as? String).flatMap(MoneyParsing.parse) }
         guard let reply, let o = CloudAI.object(from: reply), let amount = number(o["amount"]), amount > 0 else { return nil }
@@ -1266,7 +1272,7 @@ enum StoryFinder {
                 "\(i + 1) | \(l.date) | \(String(Redactor.scrub(l.text).prefix(60))) | \(String(format: "%.2f", l.amount)) | \(l.category)"
             }.joined(separator: "\n")
             let reply = await Timeout.run(600) {
-                try? await CloudAI.complete(system: system, user: listing, json: true, maxTokens: 64_000, timeout: 590, effort: "medium")
+                try? await CloudAI.complete(job: "Finding trips", system: system, user: listing, json: true, maxTokens: 64_000, timeout: 590, effort: "medium")
             }
             if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
                 print("DEBUG STORIES sent \(numbered.count) lines (\(listing.count) chars); reply \(reply?.count ?? -1) chars; ends: \(String((reply ?? "").suffix(80)).replacingOccurrences(of: "\n", with: " "))")
@@ -1311,7 +1317,7 @@ enum CloudColumnMapper {
         purchases_are_negative: true if money spent appears as negative numbers in the amount column.
         """
         let reply = await Timeout.run(60) {
-            try? await CloudAI.complete(system: system, user: "Columns: \(header)\n\nRows:\n\(sample)", json: true, maxTokens: 300, timeout: 50)
+            try? await CloudAI.complete(job: "Reading spreadsheets", system: system, user: "Columns: \(header)\n\nRows:\n\(sample)", json: true, maxTokens: 300, timeout: 50)
         }
         guard let reply, let o = CloudAI.object(from: reply) else { return nil }
         func column(_ key: String) -> Int? {
@@ -1335,7 +1341,7 @@ enum CloudWriter {
     static func line(system: String, facts: String, maxTokens: Int, temperature: Double) async -> String? {
         guard CloudAI.isEnabled else { return nil }
         return await Timeout.run(40) {
-            try? await CloudAI.complete(system: system, user: facts, json: false, maxTokens: maxTokens, temperature: temperature, timeout: 35)
+            try? await CloudAI.complete(job: "Captions and summaries", system: system, user: facts, json: false, maxTokens: maxTokens, temperature: temperature, timeout: 35)
         }?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -1354,7 +1360,7 @@ enum CloudWriter {
         with no time mentioned use that whole range. "Last month" is \(now.adding(-1).key). "This year" is \(now.year)-01 to \(last.key).
         """
         let reply = await Timeout.run(30) {
-            try? await CloudAI.complete(system: system, user: question, json: true, maxTokens: 150, timeout: 25)
+            try? await CloudAI.complete(job: "Captions and summaries", system: system, user: question, json: true, maxTokens: 150, timeout: 25)
         }
         guard let reply, let o = CloudAI.object(from: reply),
               let metric = (o["metric"] as? String).flatMap({ SpendingQuery.Metric(rawValue: $0.lowercased()) }) else { return nil }

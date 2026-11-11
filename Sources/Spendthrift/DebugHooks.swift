@@ -198,7 +198,7 @@ enum DebugHooks {
                 for e in c.early { print("   EARLY \(e.date) \(e.amount)") }
                 for u in c.unexplained { print("   UNEXPLAINED \(u.date) \(u.amount)") }
             }
-            for m in store.missingStatements { print("TIEOUT MONTHS \(m.summary)") }
+            for m in store.missingStatements { print("TIEOUT MONTHS \(m.account): \(CoverageCard.stretches(m.months))") }
             NSApp.terminate(nil); return
         }
         // SPENDTHRIFT_HUNCH=1: ask for a best guess at every place on Double-Check, print them, then quit.

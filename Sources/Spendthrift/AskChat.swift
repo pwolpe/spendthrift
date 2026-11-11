@@ -213,7 +213,7 @@ enum ChatAnalyst {
         let system = planPrompt(store: store)
         let ask = conversation + "Question: \(question)"
         let planReply = await Timeout.run(45) {
-            try? await CloudAI.complete(system: system, user: ask, json: true, maxTokens: 6_000, timeout: 40)
+            try? await CloudAI.complete(job: "Answering questions", system: system, user: ask, json: true, maxTokens: 6_000, timeout: 40)
         }
         guard let planReply, let plan = CloudAI.object(from: planReply),
               let wanted = plan["queries"] as? [[String: Any]], !wanted.isEmpty else { return nil }
@@ -237,7 +237,7 @@ enum ChatAnalyst {
         nothing matched, say so simply and suggest what to try. No lists, no headings, no emoji.
         """
         let written = await Timeout.run(45) {
-            try? await CloudAI.complete(system: writer, user: "\(conversation)Question: \(question)\n\nFigures computed by the app:\n\(factsText)\(notesText)",
+            try? await CloudAI.complete(job: "Answering questions", system: writer, user: "\(conversation)Question: \(question)\n\nFigures computed by the app:\n\(factsText)\(notesText)",
                                         json: false, maxTokens: 4_000, temperature: 0.3, timeout: 40)
         }?.trimmingCharacters(in: .whitespacesAndNewlines)
 

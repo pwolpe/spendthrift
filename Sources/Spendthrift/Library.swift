@@ -63,6 +63,8 @@ struct Library: Codable {
     /// Trips and events the app noticed, and which data they were worked out from.
     var stories: [Story]?
     var storiesBasis: String?
+    /// The spending each calendar year's trips were worked out from, so only a year that changed is read again.
+    var storyYears: [String: String]?
     var dismissedStories: Set<String>?
     /// Charges Tony moved by hand: charge id to the trip it belongs to (a trip's fingerprint), or "" for none.
     /// These win over whatever the model decides, now and every time it looks again.
@@ -92,6 +94,7 @@ struct Library: Codable {
         customCategories = (try? c.decodeIfPresent(Lossy<CustomCategory>.self, forKey: .customCategories))?.values
         stories = (try? c.decodeIfPresent(Lossy<Story>.self, forKey: .stories))?.values
         storiesBasis = try? c.decodeIfPresent(String.self, forKey: .storiesBasis)
+        storyYears = try? c.decodeIfPresent([String: String].self, forKey: .storyYears)
         dismissedStories = try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedStories)
         storyChoices = try? c.decodeIfPresent([String: String].self, forKey: .storyChoices)
         discoveries = (try? c.decodeIfPresent(Lossy<Discovery>.self, forKey: .discoveries))?.values

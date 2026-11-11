@@ -54,8 +54,9 @@ enum StatementReader {
         case "pdf", _ where Scans.imageExtensions.contains(ext):
             let table = ext == "pdf" ? try await PDFStatement.table(from: url, password: password)
                                      : try await PDFStatement.table(fromImage: url)
-            let rows = Normalizer.rows(from: table, mapping: PDFStatement.mapping).rows
-            guard !rows.isEmpty else { throw ReadError.noTransactions }
+            let rows = table.rows.isEmpty ? [] : Normalizer.rows(from: table, mapping: PDFStatement.mapping).rows
+            // No lines is fine when the reader vouched for it: a statement for a month nothing happened in.
+            guard !rows.isEmpty || (table.rows.isEmpty && table.check != .none) else { throw ReadError.noTransactions }
             return .ready(ParsedStatement(rows: rows, signature: table.signature,
                                           suggestedName: table.suggestedName ?? accountName(for: url), check: table.check, months: table.months))
         case "ofx", "qfx", "qbo":

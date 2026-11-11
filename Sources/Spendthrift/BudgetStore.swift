@@ -125,7 +125,7 @@ final class BudgetStore {
         }
         refreshDownloads()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { BudgetStore.shared.saveNow() }
+            MainActor.assumeIsolated { BudgetStore.shared.saveNow(); CloudSpend.shared.saveNow() }
         }
         Task { await sortRemaining() }
         Task { await notePeriodsIfNeeded() }
@@ -299,6 +299,9 @@ final class BudgetStore {
             print("DEBUG ORDERS read \(orders.sorted?.count ?? 0) listings, \(failures) failed requests")
         }
     }
+
+    /// A file that was already added, exactly as it is: skipped without being read.
+    private struct AlreadyHere: Error {}
 
     /// For tests: add files and return when they're in.
     func importFilesAndWait(_ urls: [URL]) async { await importFilesAsync(urls) }
@@ -1022,14 +1025,19 @@ final class BudgetStore {
 
     private func findDiscoveriesIfNeeded() async {
         guard CloudAI.isEnabled, !isFindingDiscoveries, !isImporting, !isSuggesting, let last = months.last else { return }
-        let basis = storiesBasis
+        // The last twelve months of real spending: recent enough to act on. Only a change inside
+        // those months is a reason to read them again; an old statement added today is not.
+        let start = last.adding(-11)
+        let recentBasis = { () -> String in
+            let recent = self.transactions.filter { $0.month >= start }
+            return "\(start.key)|\(recent.count)|\(Int(recent.reduce(0) { $0 + abs($1.amount) }))"
+        }
+        let basis = recentBasis()
         guard library.discoveriesBasis != basis else { return }
         isFindingDiscoveries = true
         defer { isFindingDiscoveries = false }
-        // The last twelve months of real spending: recent enough to act on.
-        let start = last.adding(-11)
         guard let found = await discover(in: transactions.filter { $0.month >= start }) else { return }
-        guard storiesBasis == basis else { return }
+        guard recentBasis() == basis else { return }
         library.discoveries = found
         library.discoveriesBasis = basis
         withAnimation(.snappy) { changed() }
@@ -1127,21 +1135,66 @@ final class BudgetStore {
         "\(library.entries.count)|\(Int(library.entries.reduce(0) { $0 + abs($1.amount) }))"
     }
 
-    private func findStoriesIfNeeded() async {
-        guard CloudAI.isEnabled, !isFindingStories, !isImporting, !isSuggesting else { return }
-        let basis = storiesBasis
-        guard library.storiesBasis != basis else { return }
-        isFindingStories = true
-        defer { isFindingStories = false }
-        let lines = transactions.filter { $0.countsAsSpending && !$0.isUnknown }.map { t in
+    /// What the trip finder reads: every charge that counts as spending.
+    private func storyLines() -> [StoryFinder.Line] {
+        transactions.filter { $0.countsAsSpending && !$0.isUnknown }.map { t in
             StoryFinder.Line(id: t.id, date: DateParsing.iso.string(from: t.date),
                              text: t.note.map { "\(t.description) [the person's note: \($0.prefix(160))]" } ?? t.description,
                              amount: t.amount, category: t.category.displayName)
         }
-        guard let found = await StoryFinder.find(lines) else { return }      // offline: try again next time
-        guard storiesBasis == basis else { return }                          // more arrived meanwhile; a newer pass will run
+    }
+    nonisolated private static func basis(_ lines: [StoryFinder.Line]) -> String {
+        "\(lines.count)|\(Int(lines.reduce(0) { $0 + abs($1.amount) }))"
+    }
+
+    private func findStoriesIfNeeded() async {
+        guard CloudAI.isEnabled, !isFindingStories, !isImporting, !isSuggesting else { return }
+        let basis = storiesBasis
+        // Trips found before the app kept track year by year: if they are up to date, note each
+        // year as read, so the next statement added doesn't send every year again.
+        if library.storyYears == nil, library.storiesBasis == basis, library.stories != nil {
+            library.storyYears = Dictionary(grouping: storyLines(), by: { String($0.date.prefix(4)) }).mapValues(Self.basis)
+            changed()
+        }
+        guard library.storiesBasis != basis else { return }
+        isFindingStories = true
+        defer { isFindingStories = false }
+        let lines = storyLines()
         let before = Set(stories.map(\.fingerprint))
-        library.stories = found
+        if lines.count <= 3_500 {
+            // A short history goes in one request, so a trip over New Year isn't cut in two.
+            guard let found = await StoryFinder.find(lines) else { return }      // offline: try again next time
+            guard storiesBasis == basis else { return }                          // more arrived meanwhile; a newer pass will run
+            library.stories = found
+            library.storyYears = Dictionary(grouping: lines, by: { String($0.date.prefix(4)) }).mapValues(Self.basis)
+        } else {
+            // A long history is read a calendar year at a time, and only the years whose spending
+            // changed since they were last read. Adding old statements leaves the other years alone.
+            let byYear = Dictionary(grouping: lines, by: { String($0.date.prefix(4)) })
+            let known = library.storyYears ?? [:]
+            let stale = byYear.filter { known[$0.key] != Self.basis($0.value) }.keys.sorted()
+            var read: [String: [Story]] = [:]
+            await withTaskGroup(of: (String, [Story]?).self) { group in
+                var next = 0
+                func start() { if next < stale.count { let year = stale[next]; next += 1; let list = byYear[year] ?? []; group.addTask { (year, await StoryFinder.find(list)) } } }
+                for _ in 0..<3 { start() }
+                for await (year, found) in group { if let found { read[year] = found }; start() }
+            }
+            // Keep what came back for a year only if that year still looks the way it did when it was sent.
+            let now = Dictionary(grouping: storyLines(), by: { String($0.date.prefix(4)) })
+            let fresh = read.filter { Self.basis(now[$0.key] ?? []) == Self.basis(byYear[$0.key] ?? []) }
+            var yearOf: [UUID: String] = [:]
+            for entry in library.entries { yearOf[entry.id] = String(entry.date.prefix(4)) }
+            let kept = (library.stories ?? []).filter { story in !story.entryIDs.contains { fresh[yearOf[$0] ?? ""] != nil } }
+            library.stories = (kept + fresh.values.flatMap { $0 }).sorted { $0.start > $1.start }
+            var years = known.filter { now[$0.key] != nil }
+            for year in fresh.keys { years[year] = Self.basis(byYear[year] ?? []) }
+            library.storyYears = years
+            if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
+                print("DEBUG STORIES years read again: \(stale) of \(byYear.keys.sorted()); kept \(kept.count) trips from the others")
+            }
+            guard fresh.count == stale.count, storiesBasis == basis else { withAnimation(.snappy) { changed() }; return }   // the rest next time
+        }
         library.storiesBasis = basis
         withAnimation(.snappy) { changed() }
         if let fresh = stories.first(where: { !before.contains($0.fingerprint) }), !before.isEmpty || stories.count == 1 {
@@ -1552,6 +1605,8 @@ final class BudgetStore {
         var attached = 0
         // Statements already read, whose originals were never kept: re-read without the model, only to link them.
         let relink = library.entries.isEmpty ? [] : library.importedHashes.subtracting((library.sources ?? []).map(\.id))
+        let alreadyHere = library.importedHashes.intersection((library.sources ?? []).map(\.id))
+        var already = 0
         isImporting = true
         // A pile of statements (or the very first one) gets the full show; one new statement doesn't,
         // and neither do statements that are only coming back so their originals can be kept.
@@ -1630,6 +1685,8 @@ final class BudgetStore {
                                                         candidates: accounts.filter { $0.signature == signature },
                                                         suggestedName: name, signature: signature))
                 }
+            } catch is AlreadyHere {
+                already += 1
             } catch {
                 // Inside a dropped folder, files that aren't statements (a tax form, a receipt) are just skipped.
                 if !(fromFolder.contains(url) && url.pathExtension.lowercased() == "pdf") {
@@ -1648,6 +1705,9 @@ final class BudgetStore {
                     do {
                         let data = try Data(contentsOf: url)
                         let hash = Self.hash(data)
+                        // The very same file, already read and its original kept: nothing to learn from
+                        // reading it again, and reading can mean asking the model, which costs money.
+                        if alreadyHere.contains(hash) { return (index, .failure(AlreadyHere())) }
                         if relink.contains(hash), let outcome = try? await CloudAI.$offline.withValue(true, operation: { try await StatementReader.read(url, data: data) }) {
                             return (index, .success((hash, data, outcome)))
                         }
@@ -1676,8 +1736,11 @@ final class BudgetStore {
             issues.append(ImportIssue(file: dropped[0].lastPathComponent, reason: "There were no statements in that folder."))
         }
         if !issues.isEmpty, !automatic { importIssues = issues }
+        if already > 0, added == 0, attached == 0, issues.isEmpty, pendingImports.isEmpty, !automatic {
+            showToast(already == 1 ? "That statement was already here." : "All \(already) of those statements were already here.", symbol: "checkmark.circle")
+        }
         if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
-            print("DEBUG IMPORT files \(urls.count) added \(added) verified \(verified) scanned \(scanned) mismatched \(mismatches) issues \(issues.count)")
+            print("DEBUG IMPORT files \(urls.count) already here \(already) added \(added) verified \(verified) scanned \(scanned) mismatched \(mismatches) issues \(issues.count)")
         }
         if !touched.isEmpty, added > 0 || !automatic {
             lastImport = batch

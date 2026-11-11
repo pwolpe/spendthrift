@@ -22,6 +22,7 @@ struct AccountsView: View {
                 DownloadsBanner()
                 CoverageCard()
                 if !store.cardCoverage.isEmpty { CardCoverageCard(coverage: store.cardCoverage) }
+                SpendCard()
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16)], spacing: 16) {
                     ForEach(store.accounts) { AccountCard(account: $0) }
                 }
@@ -300,4 +301,48 @@ struct CoverageCard: View {
         .frame(height: 20)
         .frame(maxWidth: .infinity)
     }
+}
+
+/// What the AI model cost, by job: where the money goes, so it can be steered.
+struct SpendCard: View {
+    @State private var spend = CloudSpend.shared
+    @AppStorage("spendSpan") private var span = 1
+
+    var body: some View {
+        let lines = spend.lines(days: span)
+        if !spend.days.isEmpty {
+            let total = lines.reduce(0) { $0 + $1.tally.cost }
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline) {
+                        SectionHeader(title: "What the AI cost", subtitle: "Each request to the model, as OpenRouter priced it, added up by job.")
+                        Spacer()
+                        Picker("When", selection: $span) {
+                            Text("Today").tag(1); Text("7 Days").tag(7); Text("30 Days").tag(30)
+                        }
+                        .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    }
+                    if lines.isEmpty {
+                        Text("Nothing was asked of the model in this stretch.").font(.callout).foregroundStyle(.secondary)
+                    } else {
+                        VStack(spacing: 7) {
+                            ForEach(lines) { line in
+                                ReceiptLine(value: Self.money(line.tally.cost)) {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(line.job).font(.callout)
+                                        Text("\(line.tally.requests) \(line.tally.requests == 1 ? "request" : "requests") · \(line.model.components(separatedBy: "/").last ?? line.model) · \((line.tally.input / 1000).formatted())k in, \((line.tally.output / 1000).formatted())k out")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            ReceiptRule()
+                            ReceiptLine(value: Self.money(total), bold: true) { Text("TOTAL").font(Theme.mono(13, .bold)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func money(_ cost: Double) -> String { cost < 1 ? String(format: "$%.3f", cost) : Money.format(cost) }
 }
