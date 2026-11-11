@@ -219,6 +219,8 @@ struct SourceFile: Codable, Identifiable, Hashable {
     /// The billing period the statement itself prints (yyyy-MM-dd), when it prints one. "" = looked, none.
     var periodStart: String?
     var periodEnd: String?
+    /// Why it's marked "mismatch", in a sentence: which totals didn't tie, or which lines two readings disagreed on.
+    var checkNote: String?
 
     var isPDF: Bool { ext == "pdf" }
     var isPicture: Bool { Scans.imageExtensions.contains(ext) }

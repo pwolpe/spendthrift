@@ -2005,7 +2005,7 @@ final class BudgetStore {
         }
         switch check {
         case .verified: source.check = "verified"
-        case .mismatch: source.check = "mismatch"
+        case .mismatch(let note): source.check = "mismatch"; source.checkNote = note
         case .scanned: source.check = "scanned"
         case .none: break
         }

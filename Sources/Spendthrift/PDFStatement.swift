@@ -95,6 +95,24 @@ enum PDFStatement {
                 rows = cloud.rows
                 cloudCheck = positionalText == nil ? .scanned : StatementCheck.none
             }
+            // Nothing printed on the statement vouches for this reading. Have a different model read it
+            // too: if the two agree line for line, that is as good as a total; if not, say which lines.
+            if cloudCheck != .verified, !rows.isEmpty,
+               let second = await CloudAI.$modelOverride.withValue(CloudStatementReader.secondReader, operation: {
+                   await CloudStatementReader.read(text: positionalText ?? text, closing: closing, job: "Reading statements: second opinion")
+               }) {
+                let differ = CloudStatementReader.differences(rows, second.rows)
+                if differ.isEmpty {
+                    cloudCheck = .verified
+                } else if summaryMatches(second.rows) {
+                    // They disagree, and the statement's own summary settles it in the second reading's favour.
+                    rows = second.rows
+                    cloudCheck = .verified
+                } else {
+                    cloudCheck = .mismatch("two readings of this statement disagree on \(differ.count == 1 ? "one line" : "\(differ.count) lines"): "
+                                           + differ.prefix(8).joined(separator: "; ") + (differ.count > 8 ? "; and more" : ""))
+                }
+            }
         }
         // Without the cloud, and only when pattern matching found nothing, try the on-device model.
         if rows.isEmpty, !quiet, CategorySuggester.isAvailable {
@@ -102,6 +120,8 @@ enum PDFStatement {
             let candidates = pages.filter(looksLikeTransactions)
             rows = await Timeout.run(60 + 45 * Double(candidates.count)) { await aiExtract(pages: candidates, closing: closing) } ?? []
         }
+        // Whoever read it, a purchase paid with points is not a charge.
+        rows = removePointsPaid(rows, text: positionalText ?? text)
         guard !rows.isEmpty || quiet else { throw PDFError.noTransactions }
 
         let head = String(text.prefix(1500))
@@ -245,6 +265,32 @@ enum PDFStatement {
             }
         }
         return best?.0
+    }
+
+    /// Card statements list purchases that were paid with reward points in their own section
+    /// ("Shop with Points Activity": date, shop, amount, points used). Those never reached the
+    /// balance, so a reading that picked them up as charges has them taken out again. A line is
+    /// only dropped when its amount appears nowhere else on the statement.
+    static func removePointsPaid(_ rows: [CanonicalRow], text: String) -> [CanonicalRow] {
+        guard let start = text.range(of: "shop with points activity", options: .caseInsensitive) else { return rows }
+        let section = String(text[start.lowerBound...].prefix(3_000))
+        guard let re = try? NSRegularExpression(pattern: #"(?m)^(\d\d)/(\d\d) .{4,70}? (\d[\d,]*\.\d\d) ([\d,]+)\s*$"#) else { return rows }
+        var paid: [(day: String, amount: Double)] = []
+        for m in re.matches(in: section, range: NSRange(section.startIndex..., in: section)) {
+            func group(_ i: Int) -> String { Range(m.range(at: i), in: section).map { String(section[$0]) } ?? "" }
+            guard let amount = Double(group(3).replacingOccurrences(of: ",", with: "")),
+                  let points = Double(group(4).replacingOccurrences(of: ",", with: "")), abs(points - amount * 100) <= 1 else { continue }
+            // Printed anywhere else too? Then it is also a real charge, and stays.
+            let printed = text.components(separatedBy: group(3)).count - 1
+            if printed <= 1 { paid.append(("\(group(1))-\(group(2))", amount)) }
+        }
+        guard !paid.isEmpty else { return rows }
+        var left = paid
+        return rows.filter { row in
+            guard row.amount > 0, let hit = left.firstIndex(where: { abs($0.amount - row.amount) < 0.005 && row.date.hasSuffix($0.day) }) else { return true }
+            left.remove(at: hit)
+            return false
+        }
     }
 
     /// A statement that lists nothing: it prints a billing period and its opening and closing

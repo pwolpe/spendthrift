@@ -294,7 +294,7 @@ private struct StatementRow: View {
                     .help("Its lines add up to the totals the statement prints.")
             } else if source.check == "mismatch" {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.caution).font(.caption)
-                    .help("What was read doesn't add up to the totals this statement prints. Worth a look.")
+                    .help(source.checkNote.map { "Worth a look: \($0)" } ?? "What was read doesn't add up to the totals this statement prints. Worth a look.")
             }
         }
         .padding(.vertical, 2)

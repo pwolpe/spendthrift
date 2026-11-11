@@ -640,7 +640,9 @@ enum CloudStatementReader {
     small errors; personal details have been replaced with placeholders like [name] and [number]).
 
     List every individual transaction. Do NOT include balances, summaries, totals, interest-rate tables, rewards, \
-    or the captions under pictures of paid checks.
+    or the captions under pictures of paid checks. A section about points or rewards ("Shop with Points Activity", \
+    "Points redeemed") lists purchases that were paid with points, not charged to the account: leave every line of \
+    such a section out. Checks listed under a heading like "Checks Paid" are transactions: include each one.
 
     For each transaction give:
     - date: YYYY-MM-DD. Statements often print only month/day; use the statement period to work out the year.
@@ -657,7 +659,27 @@ enum CloudStatementReader {
     "totals": [{"section": "", "amount": 0}]}
     """
 
-    static func read(text: String, closing: Date) async -> Reading? {
+    /// The model asked for a second, independent reading when the first can't be checked against printed
+    /// totals. Chosen because it errs differently from the main model, so the two agreeing means something.
+    static let secondReader = "google/gemini-3.7-flash"
+
+    /// Lines one reading has and the other doesn't, matching on amount and allowing a few days
+    /// between dates (one reading may give the purchase date, the other the posting date).
+    static func differences(_ a: [CanonicalRow], _ b: [CanonicalRow]) -> [String] {
+        func day(_ row: CanonicalRow) -> Int { OrderMatcher.dayNumber(row.date) }
+        var rest = b, only: [(CanonicalRow, String)] = []
+        for row in a {
+            let near = rest.indices.filter { abs(rest[$0].amount - row.amount) < 0.005 && abs(day(rest[$0]) - day(row)) <= 5 }
+            if let hit = near.min(by: { abs(day(rest[$0]) - day(row)) < abs(day(rest[$1]) - day(row)) }) { rest.remove(at: hit) }
+            else { only.append((row, "only in the first reading")) }
+        }
+        only += rest.map { ($0, "only in the second reading") }
+        return only.sorted { $0.0.date < $1.0.date }.map { row, which in
+            "\(row.date) \(row.description.prefix(40)) \(Money.format(abs(row.amount)))\(row.amount < 0 ? " in" : "") (\(which))"
+        }
+    }
+
+    static func read(text: String, closing: Date, job: String = "Reading statements") async -> Reading? {
         // Send it in pieces of a few pages; statements run to tens of pages, much of it legal text.
         var chunks: [String] = [], current = ""
         for line in Redactor.blank(text).components(separatedBy: .newlines) {
@@ -672,7 +694,7 @@ enum CloudStatementReader {
         var sums: [String: Double] = [:], totals: [String: Double] = [:]
         for chunk in chunks {
             let reply = await Timeout.run(180) {
-                try? await CloudAI.complete(job: "Reading statements", system: system, user: period + chunk, json: true, maxTokens: 40_000, timeout: 170)
+                try? await CloudAI.complete(job: job, system: system, user: period + chunk, json: true, maxTokens: 40_000, timeout: 170)
             }
             guard let reply, let object = CloudAI.object(from: reply) else { return nil }
             for t in (object["transactions"] as? [[String: Any]]) ?? [] {
