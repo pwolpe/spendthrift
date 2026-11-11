@@ -209,6 +209,21 @@ enum DebugHooks {
                     EditableName(text: .constant("Pastis"), font: .system(size: 19, weight: .bold, design: .serif), centered: true, commit: {}).frame(maxWidth: .infinity)
                 }.padding(24)
             }
+            if !store.orderRows.isEmpty {
+                await snap("45-orders", outDir) { OrdersView(scrolls: false) }
+                store.orderSearch = "coffee"
+                await snap("46-orders-search", outDir) { OrdersView(scrolls: false) }
+                store.orderSearch = ""
+                let spent = store.transactions.filter { $0.amount > 0 }
+                let picks: [(String, Transaction?)] = [
+                    ("47-receipt-items", spent.first { (store.orderDetail(for: $0.id)?.items.count ?? 0) >= 3 && store.orderDetail(for: $0.id)?.kind == .exact }),
+                    ("48-receipt-credit", spent.first { store.orderDetail(for: $0.id)?.kind == .lessCredit }),
+                    ("49-receipt-nomatch", spent.first { store.orderGap(for: $0) != nil }),
+                ]
+                for (name, pick) in picks {
+                    if let pick { await snap(name, outDir, width: 380) { TransactionInspector(transaction: pick, scrolls: false) } }
+                }
+            }
             await snap("36-statements", outDir) { StatementsView(scrolls: false) }
             if let month = store.lastFullMonth {
                 for (i, kind) in PremiereCard.Kind.available(in: store, month: month).enumerated() {

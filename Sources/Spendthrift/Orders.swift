@@ -19,6 +19,15 @@ struct OrderItem: Codable, Hashable {
     /// What the shop lists for the whole shipment. For groceries this is closer to the
     /// charge than the items are (weighed items, bag fees).
     var listedCents: Int?
+
+    /// The shelf it came off, in plain words, for adding orders up by kind.
+    var shelf: String {
+        switch shop {
+        case .groceries: "Groceries"
+        case .digital: "Books & Digital"
+        case .store: department == "Grocery" ? "Groceries" : (department ?? "Everything Else")
+        }
+    }
 }
 
 /// Which order items a card charge paid for, and how sure that is.

@@ -24,6 +24,7 @@ struct ContentView: View {
                         case .cashflow: CashFlowView()
                         case .stories: StoriesView()
                         case .places: PlacesView()
+                        case .orders: OrdersView()
                         case .transactions: TransactionsView()
                         case .statements: StatementsView()
                         case .review: ReviewView()
@@ -161,6 +162,10 @@ struct SidebarView: View {
                 SidebarRow(item: .cashflow, title: "Cash Flow", symbol: "arrow.left.arrow.right.circle.fill", current: current)
                 SidebarRow(item: .stories, title: "Trips & Events", symbol: "airplane.departure", current: current, count: store.stories.count, quiet: true)
                 SidebarRow(item: .places, title: "Payees", symbol: "storefront.fill", current: current)
+                // Only there once an order history has been added: a closer look, never a requirement.
+                if !store.orderRows.isEmpty || store.selection == .orders {
+                    SidebarRow(item: .orders, title: "Orders", symbol: "shippingbox.fill", current: current)
+                }
                 SidebarRow(item: .transactions, title: "Transactions", symbol: "list.bullet.rectangle.portrait.fill", current: current)
                 SidebarRow(item: .statements, title: "Statements", symbol: "doc.text.magnifyingglass", current: current, count: store.sourceFiles.count, quiet: true)
             }

@@ -293,6 +293,11 @@ struct TransactionInspector: View {
                             ReceiptLine(value: t.account) { Text("Paid with").font(.callout) }
                             ReceiptLine(value: t.isUnknown ? "Not sorted" : t.category.displayName) { Text("Filed under").font(.callout) }
                         }
+                        // What was in the box, when an order history says.
+                        if let detail = store.orderDetail(for: t.id) {
+                            ReceiptRule()
+                            OrderItemsList(items: detail.items, kind: detail.kind, charged: t.amount)
+                        }
                         ReceiptRule()
                         HStack(alignment: .firstTextBaseline) {
                             Text(t.amount < 0 ? "RECEIVED" : "TOTAL").font(Theme.mono(13, .bold))
@@ -307,6 +312,13 @@ struct TransactionInspector: View {
                         .controlSize(.large)
                         .help("Open the original statement at this line (or press Space)")
                     }
+                }
+
+                if let gap = store.orderGap(for: t) {
+                    Label(gap, systemImage: "shippingbox")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 group("Category") {

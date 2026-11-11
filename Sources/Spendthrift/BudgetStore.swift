@@ -135,13 +135,78 @@ final class BudgetStore {
 
     /// What order-history exports said was inside each order, and which charge paid for which.
     private(set) var orders = OrderBook()
+    /// The order items laid out for the Orders page: dated, searchable, each knowing its charge.
+    private(set) var orderRows: [OrderRow] = []
+    var orderSearch = ""
+    var orderSpan = PlacesView.Span.last12
+
+    struct OrderRow: Identifiable {
+        let id: Int
+        let item: OrderItem
+        let date: Date
+        /// Name and shelf squeezed to letters and digits, for finding.
+        let haystack: String
+        /// The card charge that paid for it, when one was found.
+        let charge: UUID?
+    }
+
+    /// How far the order history reaches, set against the charges it could explain.
+    struct OrderCoverage {
+        var through: Date?
+        var charges = 0, itemized = 0
+        /// Charges at these shops made after the last order on file: waiting for a newer export.
+        var newer = 0
+    }
+
+    private(set) var orderCoverage = OrderCoverage()
+
+    private func refreshOrderRows() {
+        var charge: [Int: UUID] = [:]
+        for (id, match) in orders.matches {
+            guard let uuid = UUID(uuidString: id) else { continue }
+            for i in match.items { charge[i] = uuid }
+        }
+        orderRows = orders.items.enumerated().compactMap { i, item in
+            guard let date = DateParsing.parse(item.date, format: "yyyy-MM-dd") else { return nil }
+            return OrderRow(id: i, item: item, date: date,
+                            haystack: PlacesView.squeeze(item.name) + " " + PlacesView.squeeze(item.shelf), charge: charge[i])
+        }
+        var coverage = OrderCoverage()
+        let last = orders.items.map(\.date).max()
+        coverage.through = last.flatMap { DateParsing.parse($0, format: "yyyy-MM-dd") }
+        for c in orderCharges {
+            coverage.charges += 1
+            if orders.matches[c.id.uuidString] != nil { coverage.itemized += 1 } else if let last, c.date > last { coverage.newer += 1 }
+        }
+        orderCoverage = coverage
+    }
+
+    /// What a charge paid for, if an order on file explains it. Nil for every other charge,
+    /// which is most of them: order history is extra detail, never something the app leans on.
+    func orderDetail(for id: Transaction.ID) -> (items: [OrderItem], kind: OrderMatch.Kind)? {
+        guard let match = orders.matches[id.uuidString] else { return nil }
+        let items = orders.items(for: id)
+        return items.isEmpty ? nil : (items, match.kind)
+    }
+
+    /// Why a charge from one of these shops has no items, in a sentence. Nil when there is nothing
+    /// to say: no order history at all, or a charge from somewhere order histories don't cover.
+    func orderGap(for t: Transaction) -> String? {
+        guard !orders.items.isEmpty, t.amount > 0, orders.matches[t.id.uuidString] == nil,
+              OrderMatcher.shop(of: t.description) != nil, let through = orderCoverage.through else { return nil }
+        if t.date > through {
+            return "Newer than your order history, which runs through \(through.formatted(.dateTime.month(.abbreviated).day().year())). Add a fresh one and the items will appear here."
+        }
+        return "No order on file adds up to this charge. A gift balance may have paid part of it, or it was ordered on another account."
+    }
 
     private func loadOrders() async {
         let file = paths.ordersFile
         let saved = await Task.detached { OrderBook.load(file) }.value
         guard !saved.items.isEmpty else { return }
         orders = saved
-        if saved.matches.isEmpty { await rematchOrders() }
+        refreshOrderRows()
+        await rematchOrders()   // statements may have been added since the orders were last lined up
     }
 
     /// The charges an order export could explain: spending at the shops it covers.
@@ -158,7 +223,9 @@ final class BudgetStore {
         let charges = orderCharges, items = orders.items, file = paths.ordersFile
         let matches = await Task.detached { OrderMatcher.match(charges, to: items) }.value
         guard items == orders.items else { return }   // another export arrived meanwhile; its own pass will follow
+        guard matches != orders.matches || orderRows.isEmpty else { return }
         orders.matches = matches
+        refreshOrderRows()
         let book = orders
         Task.detached { book.save(to: file) }
     }

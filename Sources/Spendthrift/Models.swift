@@ -501,7 +501,7 @@ struct Toast: Identifiable, Equatable {
 }
 
 enum SidebarItem: Hashable {
-    case overview, cashflow, stories, places, transactions, statements, report, ask, review, categories, accounts
+    case overview, cashflow, stories, places, orders, transactions, statements, report, ask, review, categories, accounts
 }
 
 /// A charge whose original statement is being shown.
