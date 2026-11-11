@@ -135,9 +135,17 @@ struct StoryCard: View {
                         .frame(width: compact ? 34 : 42, height: compact ? 34 : 42)
                         .background(Circle().fill(Theme.accent))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(story.name)
-                            .font(.system(compact ? .headline : .title3, design: .serif).weight(.bold))
-                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            Text(story.name)
+                                .font(.system(compact ? .headline : .title3, design: .serif).weight(.bold))
+                                .lineLimit(1)
+                            // The name is the app's guess; the pencil is for the person's own.
+                            if hovering {
+                                Button { rename() } label: { Image(systemName: "pencil").font(.caption.weight(.semibold)) }
+                                    .buttonStyle(.borderless)
+                                    .help("Rename this \(story.kind == .trip ? "trip" : "event")")
+                            }
+                        }
                         Text(Self.dates(story))
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -173,11 +181,25 @@ struct StoryCard: View {
         .scaleEffect(hovering ? 1.012 : 1)
         .animation(.snappy(duration: 0.18), value: hovering)
         .contextMenu {
+            Button("Rename…", systemImage: "pencil") { rename() }
             Button(story.kind == .trip ? "This Isn't a Trip" : "This Isn't an Event", systemImage: "xmark.circle") {
                 store.dismissStory(story)
             }
         }
         .help("Click to see the charges")
+    }
+
+    private func rename() {
+        let alert = NSAlert()
+        alert.messageText = "Rename “\(story.name)”"
+        alert.informativeText = "Your name stays, even when new statements make the app look for trips again."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        field.stringValue = story.name
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        if alert.runModal() == .alertFirstButtonReturn { store.renameStory(story, to: field.stringValue) }
     }
 
     private func open() {

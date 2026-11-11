@@ -69,6 +69,10 @@ struct Library: Codable {
     /// Charges Tony moved by hand: charge id to the trip it belongs to (a trip's fingerprint), or "" for none.
     /// These win over whatever the model decides, now and every time it looks again.
     var storyChoices: [String: String]?
+    /// Names the person gave trips and events. The model finds trips afresh whenever statements
+    /// change, with whatever name it thinks of; a name given by hand is put back onto the trip
+    /// that covers the same days.
+    var storyNames: [StoryName]?
     /// What the analyst noticed, and the data it was worked out from.
     var discoveries: [Discovery]?
     var discoveriesBasis: String?
@@ -97,6 +101,7 @@ struct Library: Codable {
         storyYears = try? c.decodeIfPresent([String: String].self, forKey: .storyYears)
         dismissedStories = try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedStories)
         storyChoices = try? c.decodeIfPresent([String: String].self, forKey: .storyChoices)
+        storyNames = try? c.decodeIfPresent([StoryName].self, forKey: .storyNames)
         discoveries = (try? c.decodeIfPresent(Lossy<Discovery>.self, forKey: .discoveries))?.values
         discoveriesBasis = try? c.decodeIfPresent(String.self, forKey: .discoveriesBasis)
         dismissedDiscoveries = try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedDiscoveries)

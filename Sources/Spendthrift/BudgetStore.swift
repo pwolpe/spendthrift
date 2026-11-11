@@ -897,6 +897,21 @@ final class BudgetStore {
     var stories: [Story] {
         let dismissed = library.dismissedStories ?? []
         var list = (library.stories ?? []).filter { !dismissed.contains($0.fingerprint) }
+        // A name given by hand goes back on whichever trip covers those days, however it was found this time.
+        var taken: Set<Int> = []
+        for given in library.storyNames ?? [] {
+            func shared(_ s: Story) -> Int {
+                guard let from = DateParsing.parse(max(s.start, given.start), format: "yyyy-MM-dd"),
+                      let to = DateParsing.parse(min(s.end, given.end), format: "yyyy-MM-dd") else { return -1 }
+                return (Calendar.current.dateComponents([.day], from: from, to: to).day ?? -1) + 1
+            }
+            let candidates = list.indices.filter { !taken.contains($0) && list[$0].kind == given.kind && shared(list[$0]) > 0 }
+            guard let index = candidates.max(by: { shared(list[$0]) < shared(list[$1]) }) else { continue }
+            taken.insert(index)
+            list[index].name = given.name
+            list[index].start = min(list[index].start, given.start)
+            list[index].end = max(list[index].end, given.end)
+        }
         // What Tony moved by hand wins over what the model worked out.
         let choices = library.storyChoices ?? [:]
         guard !choices.isEmpty else { return list }
@@ -926,6 +941,22 @@ final class BudgetStore {
             }
             return shared(list[a]) < shared(list[b])
         }
+    }
+
+    /// For tests: the names the person has given.
+    var storyNamesForTest: [String] { (library.storyNames ?? []).map(\.name) }
+
+    /// Gives a trip or event the person's own name. It stays through every later re-reading.
+    func renameStory(_ story: Story, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != story.name else { return }
+        var names = library.storyNames ?? []
+        // One name per stretch of days: a new name for the same trip replaces the old one.
+        names.removeAll { $0.kind == story.kind && $0.start <= story.end && $0.end >= story.start }
+        names.append(StoryName(name: trimmed, kind: story.kind, start: story.start, end: story.end))
+        library.storyNames = names
+        withAnimation(.snappy) { changed() }
+        showToast("Renamed to “\(trimmed)”. The name will stay.", symbol: "pencil.line")
     }
 
     func story(containing id: Transaction.ID) -> Story? {

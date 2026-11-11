@@ -261,6 +261,9 @@ enum DebugHooks {
                 }
             }
             if !store.setApart.isEmpty { await snap("50-kept-apart", outDir) { SetApartView(scrolls: false) } }
+            for story in store.stories where !(BudgetStore.shared.storyNamesForTest.isEmpty) && BudgetStore.shared.storyNamesForTest.contains(story.name) {
+                print("STORYNAME \(story.name) | \(story.start) to \(story.end) | \(story.entryIDs.count) charges")
+            }
             await snap("36-statements", outDir) { StatementsView(scrolls: false) }
             if let month = store.lastFullMonth {
                 for (i, kind) in PremiereCard.Kind.available(in: store, month: month).enumerated() {

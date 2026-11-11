@@ -602,6 +602,14 @@ struct Discovery: Codable, Identifiable, Hashable {
 
 /// A trip or an event the app noticed in the spending: a run of charges that belong together.
 /// Which charges belong is the model's call; every number shown is added up in code.
+/// A name the person gave a trip or event, with the days it covered when they named it.
+struct StoryName: Codable, Hashable {
+    var name: String
+    var kind: Story.Kind
+    var start: String
+    var end: String
+}
+
 struct Story: Codable, Identifiable, Hashable {
     enum Kind: String, Codable { case trip, event }
     var id = UUID()
