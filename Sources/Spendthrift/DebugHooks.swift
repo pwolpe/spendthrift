@@ -189,6 +189,14 @@ enum DebugHooks {
             for line in store.orderReport() { print("ORDERS \(line)") }
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_REREAD=1: read ledger-style statements again with today's reader, print what changed, then quit.
+        if env["SPENDTHRIFT_REREAD"] != nil {
+            let before = store.transactions.count
+            let report = await store.rereadLedgerStatements()
+            for line in report { print("REREAD-REPORT \(line)") }
+            print("REREAD-REPORT entries \(before) → \(store.transactions.count); statements re-read \(report.filter { $0.hasPrefix("REREAD") }.count), left \(report.filter { $0.hasPrefix("LEFT") }.count)")
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_TIEOUT=1: how each card's payments tie to its statements, then quit.
         if env["SPENDTHRIFT_TIEOUT"] != nil {
             await store.notePeriodsIfNeeded()

@@ -8,7 +8,7 @@ enum KeywordExtractor {
         "TST* ", "TST *", "TST*", "SQ *", "SQ* ", "SQ*", "SP * ", "SP *", "SP ", "PAYPAL *", "PP*",
         "APLPAY ", "APL*", "POS ", "POS PURCHASE ", "DEBIT CARD PURCHASE ", "DEBIT PURCHASE ",
         "PURCHASE AUTHORIZED ON ", "PURCHASE ", "CHECKCARD ", "CHECK CARD ", "DBT CRD ", "RECURRING ",
-        "ZELLE PAYMENT TO ", "ZELLE PAYMENT FROM ", "PAYMENT SENT ", "CKO*", "DD *", "IC* ", "LS ", "BT*", "PY *", "GDP*", "SQSP*", "FS *", "TM *",
+        "ZELLE PAYMENT TO ", "ZELLE PAYMENT FROM ", "ZELLE DEBIT PAYMENT TO: ", "ZELLE CREDIT PAYMENT FROM: ", "ACH DEBIT ", "ACH CREDIT ", "PAYMENT SENT ", "CKO*", "DD *", "IC* ", "LS ", "BT*", "PY *", "GDP*", "SQSP*", "FS *", "TM *",
         "SUMUP *", "SUMUP*", "SUMUP  *", "ZETTLE_*", "ZETTLE *", "IZ *", "IZ*", "CLOVER*", "CLV*", "STRIPE*", "STRIPE *", "SHOPIFY*", "WPY*", "EB *", "FSP*", "BLT*", "TOCK*", "RESY*", "OLO*", "CHOWNOW*", "MINDBODY*", "VAGARO*", "BKG*", "WWW.", "DNH*",
     ]
 
@@ -19,6 +19,14 @@ enum KeywordExtractor {
     /// Returns the recipient named after "A/C:", upper case, a few words: enough to tell recipients apart.
     static func wireRecipient(_ description: String) -> String? {
         let upper = description.uppercased()
+        // Another bank's way: "DOMESTIC MANUAL WIRE DESIGNLUSH INC.", "INT'L WIRED FUNDS OUT BRIDGE TO BHUTAN".
+        if upper.range(of: "A/C:") == nil,
+           let lead = upper.range(of: #"^(?:DOMESTIC|INCOMING|OUTGOING|INT.?L|INTERNATIONAL)\b[A-Z ]*?\bWIRED?\b(?: FUNDS)?(?:[ -]+(?:DEBIT|CREDIT|OUT|IN))?\s+"#, options: .regularExpression) {
+            let words = upper[lead.upperBound...].split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+                .filter { !$0.allSatisfy(\.isNumber) }
+            let name = words.prefix(4).joined(separator: " ")
+            return name.count >= 3 ? name : nil
+        }
         guard upper.range(of: #"\bWIRE\b"#, options: .regularExpression) != nil, let start = upper.range(of: "A/C:") else { return nil }
         var rest = String(upper[start.upperBound...])
         // The recipient ends where the next labelled field begins.

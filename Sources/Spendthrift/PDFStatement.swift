@@ -456,6 +456,22 @@ enum PDFStatement {
         // Coinbase heads its purchases with the single word "Transactions". Other banks print that
         // word in passing (Chase, in the middle of a section), so only Coinbase's counts as a heading.
         let bareTransactionsHeading = text.contains("Coinbase One Card")
+        // Some banks (First Republic) print a ledger: money out carries a trailing minus ("$87.37-"),
+        // and who it went to is on the line underneath ("ACH DEBIT $87.37-" / "CITI AUTOPAY/PAYMENT").
+        // There the section says the direction, and the line underneath belongs to the row above:
+        // it is never a heading, even when it holds a word like "credit" or "payment".
+        let ledgerStyle = text.range(of: #"(?im)^.*total withdrawals[^\n]*\d ?-(?: .*)?$"#, options: .regularExpression) != nil
+        // Its sections are the things it prints totals for ("Total Deposits and Credits $…").
+        var ledgerHeadings: Set<String> = []
+        if ledgerStyle, let re = try? NSRegularExpression(pattern: #"(?im)^(?:\d+ )?total ([a-z][a-z &]+?) \$[\d,]+\.\d\d"#) {
+            for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                if let r = Range(m.range(at: 1), in: text) { ledgerHeadings.insert(text[r].lowercased()) }
+            }
+        }
+        let checkTriple = try! NSRegularExpression(pattern: #"(\d{2,7})\*? (\d{1,2}/\d{1,2}) \$?([\d,]+\.\d\d)"#)
+        /// The row a detail line would belong to (the one just read), and how many it has taken.
+        var detailFor: Int?
+        var detailsTaken = 0
         // A charge whose amount is on a later line.
         var pending: (date: Date, description: String, linesWaited: Int)?
         // The row just added from a bare amount with no "$": the next line may hold the real dollars.
@@ -476,9 +492,12 @@ enum PDFStatement {
             // A sentence that happens to begin with a date ("February 11, 2026 on the statement closing
             // date…") or a summary label beside one ("April 8, 2025 Payments - $42.45") is not a charge.
             if Self.isProse(description) { return }
+            // The caption under a picture of a paid check ("03/11 Amount $16,550.00") repeats a check already listed.
+            if description.caseInsensitiveCompare("amount") == .orderedSame { return }
             var amount = rawAmount
             sectionSum += abs(rawAmount); sectionCount += 1
             if sectionIsCredit && amount > 0 { amount = -amount }
+            if ledgerStyle { amount = sectionIsCredit ? -abs(rawAmount) : abs(rawAmount) }
             out.rows.append(CanonicalRow(date: DateParsing.iso.string(from: date), description: description,
                                          amount: (amount * 100).rounded() / 100))
         }
@@ -520,6 +539,8 @@ enum PDFStatement {
             // Drop markers like Amex's "⧫" (Pay Over Time) so the amount is the last word.
             var tokens = line.split(whereSeparator: \.isWhitespace).map(String.init)
                 .filter { $0.contains(where: { $0.isLetter || $0.isNumber || "$-().,/*".contains($0) }) }
+            // A ledger's minus can stand apart from the amount: "$12,543.00 -".
+            if ledgerStyle, tokens.count >= 2, tokens.last == "-", isMoney(tokens[tokens.count - 2]) { tokens.removeLast() }
             let hasMoney = tokens.contains(where: isMoney)
 
             // A foreign charge lists the foreign amount, then the dollars on the next line
@@ -554,6 +575,36 @@ enum PDFStatement {
                 if pending!.linesWaited > 10 { pending = nil }
             }
 
+            if ledgerStyle, !hasMoney {
+                let lower = line.lowercased()
+                if let heading = ledgerHeadings.first(where: { lower.hasPrefix($0) }) {
+                    updateSection(heading)
+                    detailFor = nil
+                } else if let row = detailFor, leadingDate(tokens, closing: closing) == nil {
+                    // Up to two lines under a row say who it was ("PAYMENT TO: STEPHEN MITCHELL" / "ID: 123");
+                    // a line of digits is a reference number, and the page's footer ends it.
+                    let furniture = ["page ", "total", "www.", "account statement", "account activity", "date description"].contains(where: lower.hasPrefix)
+                        || lower.contains("member fdic")
+                    if furniture { detailFor = nil }
+                    else if line.count < 70, line.filter(\.isLetter).count >= 3 {
+                        out.rows[row].description += " " + line
+                        detailsTaken += 1
+                        if detailsTaken >= 2 { detailFor = nil }
+                    }
+                }
+                continue
+            }
+            detailFor = nil
+            // Checks are listed two to a line: "139 03/11 $16,550.00 141 03/28 $2,750.00".
+            if ledgerStyle, sectionTitle.lowercased().hasPrefix("checks paid"), tokens.first?.lowercased() != "total" {
+                for m in checkTriple.matches(in: line, range: NSRange(line.startIndex..., in: line)) {
+                    func group(_ i: Int) -> String { Range(m.range(at: i), in: line).map { String(line[$0]) } ?? "" }
+                    if let (date, _) = leadingDate([group(2)], closing: closing), let amount = parseMoney(group(3)) {
+                        add(date, "Check #\(group(1))", amount)
+                    }
+                }
+                continue
+            }
             if !hasMoney {
                 // A date at the very start begins a charge whose amount comes later.
                 if let (date, used) = leadingDate(tokens, closing: closing) {
@@ -603,7 +654,9 @@ enum PDFStatement {
             // Capital One prints a payment as "AUTOPAY PYMT - $42.45": the minus stands apart.
             if tokens.last == "-" { tokens.removeLast(); amount = -abs(amount) }
             pending = nil
+            let before = out.rows.count
             add(date, checkNumber.map { "Check #\($0)" } ?? tokens.joined(separator: " "), amount)
+            if ledgerStyle, out.rows.count > before { detailFor = out.rows.count - 1; detailsTaken = 0 }
         }
         out.rows = removeInternalAdjustments(out.rows)
         return out

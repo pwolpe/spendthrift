@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Observation
 import CryptoKit
+import PDFKit
 import UniformTypeIdentifiers
 
 /// The app's single source of truth: the saved library, plus everything derived from it.
@@ -298,6 +299,56 @@ final class BudgetStore {
         if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
             print("DEBUG ORDERS read \(orders.sorted?.count ?? 0) listings, \(failures) failed requests")
         }
+    }
+
+    /// Reads kept statements again with today's reader and puts what it finds in place of what an
+    /// earlier reader made of them. Only statements the reader can now prove (its lines tie to the
+    /// printed totals) and that are printed as a ledger, the layout the earlier reader got wrong.
+    /// A charge that is still there keeps its identity, so notes, own categories and trips survive.
+    /// Never asks the model. Returns one line per statement, for the record.
+    func rereadLedgerStatements() async -> [String] {
+        var report: [String] = []
+        for source in (library.sources ?? []) where source.isPDF {
+            guard let accountID = source.accountID, library.accounts.contains(where: { $0.id == accountID }) else { continue }
+            let url = paths.statementFile(source)
+            guard let data = try? Data(contentsOf: url), let doc = PDFDocument(data: data), !doc.isLocked else { continue }
+            let pages = (0..<min(doc.pageCount, 30)).compactMap { doc.page(at: $0) }
+            // (The text as stored and as laid out on the page: the telltale line can read differently in each.)
+            let text = pages.compactMap(\.string).joined(separator: "\n") + "\n" + pages.map(PDFStatement.positionalText).joined(separator: "\n")
+            guard text.range(of: #"(?im)^.*total withdrawals[^\n]*\d ?-(?: .*)?$"#, options: .regularExpression) != nil else { continue }
+            guard let outcome = try? await CloudAI.$offline.withValue(true, operation: { try await StatementReader.read(url, data: data) }),
+                  case .ready(let statement) = outcome, statement.check == .verified else {
+                report.append("LEFT \(source.name): today's reader can't prove it either")
+                continue
+            }
+            let old = library.entries.filter { $0.sourceID == source.id }
+            library.entries.removeAll { $0.sourceID == source.id }
+            let ids = add(statement.rows, to: accountID, source: source.id)
+            // A line that was there before, whatever its sign was and however short its text: same charge.
+            var pool = old, carried = 0
+            for i in library.entries.indices where ids.contains(library.entries[i].id) {
+                let entry = library.entries[i]
+                guard let j = pool.firstIndex(where: { $0.date == entry.date && abs(abs($0.amount) - abs(entry.amount)) < 0.005
+                    && entry.description.uppercased().hasPrefix($0.description.uppercased().prefix(12)) }) else { continue }
+                let was = pool.remove(at: j)
+                library.entries[i].id = was.id
+                library.entries[i].note = was.note
+                library.entries[i].override = was.override
+                carried += 1
+            }
+            if let s = library.sources?.firstIndex(where: { $0.id == source.id }) {
+                library.sources?[s].rows = statement.rows.count
+                library.sources?[s].check = "verified"
+                library.sources?[s].checkNote = nil
+                library.sources?[s].firstDate = statement.rows.map(\.date).min() ?? source.firstDate
+                library.sources?[s].lastDate = statement.rows.map(\.date).max() ?? source.lastDate
+            }
+            report.append("REREAD \(source.name): \(old.count) lines before, \(statement.rows.count) now (\(ids.count) added, \(carried) kept their identity)")
+        }
+        pruneUnusedPlaces()
+        changed()
+        saveNow()
+        return report
     }
 
     /// A file that was already added, exactly as it is: skipped without being read.
