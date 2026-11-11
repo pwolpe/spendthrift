@@ -317,12 +317,16 @@ final class BudgetStore {
             let pages = (0..<min(doc.pageCount, 30)).compactMap { doc.page(at: $0) }
             // (The text as stored and as laid out on the page: the telltale line can read differently in each.)
             let text = pages.compactMap(\.string).joined(separator: "\n") + "\n" + pages.map(PDFStatement.positionalText).joined(separator: "\n")
-            guard text.range(of: #"(?im)^.*total (?:withdrawals|checks)[^\n]*\d ?-(?: .*)?$"#, options: .regularExpression) != nil else { continue }
-            // One that already ties has been through this, unless it still holds the same line twice
-            // (the mark of the earlier reader).
+            let ledger = text.range(of: #"(?im)^.*total (?:withdrawals|checks)[^\n]*\d ?-(?: .*)?$"#, options: .regularExpression) != nil
             let mine = library.entries.filter { $0.sourceID == source.id }
+            // The mark of an earlier misreading, on any kind of statement: the same line both as a
+            // charge and as a credit (a reading that filed everything as credits, added beside the right one).
+            var signed: [String: Set<Bool>] = [:]
+            for e in mine { signed["\(e.date)|\(abs(e.amount))|\(e.description)", default: []].insert(e.amount > 0) }
+            let mirrored = signed.values.filter { $0.count == 2 }.count >= 3
+            // A ledger that already ties has been through this, unless it still holds the same line twice.
             let repeats = Dictionary(grouping: mine, by: { "\($0.date)|\($0.amount)|\($0.description)" }).contains { $0.value.count > 1 }
-            if source.check == "verified", !mine.isEmpty, !repeats { continue }
+            guard mirrored || (ledger && !(source.check == "verified" && !mine.isEmpty && !repeats)) else { continue }
             guard let outcome = try? await CloudAI.$offline.withValue(true, operation: { try await StatementReader.read(url, data: data) }),
                   case .ready(let statement) = outcome, statement.check == .verified else {
                 report.append("LEFT \(source.name): today's reader can't prove it either")
@@ -335,8 +339,14 @@ final class BudgetStore {
             var pool = old, carried = 0
             for i in library.entries.indices where ids.contains(library.entries[i].id) {
                 let entry = library.entries[i]
-                guard let j = pool.firstIndex(where: { $0.date == entry.date && abs(abs($0.amount) - abs(entry.amount)) < 0.005
-                    && entry.description.uppercased().hasPrefix($0.description.uppercased().prefix(12)) }) else { continue }
+                // Of the old lines this could be, the one the person touched comes first, then the one with the right sign.
+                let matches = pool.indices.filter { pool[$0].date == entry.date && abs(abs(pool[$0].amount) - abs(entry.amount)) < 0.005
+                    && entry.description.uppercased().hasPrefix(pool[$0].description.uppercased().prefix(12)) }
+                func worth(_ e: LedgerEntry) -> Int {
+                    ((e.note ?? "").isEmpty && e.override == nil && !e.merchantKey.hasPrefix("own:") && !e.merchantKey.hasPrefix("CHECK TO ") ? 0 : 2)
+                        + ((e.amount > 0) == (entry.amount > 0) ? 1 : 0)
+                }
+                guard let j = matches.max(by: { worth(pool[$0]) < worth(pool[$1]) }) else { continue }
                 let was = pool.remove(at: j)
                 library.entries[i].id = was.id
                 library.entries[i].note = was.note

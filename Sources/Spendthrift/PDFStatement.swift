@@ -58,22 +58,31 @@ enum PDFStatement {
         // order; sometimes (Chase checking) amounts come out detached from their descriptions.
         // So read it both ways (as stored, and rebuilt row by row from positions on the page)
         // and keep whichever agrees with the statement's own printed totals.
-        let stored = parseLines(text, closing: closing)
-        var best = stored
-        if let positionalText {
-            let positional = parseLines(positionalText, closing: closing)
-            if positional.score > stored.score || (positional.score == stored.score && positional.rows.count > stored.rows.count) {
-                best = positional
-            }
-        }
-        var rows = best.rows
-        var cloudCheck: StatementCheck?
         // Card statements print an account summary ("Purchases +$346.81, Payments/Credits -$1,818.04")
         // rather than section totals: that's just as good a check.
         // (The summary may only read correctly in one of the two text orders, so try both.)
         let summaryMatches = { (candidate: [CanonicalRow]) in
             matchesAccountSummary(text, rows: candidate) || (positionalText.map { matchesAccountSummary($0, rows: candidate) } ?? false)
         }
+        let stored = parseLines(text, closing: closing)
+        var best = stored
+        if let positionalText {
+            let positional = parseLines(positionalText, closing: closing)
+            // The stored order can lose a heading ("PURCHASE") and file every charge as a credit; the
+            // statement's own summary says which of the two readings is right.
+            let storedTies = summaryMatches(stored.rows), positionalTies = summaryMatches(positional.rows)
+            if positionalTies != storedTies {
+                if positionalTies { best = positional }
+            } else if !storedTies, let printed = [parseLines(positionalText, closing: closing, signsAsPrinted: true),
+                                                  parseLines(text, closing: closing, signsAsPrinted: true)].first(where: { summaryMatches($0.rows) }) {
+                // Neither ties, but taking every amount's sign as printed does: the headings were lost.
+                best = printed
+            } else if positional.score > stored.score || (positional.score == stored.score && positional.rows.count > stored.rows.count) {
+                best = positional
+            }
+        }
+        var rows = best.rows
+        var cloudCheck: StatementCheck?
         if best.matched == 0, best.mismatched.isEmpty, summaryMatches(rows) { best.matched = 1 }
         // Unless our own reading already adds up to the statement's printed totals, let the powerful
         // model read it too (when Tony's Mac has a key). It copes with layouts and scans the patterns
@@ -444,7 +453,10 @@ enum PDFStatement {
         return ["payments", "purchases", "transactions", "other credits", "cash advances", "previous balance", "new balance"].contains(label)
     }
 
-    static func parseLines(_ text: String, closing: Date) -> Parsed {
+    /// - signsAsPrinted: ignore section headings and take each amount's direction from its own sign
+    ///   (a card statement prints credits with a minus). For statements whose headings didn't
+    ///   survive into the text, where "credits" would otherwise swallow every charge after it.
+    static func parseLines(_ text: String, closing: Date, signsAsPrinted: Bool = false) -> Parsed {
         var out = Parsed()
         var sectionIsCredit = false
         var sectionTitle = ""
@@ -498,7 +510,7 @@ enum PDFStatement {
             if description.caseInsensitiveCompare("amount") == .orderedSame { return }
             var amount = rawAmount
             sectionSum += abs(rawAmount); sectionCount += 1
-            if sectionIsCredit && amount > 0 { amount = -amount }
+            if sectionIsCredit && amount > 0 && !signsAsPrinted { amount = -amount }
             if ledgerStyle { amount = sectionIsCredit ? -abs(rawAmount) : abs(rawAmount) }
             out.rows.append(CanonicalRow(date: DateParsing.iso.string(from: date), description: description,
                                          amount: (amount * 100).rounded() / 100))
