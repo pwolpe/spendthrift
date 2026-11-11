@@ -460,7 +460,8 @@ enum PDFStatement {
         // and who it went to is on the line underneath ("ACH DEBIT $87.37-" / "CITI AUTOPAY/PAYMENT").
         // There the section says the direction, and the line underneath belongs to the row above:
         // it is never a heading, even when it holds a word like "credit" or "payment".
-        let ledgerStyle = text.range(of: #"(?im)^.*total withdrawals[^\n]*\d ?-(?: .*)?$"#, options: .regularExpression) != nil
+        // (In a month with no withdrawals the telltale minus is on the checks total instead.)
+        let ledgerStyle = text.range(of: #"(?im)^.*total (?:withdrawals|checks)[^\n]*\d ?-(?: .*)?$"#, options: .regularExpression) != nil
         // Its sections are the things it prints totals for ("Total Deposits and Credits $…").
         var ledgerHeadings: Set<String> = []
         if ledgerStyle, let re = try? NSRegularExpression(pattern: #"(?im)^(?:\d+ )?total ([a-z][a-z &]+?) \$[\d,]+\.\d\d"#) {

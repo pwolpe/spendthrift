@@ -317,9 +317,12 @@ final class BudgetStore {
             let pages = (0..<min(doc.pageCount, 30)).compactMap { doc.page(at: $0) }
             // (The text as stored and as laid out on the page: the telltale line can read differently in each.)
             let text = pages.compactMap(\.string).joined(separator: "\n") + "\n" + pages.map(PDFStatement.positionalText).joined(separator: "\n")
-            guard text.range(of: #"(?im)^.*total withdrawals[^\n]*\d ?-(?: .*)?$"#, options: .regularExpression) != nil else { continue }
-            // One that already ties has been through this; its charges may since have been named by hand.
-            if source.check == "verified", library.entries.contains(where: { $0.sourceID == source.id }) { continue }
+            guard text.range(of: #"(?im)^.*total (?:withdrawals|checks)[^\n]*\d ?-(?: .*)?$"#, options: .regularExpression) != nil else { continue }
+            // One that already ties has been through this, unless it still holds the same line twice
+            // (the mark of the earlier reader).
+            let mine = library.entries.filter { $0.sourceID == source.id }
+            let repeats = Dictionary(grouping: mine, by: { "\($0.date)|\($0.amount)|\($0.description)" }).contains { $0.value.count > 1 }
+            if source.check == "verified", !mine.isEmpty, !repeats { continue }
             guard let outcome = try? await CloudAI.$offline.withValue(true, operation: { try await StatementReader.read(url, data: data) }),
                   case .ready(let statement) = outcome, statement.check == .verified else {
                 report.append("LEFT \(source.name): today's reader can't prove it either")
