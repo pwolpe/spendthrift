@@ -1,0 +1,213 @@
+import SwiftUI
+
+/// The top of the Overview: what came in, and what it did. One bar, income as the whole track,
+/// filled by what was lived on and owed. What's left is gold: kept or invested, it is still yours.
+struct FlowHero: View {
+    let data: CashFlowData
+    var action: (() -> Void)?
+    @State private var hovered = false
+
+    private struct Part: Identifiable {
+        var id: String { name }
+        let name: String
+        let amount: Double
+        let color: Color
+    }
+
+    var body: some View {
+        let income = data.totalIncome
+        let within = data.surplus >= 0
+        let parts = [
+            Part(name: "Lived on", amount: data.spending, color: Theme.spent),
+            Part(name: "Income taxes", amount: data.taxes, color: Category.taxes.color),
+            Part(name: "Loan interest", amount: data.loanInterest, color: Category.investmentLoan.color.opacity(0.7)),
+        ].filter { $0.amount > 0.5 }
+        let used = parts.reduce(0) { $0 + $1.amount }
+        let left = max(0, income - used)
+        let scale = max(income, used, 1)
+        let color: Color = within ? Theme.good : Theme.spent
+
+        Button { action?() } label: {
+            Card(padding: 22) {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .center, spacing: 18) {
+                        if income > 0 { SpotArt(name: within ? "within" : "over", height: 92) }
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(data.title.uppercased())
+                                .font(Theme.mono(10, .bold)).tracking(1.2).foregroundStyle(.secondary)
+                            Text(headline(income: income, used: used, within: within))
+                                .font(.system(size: 26, weight: .bold, design: .serif))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(sentence(income: income, within: within))
+                                .font(.body).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                        if income > 0 { Stamp(text: within ? "WITHIN MEANS" : "OVER", color: color, size: 13).padding(.trailing, 6) }
+                        if action != nil {
+                            Image(systemName: "chevron.right").font(.callout.weight(.semibold))
+                                .foregroundStyle(hovered ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                        }
+                    }
+                    if used > 0.5 || income > 0.5 {
+                        GeometryReader { geo in
+                            let width = geo.size.width
+                            ZStack(alignment: .leading) {
+                                HStack(spacing: 2) {
+                                    ForEach(parts) { part in
+                                        Rectangle().fill(part.color.gradient)
+                                            .frame(width: max(3, (width - CGFloat(parts.count) * 2) * part.amount / scale))
+                                    }
+                                    // What wasn't consumed: kept or put to work. Gold, because it is still yours.
+                                    if left > 0.5 { Rectangle().fill(Theme.goldDeep.gradient) }
+                                    Spacer(minLength: 0)
+                                }
+                                .clipShape(Capsule())
+                                // Spent past what came in: mark where income ended.
+                                if income > 0.5, used > income + 0.5 {
+                                    Rectangle().fill(Color.primary).frame(width: 2, height: 28).offset(x: width * income / scale - 1)
+                                }
+                            }
+                        }
+                        .frame(height: 18)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 14, alignment: .leading)], alignment: .leading, spacing: 10) {
+                            figure("Came in", income, nil)
+                            ForEach(parts) { figure($0.name, $0.amount, $0.color) }
+                            if left > 0.5 { figure("Left to keep or invest", left, Theme.goldDeep) }
+                        }
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
+        .onHover { hovered = $0 }
+        .help(action == nil ? "" : "See all the money in and out")
+    }
+
+    private func figure(_ name: String, _ amount: Double, _ color: Color?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                if let color { Circle().fill(color).frame(width: 7, height: 7) }
+                Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Text(Money.format(amount, cents: false))
+                .font(.system(size: 17, weight: .semibold, design: .rounded)).monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+    }
+
+    private func headline(income: Double, used: Double, within: Bool) -> String {
+        if income <= 0.5 { return used > 0.5 ? "\(Money.format(data.spending, cents: false)) spent so far" : "Nothing here yet" }
+        return within ? "You lived within your income" : "You spent \(Money.format(-data.surplus, cents: false)) more than came in"
+    }
+
+    private func sentence(income: Double, within: Bool) -> String {
+        guard income > 0.5 else { return "No income has shown up for \(data.title) yet, so there is nothing to measure it against." }
+        let share = data.consumed / income
+        if within {
+            return "Of every dollar that came in, \(Int((share * 100).rounded()))¢ went on living, taxes and interest."
+                + (data.built > 0.5 ? " \(Money.format(data.built, cents: false)) was invested, and that is still yours." : "")
+        }
+        return "For every dollar that came in, \(Money.format(share)) went on living, taxes and interest. Investing isn't part of that."
+    }
+}
+
+/// One quiet card on the Overview: a figure, a line about it, a small picture, and a way in.
+struct SummaryCard<Visual: View>: View {
+    let title: String
+    let symbol: String
+    let color: Color
+    let figure: String
+    var note: String?
+    var noteColor: Color = .secondary
+    let action: () -> Void
+    @ViewBuilder var visual: Visual
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Card(padding: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 7) {
+                        Image(systemName: symbol).font(.callout.weight(.semibold)).foregroundStyle(color)
+                        Text(title).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                            .foregroundStyle(hovered ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                    }
+                    Text(figure)
+                        .font(.system(size: 32, weight: .bold, design: .rounded)).monospacedDigit()
+                        .lineLimit(1).minimumScaleFactor(0.55)
+                    Text(note ?? " ").font(.callout).foregroundStyle(noteColor).lineLimit(1)
+                    visual.frame(height: 58).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+    }
+}
+
+/// A handful of bars with one of them lit: the run of months a figure sits in.
+struct MiniBars: View {
+    let values: [Double]
+    let labels: [String]
+    var lit: Int?
+    let color: Color
+
+    var body: some View {
+        let top = max(values.max() ?? 0, 1)
+        HStack(alignment: .bottom, spacing: 5) {
+            ForEach(Array(values.enumerated()), id: \.offset) { index, value in
+                VStack(spacing: 3) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(lit == nil || lit == index ? AnyShapeStyle(color.gradient) : AnyShapeStyle(color.opacity(0.28)))
+                        .frame(height: max(2, 42 * max(value, 0) / top))
+                        .frame(maxHeight: 42, alignment: .bottom)
+                    Text(labels.indices.contains(index) ? labels[index] : "")
+                        .font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary).lineLimit(1).fixedSize()
+                }
+                .frame(maxWidth: 30)
+                .help(labels.indices.contains(index) ? "\(labels[index]): \(Money.format(value, cents: false))" : "")
+            }
+        }
+    }
+}
+
+/// A small ring of where spending went, with its three biggest slices named beside it.
+struct MiniRing: View {
+    let slices: [(category: Category, total: Double)]
+
+    var body: some View {
+        let sum = max(slices.reduce(0) { $0 + $1.total }, 1)
+        HStack(spacing: 14) {
+            Canvas { context, size in
+                let radius = min(size.width, size.height) / 2 - 4
+                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                var start = -90.0
+                for slice in slices where slice.total / sum > 0.004 {
+                    let sweep = slice.total / sum * 360
+                    var path = Path()
+                    path.addArc(center: center, radius: radius, startAngle: .degrees(start + 1), endAngle: .degrees(start + max(sweep - 1, 0.5)), clockwise: false)
+                    context.stroke(path, with: .color(slice.category.color), style: StrokeStyle(lineWidth: 8, lineCap: .butt))
+                    start += sweep
+                }
+            }
+            .frame(width: 58, height: 58)
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(slices.prefix(3).enumerated()), id: \.offset) { _, slice in
+                    HStack(spacing: 6) {
+                        Circle().fill(slice.category.color).frame(width: 7, height: 7)
+                        Text(slice.category.displayName).font(.caption).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text((slice.total / sum).formatted(.percent.precision(.fractionLength(0))))
+                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+            }
+        }
+    }
+}

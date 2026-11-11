@@ -20,8 +20,7 @@ struct ContentView: View {
                         ChargesView(filter: filter)
                     } else {
                         switch store.selection ?? .overview {
-                        case .overview, .report, .ask: OverviewView()
-                        case .cashflow: CashFlowView()
+                        case .overview, .report, .ask, .cashflow: OverviewView()
                         case .stories: StoriesView()
                         case .places: PlacesView()
                         case .orders: OrdersView()
@@ -152,7 +151,7 @@ struct SidebarView: View {
         // The rows draw their own selection, in the app's ink blue rather than the Mac's accent color.
         let current: SidebarItem = {
             switch store.selection ?? .overview {
-            case .report, .ask: return .overview
+            case .report, .ask, .cashflow: return .overview
             case .categories: return .accounts
             case let other: return other
             }
@@ -160,7 +159,6 @@ struct SidebarView: View {
         List {
             Section {
                 SidebarRow(item: .overview, title: "Overview", symbol: "chart.pie.fill", current: current)
-                SidebarRow(item: .cashflow, title: "Cash Flow", symbol: "arrow.left.arrow.right.circle.fill", current: current)
                 SidebarRow(item: .stories, title: "Trips & Events", symbol: "airplane.departure", current: current, count: store.stories.count, quiet: true)
                 SidebarRow(item: .places, title: "Payees", symbol: "storefront.fill", current: current)
                 // Only there once an order history has been added: a closer look, never a requirement.

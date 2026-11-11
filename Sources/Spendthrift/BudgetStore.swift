@@ -27,7 +27,10 @@ final class BudgetStore {
     @ObservationIgnored private var dateCache: [String: Date] = [:]
 
     // UI state
-    var selection: SidebarItem? = .overview { didSet { if placeFocus != nil { placeFocus = nil }; if chargesFocus != nil { chargesFocus = nil } } }
+    var selection: SidebarItem? = .overview { didSet { if placeFocus != nil { placeFocus = nil }; if chargesFocus != nil { chargesFocus = nil }; if overviewDetail != nil { overviewDetail = nil } } }
+    /// Which of the Overview's cards has been stepped into, if any. Nil is the summary itself.
+    var overviewDetail: OverviewDetail?
+    enum OverviewDetail: String { case flow, spending, income, investing }
     /// Non-nil while a plain list of charges is open (one month of dining, one trip…): where a click
     /// in an answer lands. A place opened from it sits on top, and Back returns here.
     var chargesFocus: TransactionFilter?
@@ -258,7 +261,14 @@ final class BudgetStore {
             if let kind = orderKind { parts.append("only the kind \(kind)") }
             if !orderSearch.trimmingCharacters(in: .whitespaces).isEmpty { parts.append("searched for “\(orderSearch)”") }
             return parts.joined(separator: ", ")
-        case .overview, .report, .ask: return "the Overview of their spending"
+        case .overview, .report, .ask:
+            switch overviewDetail {
+            case .spending: return "their everyday spending, by category and month"
+            case .income: return "their income, by who paid it"
+            case .investing: return "the investment side: what was invested and what came back"
+            case .flow: return "all their money in and out (income, spending, taxes, investing)"
+            case nil: return "the Overview: what came in and what it did, with spending, income and investing"
+            }
         case .cashflow: return "the Cash Flow page (income, spending, investing and taxes)"
         case .stories: return "the Trips & Events page"
         case .places: return "the list of payees"

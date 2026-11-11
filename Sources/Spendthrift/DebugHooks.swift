@@ -49,8 +49,9 @@ enum DebugHooks {
         store.overviewShowsYear = true
         await shot("3-year")
         store.overviewShowsYear = false
-        store.selection = .cashflow
+        store.overviewDetail = .flow
         await shot("4-cashflow")
+        store.overviewDetail = nil
         store.selection = .stories
         await shot("5-trips")
         if let trip = store.stories.max(by: { store.transactions(in: $0).count < store.transactions(in: $1).count }) {
@@ -348,6 +349,14 @@ enum DebugHooks {
         try? await Task.sleep(for: .seconds(8))   // let Daily Tony and the recap finish
         await settle()
         await snap("04-overview", outDir) { OverviewView(scrolls: false) }
+        for detail in [BudgetStore.OverviewDetail.spending, .income, .investing, .flow] {
+            store.overviewDetail = detail
+            await snap("04-overview-\(detail.rawValue)", outDir) { OverviewView(scrolls: false) }
+        }
+        store.overviewDetail = nil
+        store.overviewShowsYear = true
+        await snap("04-overview-year", outDir) { OverviewView(scrolls: false) }
+        store.overviewShowsYear = false
         if let p = ReportData.periods(for: store).first {
             let data = ReportData(store: store, period: p)
             await snap("07-report", outDir) { ReportContent(data: data, interactive: false).padding(28) }

@@ -20,6 +20,8 @@ struct CashFlowData {
     }
 
     let period: ReportPeriod
+    /// The stretch in words: "2026", "Last 12 Months", "November 2026".
+    let title: String
     let months: [Month]
     let income: Double
     let spending: Double
@@ -69,7 +71,6 @@ struct CashFlowData {
     static let laneColors: [Color] = [Category.income.color, Theme.spent, Category.taxes.color, Category.investmentIncome.color, Theme.goldDeep]
 
     @MainActor init(store: BudgetStore, period: ReportPeriod) {
-        self.period = period
         let inPeriod: (Month) -> Bool
         switch period {
         case .year(let y): inPeriod = { $0.year == y }
@@ -78,6 +79,17 @@ struct CashFlowData {
             let start = end.adding(-11)
             inPeriod = { $0 >= start && $0 <= end }
         }
+        self.init(store: store, period: period, title: period.title, inPeriod: inPeriod)
+    }
+
+    /// The same sums for a single month.
+    @MainActor init(store: BudgetStore, month: Month) {
+        self.init(store: store, period: .year(month.year), title: month.title, inPeriod: { $0 == month })
+    }
+
+    @MainActor private init(store: BudgetStore, period: ReportPeriod, title: String, inPeriod: (Month) -> Bool) {
+        self.period = period
+        self.title = title
         let txns = store.transactions.filter { inPeriod($0.month) }
         months = Array(Set(txns.map(\.month))).sorted()
 
@@ -182,9 +194,9 @@ struct CashFlowContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Cash Flow")
+                Text("Money In and Out")
                     .font(.system(size: 30, weight: .bold, design: .serif))
-                Text("Where the money came from and what it did. \(data.period.title).")
+                Text("Where the money came from and what it did. \(data.title).")
                     .font(.title3)
                     .foregroundStyle(.secondary)
             }
@@ -282,7 +294,7 @@ struct VerdictCard: View {
     private func detail(income: Double, consumed: Double, within: Bool, share: Double) -> String {
         guard income > 0 else { return "Add the account your pay goes into and this will say whether spending stayed within it." }
         let cents = Int((share * 100).rounded())
-        let period = data.period.title
+        let period = data.title
         if within {
             return "\(period): of every dollar that came in, \(cents)¢ was consumed (living, taxes, interest). "
                 + "\(Money.format(data.surplus, cents: false)) was left to save or invest."
@@ -707,6 +719,92 @@ private struct InvestmentsCard: View {
                     }
                 }
             }
+        }
+    }
+}
+
+
+// MARK: - Details reached from the Overview
+
+/// Who paid, and how much: every source of income in the stretch.
+struct IncomeDetail: View {
+    @Environment(BudgetStore.self) private var store
+    let data: CashFlowData
+
+    var body: some View {
+        let paidOut = data.investmentLines.filter { $0.category == .investmentIncome && $0.moneyIn > 0.5 }
+        VStack(alignment: .leading, spacing: 22) {
+            DetailTitle(title: "Income", figure: data.totalIncome, subtitle: "What came in. \(data.title).")
+            HStack(alignment: .top, spacing: 22) {
+                VStack(spacing: 22) {
+                    lines("Salary & income", "What you were paid", data.incomeLines.filter { $0.moneyIn > 0.5 }, total: data.income)
+                    if !paidOut.isEmpty { lines("Paid out by investments", "Dividends, interest and distributions", paidOut, total: data.fromInvestments) }
+                    if data.unsortedIn > 0.5 {
+                        Text("\(Money.format(data.unsortedIn, cents: false)) more came in as deposits nobody has named yet.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+                if data.months.count > 1 { MonthlyFlowCard(data: data).frame(minWidth: 360) }
+            }
+        }
+    }
+
+    private func lines(_ title: String, _ subtitle: String, _ lines: [CashFlowData.Line], total: Double) -> some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    SectionHeader(title: title, subtitle: subtitle)
+                    Spacer()
+                    Text(Money.format(total, cents: false)).font(.headline).monospacedDigit()
+                }
+                if lines.isEmpty { Text("Nothing in this stretch.").foregroundStyle(.secondary) }
+                ForEach(lines.prefix(14)) { line in
+                    Button { if let name = store.place(line.key)?.name { store.showPlace(name) } } label: {
+                        HStack(spacing: 12) {
+                            MerchantIcon(name: line.name, category: line.category, size: 30)
+                            Text(line.name).font(.body.weight(.medium)).lineLimit(1)
+                            Spacer()
+                            Text(Money.format(line.moneyIn)).monospacedDigit()
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+/// The investment side on its own: what was put to work, and what came back.
+struct InvestingDetail: View {
+    @Environment(BudgetStore.self) private var store
+    let data: CashFlowData
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            DetailTitle(title: "Investing", figure: data.built, subtitle: "Money put to work. It isn't spending: it's still yours. \(data.title).")
+            PurposeCard(data: data)
+            if data.investmentLines.isEmpty {
+                Text("Nothing on the investment side in this stretch.").foregroundStyle(.secondary)
+            } else {
+                InvestmentsCard(data: data, open: { key in if let name = store.place(key)?.name { store.showPlace(name) } })
+            }
+        }
+    }
+}
+
+struct DetailTitle: View {
+    let title: String
+    let figure: Double
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.title3.weight(.medium)).foregroundStyle(.secondary)
+            Text(Money.format(figure, cents: false))
+                .font(.system(size: 54, weight: .bold, design: .rounded)).monospacedDigit()
+            Text(subtitle).font(.callout).foregroundStyle(.secondary)
         }
     }
 }

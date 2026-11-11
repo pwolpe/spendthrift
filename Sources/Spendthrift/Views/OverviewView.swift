@@ -23,55 +23,194 @@ struct OverviewView: View {
     }
 
     private var content: some View {
-            VStack(alignment: .leading, spacing: 20) {
-                if !DebugHooks.off("daily") { BannerCard() }
-                OnThisDayLine()
-                CloudTroubleBanner()
-                DownloadsBanner()
-                if !store.reviewItems.isEmpty, !store.isSuggesting { reviewBanner }
-                if !store.missingStatements.isEmpty, !store.isImporting { missingBanner }
+        VStack(alignment: .leading, spacing: 20) {
+            if let detail = store.overviewDetail, flowData != nil {
+                detailPage(detail)
+            } else {
+                summary
+            }
+        }
+        .padding(28)
+        .frame(maxWidth: 1200)
+        .frame(maxWidth: .infinity)
+    }
 
-                // The judgment that matters most, always in sight: did consumption stay within income?
-                if store.months.count > 2, let period = ReportData.periods(for: store).first {
-                    Button { store.selection = .cashflow } label: {
-                        VerdictCard(data: CashFlowData(store: store, period: period), compact: true)
-                    }
-                    .buttonStyle(.plain)
+    /// The stretch on screen, summed: a month, or a year.
+    private var flowData: CashFlowData? {
+        if store.overviewShowsYear { return currentPeriod.map { CashFlowData(store: store, period: $0) } }
+        return currentMonth.map { CashFlowData(store: store, month: $0) }
+    }
+
+    private func open(_ detail: BudgetStore.OverviewDetail?) {
+        withAnimation(.snappy(duration: 0.28)) { store.overviewDetail = detail }
+    }
+
+    // MARK: The summary: one answer, then a few cards to step into
+
+    @ViewBuilder
+    private var summary: some View {
+        if !DebugHooks.off("daily") { BannerCard() }
+        OnThisDayLine()
+        CloudTroubleBanner()
+        DownloadsBanner()
+        if !store.reviewItems.isEmpty, !store.isSuggesting { reviewBanner }
+        if !store.missingStatements.isEmpty, !store.isImporting { missingBanner }
+        if store.months.count > 1 { scopePicker }
+        if let data = flowData {
+            // The judgment that matters most comes first: did living stay within income?
+            FlowHero(data: data) { open(.flow) }
+            let figures = Figures(store: store, data: data, month: store.overviewShowsYear ? nil : currentMonth)
+            HStack(alignment: .top, spacing: 16) {
+                SummaryCard(title: "Spending", symbol: "creditcard.fill", color: Theme.spent,
+                            figure: Money.format(data.spending, cents: false), note: figures.spendingNote, noteColor: figures.spendingNoteColor,
+                            action: { open(.spending) }) {
+                    if figures.categories.isEmpty { Text("No spending in this stretch.").font(.caption).foregroundStyle(.secondary) }
+                    else { MiniRing(slices: figures.categories) }
                 }
-                if store.months.count > 1 { scopePicker }
-
-                if store.overviewShowsYear, let period = currentPeriod {
-                    // The same questions, asked of a whole year: one page, two distances.
-                    ReportContent(data: ReportData(store: store, period: period), interactive: true)
-                } else if let m = currentMonth {
-                    header(m)
-                    beyondEveryday(m)
-                    // Two balanced columns: where this month went on the left; what stood out and the run
-                    // of months on the right. (Places have their own page now.)
-                    HStack(alignment: .top, spacing: 20) {
-                        VStack(spacing: 20) {
-                            if !DebugHooks.off("donut") { breakdownCard(m) }
-                        }
-                        VStack(spacing: 20) {
-                            NoticedCard(scope: .month(m))
-                            if !DebugHooks.off("trend") { trendCard(m) }
-                        }
-                        .frame(minWidth: 300, maxWidth: 420)
-                    }
-                    // What's ahead, side by side: the estimate for next month and the charges already due.
-                    HStack(alignment: .top, spacing: 20) {
-                        ForecastCard()
-                        if !DebugHooks.off("coming") { comingUpCard }
-                    }
-                    if !DebugHooks.off("stories") { storiesThisMonth(m) }
-                    if !DebugHooks.off("ceremony") { CeremonyCard(month: m) }
-                } else {
-                    TonySays(title: "Nothing here yet", message: "Drop a statement into this window and it all gets added up.", art: "welcome")
+                SummaryCard(title: "Income", symbol: Category.income.symbol, color: Category.income.color,
+                            figure: Money.format(data.totalIncome, cents: false), note: figures.incomeNote,
+                            action: { open(.income) }) {
+                    MiniBars(values: figures.income, labels: figures.labels, lit: figures.lit, color: Category.income.color)
+                }
+                SummaryCard(title: "Investing", symbol: "arrow.up.forward.circle.fill", color: Theme.goldDeep,
+                            figure: Money.format(data.built, cents: false), note: figures.investingNote,
+                            action: { open(.investing) }) {
+                    MiniBars(values: figures.invested, labels: figures.labels, lit: figures.lit, color: Theme.goldDeep)
                 }
             }
-            .padding(28)
-            .frame(maxWidth: 1200)
-            .frame(maxWidth: .infinity)
+            HStack(alignment: .top, spacing: 16) {
+                noticed
+                if !DebugHooks.off("coming") { comingUpCard }
+            }
+            if !store.overviewShowsYear, let m = currentMonth, !DebugHooks.off("stories") { storiesThisMonth(m) }
+        } else {
+            TonySays(title: "Nothing here yet", message: "Drop a statement into this window and it all gets added up.", art: "welcome")
+        }
+    }
+
+    @ViewBuilder
+    private var noticed: some View {
+        if store.overviewShowsYear {
+            switch currentPeriod {
+            case .year(let year)?: NoticedCard(scope: .year(year))
+            case .last12?: NoticedCard(scope: .last12)
+            case nil: EmptyView()
+            }
+        } else if let m = currentMonth {
+            NoticedCard(scope: .month(m))
+        }
+    }
+
+    /// The small figures on the cards: the run of months each sits in, and a line about each.
+    private struct Figures {
+        var labels: [String] = []
+        var income: [Double] = []
+        var invested: [Double] = []
+        var lit: Int?
+        var categories: [(category: Category, total: Double)] = []
+        var spendingNote: String?
+        var spendingNoteColor: Color = .secondary
+        var incomeNote: String?
+        var investingNote: String?
+
+        @MainActor init(store: BudgetStore, data: CashFlowData, month: Month?) {
+            // A month sits in the six months that end with it; a year shows its own months.
+            let window: [Month]
+            if let month {
+                let first = store.months.first ?? month
+                window = (0..<6).reversed().map { month.adding(-$0) }.filter { $0 >= first }
+                lit = window.count - 1
+            } else {
+                window = data.months
+            }
+            let place = Dictionary(uniqueKeysWithValues: window.enumerated().map { ($1, $0) })
+            income = Array(repeating: 0, count: window.count)
+            invested = income
+            for t in store.transactions {
+                guard let i = place[t.month] else { continue }
+                switch t.lane {
+                case .everyday: if t.isIncome || t.isUnsortedDeposit { income[i] -= t.amount }
+                case .investments:
+                    if t.amount > 0 { invested[i] += t.amount } else if t.category == .investmentIncome { income[i] -= t.amount }
+                default: break
+                }
+            }
+            labels = window.map { window.count > 6 ? String($0.shortName.prefix(1)) : $0.shortName }
+
+            if let month {
+                categories = store.categoryTotals(in: month)
+                let before = month.adding(-1)
+                if store.months.contains(before) {
+                    let diff = store.totalSpent(in: month) - store.totalSpent(in: before)
+                    spendingNote = "\(Money.format(abs(diff), cents: false)) \(diff <= 0 ? "less" : "more") than \(before.name)"
+                    spendingNoteColor = diff <= 0 ? Theme.good : Theme.caution
+                }
+            } else {
+                var totals: [Category: Double] = [:]
+                for m in window { for item in store.categoryTotals(in: m) { totals[item.category, default: 0] += item.total } }
+                categories = totals.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }
+                if !window.isEmpty { spendingNote = "About \(Money.format(data.spending / Double(window.count), cents: false)) a month" }
+            }
+            if let top = (data.incomeLines.filter { $0.moneyIn > 0.5 }).max(by: { $0.moneyIn < $1.moneyIn }) {
+                incomeNote = data.incomeLines.filter { $0.moneyIn > 0.5 }.count == 1 ? "From \(top.name)" : "Mostly from \(top.name)"
+            } else if data.fromInvestments > 0.5 {
+                incomeNote = "Paid out by investments"
+            } else {
+                incomeNote = "Nothing came in"
+            }
+            let back = data.fromInvestments + data.soldOrRedeemed
+            investingNote = data.built > 0.5 ? (back > 0.5 ? "\(Money.format(back, cents: false)) came back" : "Still yours")
+                : (back > 0.5 ? "\(Money.format(back, cents: false)) came back" : "Nothing put in")
+        }
+    }
+
+    // MARK: A card, stepped into
+
+    @ViewBuilder
+    private func detailPage(_ detail: BudgetStore.OverviewDetail) -> some View {
+        HStack(spacing: 12) {
+            Button { open(nil) } label: {
+                HStack(spacing: 5) { Image(systemName: "chevron.left").font(.callout.weight(.semibold)); Text("Overview").font(.headline) }
+                    .foregroundStyle(.tint)
+                    .padding(.horizontal, 14).frame(height: 34)
+                    .background(Color.primary.opacity(0.07), in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .help("Back to the Overview (Esc)")
+            if store.months.count > 1 { scopePicker }
+        }
+        if let data = flowData {
+            switch detail {
+            case .flow: CashFlowContent(data: data, interactive: true)
+            case .income: IncomeDetail(data: data)
+            case .investing: InvestingDetail(data: data)
+            case .spending: spendingDetail
+            }
+        }
+    }
+
+    /// Everyday spending, close up: where it went, the run of months, what's ahead.
+    @ViewBuilder
+    private var spendingDetail: some View {
+        if store.overviewShowsYear, let period = currentPeriod {
+            ReportContent(data: ReportData(store: store, period: period), interactive: true)
+        } else if let m = currentMonth {
+            header(m)
+            HStack(alignment: .top, spacing: 20) {
+                VStack(spacing: 20) {
+                    if !DebugHooks.off("donut") { breakdownCard(m) }
+                }
+                VStack(spacing: 20) {
+                    if !DebugHooks.off("trend") { trendCard(m) }
+                    topPlacesCard(m)
+                    ForecastCard()
+                }
+                .frame(minWidth: 300, maxWidth: 420)
+            }
+            if !DebugHooks.off("ceremony") { CeremonyCard(month: m) }
+        }
     }
 
     // MARK: Month or year
@@ -99,12 +238,31 @@ struct OverviewView: View {
                     .fixedSize()
                 }
                 Spacer()
-                Button {
-                    ReportExporter.savePDF(data: ReportData(store: store, period: current), store: store)
-                } label: {
-                    Label("Save as PDF", systemImage: "square.and.arrow.down")
+                if store.overviewDetail == .spending {
+                    Button {
+                        ReportExporter.savePDF(data: ReportData(store: store, period: current), store: store)
+                    } label: {
+                        Label("Save as PDF", systemImage: "square.and.arrow.down")
+                    }
+                    .help("Save the year as a PDF to print or share")
                 }
-                .help("Save the year as a PDF to print or share")
+            } else if let m = currentMonth {
+                let months = store.months
+                let index = months.firstIndex(of: m) ?? 0
+                HStack(spacing: 4) {
+                    Button { withAnimation { month = months[index - 1] } } label: {
+                        Image(systemName: "chevron.left").frame(width: 20, height: 20)
+                    }
+                    .disabled(index == 0)
+                    Text(m.title).font(.headline).frame(minWidth: 130)
+                    Button { withAnimation { month = months[index + 1] } } label: {
+                        Image(systemName: "chevron.right").frame(width: 20, height: 20)
+                    }
+                    .disabled(index >= months.count - 1)
+                }
+                .buttonStyle(.glass)
+                .controlSize(.large)
+                Spacer()
             } else {
                 Spacer()
             }
@@ -117,8 +275,6 @@ struct OverviewView: View {
         let total = store.totalSpent(in: m)
         let previous = store.totalSpent(in: m.adding(-1))
         let hasPrevious = store.months.contains(m.adding(-1))
-        let months = store.months
-        let index = months.firstIndex(of: m) ?? 0
 
         return HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 6) {
@@ -141,71 +297,6 @@ struct OverviewView: View {
                 }
             }
             Spacer()
-            HStack(spacing: 4) {
-                Button { withAnimation { month = months[index - 1] } } label: {
-                    Image(systemName: "chevron.left").frame(width: 20, height: 20)
-                }
-                .disabled(index == 0)
-                Text(m.title)
-                    .font(.headline)
-                    .frame(minWidth: 130)
-                Button { withAnimation { month = months[index + 1] } } label: {
-                    Image(systemName: "chevron.right").frame(width: 20, height: 20)
-                }
-                .disabled(index >= months.count - 1)
-            }
-            .buttonStyle(.glass)
-            .controlSize(.large)
-        }
-    }
-
-    /// Salary, taxes and investments for the month: visible, but apart from spending.
-    @ViewBuilder
-    private func beyondEveryday(_ m: Month) -> some View {
-        let month = store.transactions.filter { $0.month == m }
-        let salary = month.filter(\.isIncome).reduce(0) { $0 - $1.amount }
-        let taxes = month.filter { $0.lane == .taxes }.reduce(0) { $0 + $1.amount }
-        // Investing is not spending: money put to work is still his. It gets its own gold figure,
-        // apart from the month's total above, and what came back from investments gets another.
-        let invested = month.filter { $0.lane == .investments && $0.amount > 0 }.reduce(0) { $0 + $1.amount }
-        let returned = month.filter { $0.lane == .investments && $0.amount < 0 }.reduce(0) { $0 - $1.amount }
-        let investments = invested + returned
-        if salary != 0 || taxes != 0 || investments != 0 {
-            Button { store.selection = .cashflow } label: {
-                HStack(spacing: 22) {
-                    Text("Not counted as spending").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
-                    if invested > 0 {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.up.forward.circle.fill").font(.callout).foregroundStyle(Theme.goldDeep)
-                            Text("Invested").font(.callout.weight(.semibold))
-                            Text(Money.format(invested, cents: false)).font(.callout.weight(.bold)).monospacedDigit().foregroundStyle(Theme.goldDeep)
-                        }
-                        .help("Money put into investments this month. It isn't spending: it's still yours.")
-                    }
-                    if returned > 0 { aside("From investments", returned, Category.investmentIncome) }
-                    if salary != 0 { aside("Salary & income", salary, Category.income) }
-                    if taxes != 0 { aside("Income taxes", -taxes, Category.taxes) }
-                    Spacer()
-                    Label("Cash Flow", systemImage: "chevron.right")
-                        .labelStyle(.titleAndIcon)
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(.tint)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Color.primary.opacity(0.04), in: .rect(cornerRadius: 12, style: .continuous))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private func aside(_ title: String, _ amount: Double, _ category: Category) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: category.symbol).font(.caption.weight(.bold)).foregroundStyle(category.color)
-            Text(title).font(.callout).foregroundStyle(.secondary)
-            Text((amount >= 0 ? "+" : "−") + Money.format(abs(amount), cents: false))
-                .font(.callout.weight(.semibold)).monospacedDigit()
         }
     }
 
