@@ -298,6 +298,10 @@ struct TransactionInspector: View {
                         if let detail = store.orderDetail(for: t.id) {
                             ReceiptRule()
                             OrderItemsList(items: detail.items, kind: detail.kind, charged: t.amount)
+                            Button { store.showOrder(of: t.id) } label: {
+                                Label("See This Order in Amazon", systemImage: "shippingbox").frame(maxWidth: .infinity)
+                            }
+                            .help("Open the Amazon page at this order: every item, who ordered it, and a link to it at the shop")
                         }
                         ReceiptRule()
                         HStack(alignment: .firstTextBaseline) {

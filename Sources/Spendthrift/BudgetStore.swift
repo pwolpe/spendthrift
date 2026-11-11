@@ -147,6 +147,17 @@ final class BudgetStore {
     var orderWho: String?
     var orderCategory: Category?
     var orderList = OrderList.orders
+    /// One order on show by itself (arrived at from a charge), until the person clears it.
+    var orderOnly: String?
+
+    /// A statement charge at one of the shops an order history covers, and whether an order explains it.
+    struct OrderCharge: Identifiable {
+        let id: UUID
+        let date: String
+        let amount: Double
+        let itemized: Bool
+    }
+    private(set) var orderChargeList: [OrderCharge] = []
 
     enum OrderScope: Hashable { case all, year(Int), month(Month) }
     enum OrderList: String, CaseIterable, Identifiable { case orders = "Orders", items = "Items"; var id: String { rawValue } }
@@ -217,6 +228,47 @@ final class BudgetStore {
             if orders.matches[c.id.uuidString] != nil { coverage.itemized += 1 } else if let last, c.date > last { coverage.newer += 1 }
         }
         orderCoverage = coverage
+        orderChargeList = orderCharges.map { OrderCharge(id: $0.id, date: $0.date, amount: Double($0.cents) / 100, itemized: orders.matches[$0.id.uuidString] != nil) }
+            .filter { charge in !apartEntryIDs.contains(charge.id) }
+    }
+
+    /// Charges on accounts kept apart: not the person's own, so not part of this tie-out either.
+    private var apartEntryIDs: Set<UUID> { Set(setApart.map(\.id)) }
+
+    /// Goes to the Amazon page showing just the order behind one charge.
+    func showOrder(of charge: Transaction.ID) {
+        guard let order = orders.items(for: charge).first?.orderID else { return }
+        withAnimation(.snappy(duration: 0.25)) {
+            placeFocus = nil; chargesFocus = nil
+            orderScope = .all; orderWho = nil; orderCategory = nil; orderSearch = ""; orderList = .orders
+            orderOnly = order
+            selection = .orders
+        }
+    }
+
+    /// A few sentences about one stretch of orders, written by the model from totals the app worked out.
+    /// Written once for a given set of facts and kept; nil while it is being written or when the model is off.
+    func orderRead(key: String, basis: String, facts: String) async -> String? {
+        if let kept = orders.reads?[key], kept.hasPrefix(basis + "\t") { return String(kept.dropFirst(basis.count + 1)) }
+        guard CloudAI.isEnabled else { return nil }
+        let system = """
+        You are looking at a household's online order history for one stretch of time, as totals worked out by a \
+        budgeting app. Write two or three plain sentences that tell them something true and specific about it: \
+        what the money mostly went on, anything bought again and again, the one or two purchases that stand out, \
+        how the stretch compares with the one before when that is given. Use the names and amounts given, rounded \
+        to whole dollars. Dry and warm, like a friend who is good with numbers. No advice, no exclamation marks, \
+        no lists, no opening like "In this period". Do not invent anything that is not in the facts.
+        """
+        guard let text = await Timeout.run(45, { try? await CloudAI.complete(job: "Amazon: the short version", system: system, user: facts, json: false, maxTokens: 400, temperature: 0.4, timeout: 40) }),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var reads = orders.reads ?? [:]
+        reads[key] = basis + "\t" + clean
+        if reads.count > 200 { reads = Dictionary(uniqueKeysWithValues: Array(reads).suffix(150)) }
+        orders.reads = reads
+        let book = orders, file = paths.ordersFile
+        Task.detached { book.save(to: file) }
+        return clean
     }
 
     /// What a charge paid for, if an order on file explains it. Nil for every other charge,

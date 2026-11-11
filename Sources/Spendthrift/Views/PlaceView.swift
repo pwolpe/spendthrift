@@ -25,6 +25,7 @@ struct PlaceView: View {
                     .keyboardShortcut(.cancelAction)
                 if let first = all.first {
                     header(all, first)
+                    orderLink(all)
                     noteField
                     tiles(all)
                     if Set(all.map(\.month)).count > 1 { monthly(all) }
@@ -41,6 +42,25 @@ struct PlaceView: View {
         .navigationTitle(name)
         .onAppear { draft = name }
         .onChange(of: name) { draft = name }
+    }
+
+    /// For a shop whose order history is on file: how many of these charges have their items, and the way to them.
+    @ViewBuilder private func orderLink(_ all: [Transaction]) -> some View {
+        let itemized = all.filter { store.orderDetail(for: $0.id) != nil }
+        if !itemized.isEmpty {
+            HStack(spacing: 12) {
+                Image(systemName: "shippingbox.fill").foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(itemized.count) of \(all.count) charges here have their items").font(.callout.weight(.medium))
+                    Text("From your Amazon order history. Open any charge to see what was in it, or browse everything ordered.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Open Amazon") { store.placeFocus = nil; store.orderOnly = nil; store.selection = .orders }
+            }
+            .padding(12)
+            .background(Theme.accent.opacity(0.07), in: .rect(cornerRadius: 12, style: .continuous))
+        }
     }
 
     private func header(_ all: [Transaction], _ first: Transaction) -> some View {

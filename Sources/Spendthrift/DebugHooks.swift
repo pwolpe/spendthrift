@@ -240,6 +240,13 @@ enum DebugHooks {
             }
             if !store.orderRows.isEmpty {
                 await snap("45-orders", outDir) { OrdersView(scrolls: false) }
+                if env["SPENDTHRIFT_ORDERREAD"] != nil {
+                    for scope in [BudgetStore.OrderScope.all, .year(store.orderRows.last?.month.year ?? 2026)] {
+                        store.orderScope = scope
+                        print("ORDERREAD \(scope): \(await OrdersView(scrolls: false).shortVersionForTest() ?? "(nothing)")")
+                    }
+                    store.orderScope = .all
+                }
                 if let latest = store.orderRows.last {
                     store.orderScope = .year(latest.month.year)
                     await snap("45-orders-year", outDir) { OrdersView(scrolls: false) }

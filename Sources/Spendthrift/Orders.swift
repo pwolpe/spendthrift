@@ -21,6 +21,19 @@ struct OrderItem: Codable, Hashable {
     var listedCents: Int?
     /// Whose account it was ordered on (a first name), when the export says.
     var who: String?
+    /// The shop's own number for the product, when it has one: enough to open its page.
+    var asin: String?
+
+    /// The product's page at the shop, when it can be worked out.
+    var productURL: URL? {
+        guard let asin, asin.count == 10, asin.allSatisfy({ $0.isLetter || $0.isNumber }) else { return nil }
+        return URL(string: "https://www.amazon.com/dp/\(asin)")
+    }
+    /// The order's own page at the shop (the person has to be signed in there to see it).
+    var orderURL: URL? {
+        guard shop != .groceries, orderID.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { return nil }
+        return URL(string: "https://www.amazon.com/gp/your-account/order-details?orderID=\(orderID)")
+    }
 
     /// Where it's filed before the model has read it: only as fine as the shop's own shelves allow.
     var roughCategory: Category {
@@ -71,6 +84,8 @@ struct OrderBook: Codable {
     var sorted: [String: ItemSort]?
     /// Money that came back, by order.
     var refunds: [String: Int]?
+    /// A few sentences the model wrote about one stretch of orders, kept with what they were written from.
+    var reads: [String: String]?
 
     /// A listing read by the model: what the thing is in plain words, and where it belongs in the budget.
     struct ItemSort: Codable, Hashable {
@@ -184,10 +199,11 @@ enum OrderExport {
             let groceries = ["wholefoods", "fresh", "primenow", "amazon go"].contains { site.contains($0) }
             let listed = cents(cell(row, "Shipment Item Subtotal")) + cents(cell(row, "Shipment Item Subtotal Tax"))
             let department = cell(row, "Department")
+            let asin = cell(row, "ASIN")
             return OrderItem(orderID: id, shop: groceries ? .groceries : .store, date: String(when.prefix(10)),
                              shipment: String(when.prefix(16)), name: name, department: department.isEmpty ? nil : department,
                              cents: cents(cell(row, "Total Amount")), quantity: max(1, Int(cell(row, "Original Quantity")) ?? 1),
-                             listedCents: listed > 0 ? listed : nil)
+                             listedCents: listed > 0 ? listed : nil, asin: asin.hasPrefix("_") || asin.isEmpty ? nil : asin)
         }
     }
 
@@ -204,8 +220,10 @@ enum OrderExport {
                 if found[key]!.name.isEmpty { found[key]!.name = cell(row, "Product Name") }
             } else {
                 order.append(key)
+                let asin = cell(row, "ASIN")
                 found[key] = OrderItem(orderID: id, shop: .digital, date: String(when.prefix(10)), shipment: String(when.prefix(16)),
-                                       name: cell(row, "Product Name"), department: nil, cents: amount, quantity: 1, listedCents: nil)
+                                       name: cell(row, "Product Name"), department: nil, cents: amount, quantity: 1, listedCents: nil,
+                                       asin: asin.isEmpty ? nil : asin)
             }
         }
         return order.compactMap { found[$0] }.map { item in

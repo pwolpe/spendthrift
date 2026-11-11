@@ -165,7 +165,7 @@ struct SidebarView: View {
                 SidebarRow(item: .places, title: "Payees", symbol: "storefront.fill", current: current)
                 // Only there once an order history has been added: a closer look, never a requirement.
                 if !store.orderRows.isEmpty || store.selection == .orders {
-                    SidebarRow(item: .orders, title: "Orders", symbol: "shippingbox.fill", current: current)
+                    SidebarRow(item: .orders, title: "Amazon", symbol: "shippingbox.fill", current: current)
                 }
                 // Someone else's money looked after here: followed on its own page, counted nowhere else.
                 if store.accounts.contains(where: { $0.apart != nil }) || store.selection == .apart {

@@ -36,14 +36,14 @@ struct OrderItemsList: View {
     }
 }
 
-/// The order histories that were added, as a place to browse: every order and what was in it,
-/// by all time, year or month, with where the money went and how it moved. A closer look at
-/// charges the statements only name; the rest of the app works the same without it.
+/// Amazon, opened up: every order from the order histories that were added (Amazon, Whole Foods,
+/// Kindle), what was in it, where the money went, and how it lines up with the card charges.
+/// A closer look at charges the statements only name; the rest of the app works the same without it.
 struct OrdersView: View {
-    @Environment(BudgetStore.self) private var store
+    private var store: BudgetStore { .shared }
     @FocusState private var searching: Bool
     @State private var open: String?
-    @State private var hoveredAngle: Double?
+    @State private var read: String?
     /// False when rendered for a test snapshot.
     var scrolls = true
 
@@ -60,16 +60,20 @@ struct OrdersView: View {
         var charges: [UUID] { var seen: Set<UUID> = []; return rows.compactMap(\.charge).filter { seen.insert($0).inserted } }
     }
 
+    private func inStretch(_ month: Month) -> Bool {
+        switch store.orderScope {
+        case .all: true
+        case .year(let year): month.year == year
+        case .month(let m): month == m
+        }
+    }
+
     /// Everything on screen follows from these: the stretch, the person, the search, and the category clicked.
     private func rows(ignoringCategory: Bool = false) -> [Row] {
+        if let only = store.orderOnly { return store.orderRows.filter { $0.item.orderID == only && $0.item.cents > 0 } }
         let query = PlacesView.squeeze(store.orderSearch)
         return store.orderRows.filter { row in
-            guard row.item.cents > 0 else { return false }
-            switch store.orderScope {
-            case .all: break
-            case .year(let year): if row.month.year != year { return false }
-            case .month(let month): if row.month != month { return false }
-            }
+            guard row.item.cents > 0, inStretch(row.month) else { return false }
             if let who = store.orderWho, row.item.who != who { return false }
             if !ignoringCategory, let category = store.orderCategory, row.category != category { return false }
             return query.isEmpty || row.haystack.contains(query)
@@ -83,8 +87,12 @@ struct OrdersView: View {
         case .month(let month): month.title
         }
     }
+    /// Nothing narrowing the page but the stretch: the state the tie-out and the summary are about.
+    private var plain: Bool {
+        store.orderWho == nil && store.orderCategory == nil && store.orderOnly == nil && store.orderSearch.trimmingCharacters(in: .whitespaces).isEmpty
+    }
 
-    private static func money(_ cents: Int) -> String { Money.format(Double(cents) / 100) }
+    static func money(_ cents: Int, cents showCents: Bool = true) -> String { Money.format(Double(cents) / 100, cents: showCents) }
     private static let day = Date.FormatStyle.dateTime.month(.abbreviated).day().year()
 
     var body: some View {
@@ -95,37 +103,52 @@ struct OrdersView: View {
         MaybeScroll(scrolls: scrolls) {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Orders").font(.system(size: 30, weight: .bold, design: .serif))
-                    Text("What was inside the boxes: every order, what it was, and where that money went.")
-                        .font(.title3).foregroundStyle(.secondary)
+                    Text("Amazon").font(.system(size: 30, weight: .bold, design: .serif))
+                    Text("What was inside the boxes: every Amazon, Whole Foods and Kindle order, and where that money went.")
+                        .font(.title3).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                controls
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Find anything you ordered: coffee, charger, a book title…", text: $store.orderSearch)
-                        .textFieldStyle(.plain)
-                        .font(.title3)
-                        .focused($searching)
-                    if finding {
-                        Button { store.orderSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.plain).foregroundStyle(.tertiary)
+                if let only = store.orderOnly {
+                    HStack(spacing: 10) {
+                        Label("Showing one order: \(only)", systemImage: "shippingbox.fill").font(.callout.weight(.medium))
+                        Button("Show Everything") { withAnimation(.snappy(duration: 0.2)) { store.orderOnly = nil } }
                     }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Theme.accent.opacity(0.08), in: .rect(cornerRadius: 10, style: .continuous))
+                } else {
+                    controls
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Find anything you ordered: coffee, charger, a book title…", text: $store.orderSearch)
+                            .textFieldStyle(.plain)
+                            .font(.title3)
+                            .focused($searching)
+                        if finding {
+                            Button { store.orderSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
+                                .buttonStyle(.plain).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Theme.sheet, in: .rect(cornerRadius: 12, style: .continuous))
+                    .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(searching ? Theme.accent.opacity(0.55) : Theme.hairline) }
                 }
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .background(Theme.sheet, in: .rect(cornerRadius: 12, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(searching ? Theme.accent.opacity(0.55) : Theme.hairline) }
 
                 if everything.isEmpty {
                     TonySays(title: finding ? "Nothing ordered by that name" : "No orders in \(scopeTitle)",
                              message: finding ? "Nothing matches “\(store.orderSearch)” in \(scopeTitle.lowercased()). Try one word of what it was, or look in All Time."
                                               : "The order history on file has nothing here. Step to another stretch, or choose All Time.",
                              art: "nothing")
+                } else if store.orderOnly != nil {
+                    listing(list)
                 } else {
-                    HStack(alignment: .top, spacing: 18) {
-                        summary(list, finding: finding)
-                        ring(everything)
+                    if plain { shortVersion(list) }
+                    // Side by side when there is room for both to be read in full; one under the other when not.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 18) { summary(list, finding: finding); ring(everything) }
+                        VStack(alignment: .leading, spacing: 18) { summary(list, finding: finding); ring(everything) }
                     }
                     trend(list)
+                    if !finding { favourites(list) }
+                    if plain { tieOut() }
                     listing(list)
                 }
             }
@@ -133,8 +156,8 @@ struct OrdersView: View {
             .frame(maxWidth: 980, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .navigationTitle("Orders")
-        .navigationSubtitle(scopeTitle)
+        .navigationTitle("Amazon")
+        .navigationSubtitle(store.orderOnly == nil ? scopeTitle : "One order")
     }
 
     // MARK: The stretch and the person
@@ -190,16 +213,75 @@ struct OrdersView: View {
         }
     }
 
+    // MARK: The short version
+
+    /// What was bought more than once, most often first.
+    private static func repeats(_ list: [Row]) -> [(name: String, times: Int, cents: Int)] {
+        Dictionary(grouping: list, by: \.name).map { (name: $0.key, times: $0.value.count, cents: $0.value.reduce(0) { $0 + $1.net }) }
+            .filter { $0.times >= 3 }
+            .sorted { ($0.times, $0.cents, $1.name) > ($1.times, $1.cents, $0.name) }
+    }
+
+    /// The facts the model writes its few sentences from: totals the app has already worked out.
+    private func facts(_ list: [Row]) -> String {
+        let total = list.reduce(0) { $0 + $1.net }
+        var lines = ["Stretch: \(scopeTitle)", "Orders: \(Set(list.map(\.item.orderID)).count), items: \(list.count), total after refunds: \(Self.money(total, cents: false))"]
+        let byCategory = Dictionary(grouping: list, by: \.category).map { ($0.key.displayName, $0.value.reduce(0) { $0 + $1.net }) }.sorted { $0.1 > $1.1 }
+        lines.append("By category: " + byCategory.prefix(7).map { "\($0.0) \(Self.money($0.1, cents: false))" }.joined(separator: "; "))
+        let people = Dictionary(grouping: list.filter { $0.item.who != nil }, by: { $0.item.who! }).map { ($0.key, $0.value.reduce(0) { $0 + $1.net }) }.sorted { $0.1 > $1.1 }
+        if people.count > 1 { lines.append("By who ordered: " + people.map { "\($0.0) \(Self.money($0.1, cents: false))" }.joined(separator: "; ")) }
+        lines.append("Biggest single items: " + list.sorted { $0.net > $1.net }.prefix(6).map { "\($0.name) \(Self.money($0.net, cents: false))" }.joined(separator: "; "))
+        let again = Self.repeats(list).prefix(6)
+        if !again.isEmpty { lines.append("Bought again and again: " + again.map { "\($0.name), \($0.times) times, \(Self.money($0.cents, cents: false))" }.joined(separator: "; ")) }
+        // The stretch before, for comparison.
+        let before: [Row]? = switch store.orderScope {
+        case .all: nil
+        case .year(let y): store.orderRows.filter { $0.month.year == y - 1 && $0.item.cents > 0 }
+        case .month(let m): store.orderRows.filter { $0.month == m.adding(-1) && $0.item.cents > 0 }
+        }
+        if let before, !before.isEmpty { lines.append("The stretch before: \(Self.money(before.reduce(0) { $0 + $1.net }, cents: false)) across \(Set(before.map(\.item.orderID)).count) orders") }
+        if let through = store.orderCoverage.through, case .all = store.orderScope {
+            lines.append("Order history runs from \(list.map(\.date).min().map { $0.formatted(.dateTime.year()) } ?? "") to \(through.formatted(Self.day))")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// For tests: the few sentences for the stretch on show, written now.
+    func shortVersionForTest() async -> String? {
+        let list = rows()
+        return await store.orderRead(key: scopeTitle, basis: "\(list.count)|\(list.reduce(0) { $0 + $1.net })", facts: facts(list))
+    }
+
+    @ViewBuilder private func shortVersion(_ list: [Row]) -> some View {
+        let key = scopeTitle
+        let basis = "\(list.count)|\(list.reduce(0) { $0 + $1.net })"
+        Group {
+            if let read {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "sparkles").foregroundStyle(Theme.accent).padding(.top, 2)
+                    Text(read).font(.system(size: 16, design: .serif)).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.sheet, in: .rect(cornerRadius: 14, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline) }
+                .transition(.opacity)
+            }
+        }
+        .task(id: key + basis) {
+            guard scrolls else { return }
+            read = nil
+            let text = await store.orderRead(key: key, basis: basis, facts: facts(list))
+            withAnimation(.easeOut(duration: 0.3)) { read = text }
+        }
+    }
+
     // MARK: What it came to
 
-    /// The total as a receipt, with what the cards were actually charged beside it: order totals and
-    /// statements are two sets of books, and this is where they are shown side by side.
     private func summary(_ list: [Row], finding: Bool) -> some View {
         let ordered = list.reduce(0) { $0 + $1.item.cents }, net = list.reduce(0) { $0 + $1.net }
         let orders = Set(list.map(\.item.orderID)).count
-        let chargeIDs = Set(list.compactMap(\.charge))
-        let charged = store.transactions.filter { chargeIDs.contains($0.id) }.reduce(0.0) { $0 + $1.amount }
-        let unpaid = Set(list.filter { $0.charge == nil }.map(\.item.orderID)).count
         var title = ["What was ordered", scopeTitle]
         if let who = store.orderWho { title.append(who) }
         if let category = store.orderCategory { title.append(category.displayName) }
@@ -214,20 +296,13 @@ struct OrdersView: View {
                 }
                 ReceiptRule()
                 ReceiptLine(value: Self.money(net), bold: true) { Text("TOTAL").font(Theme.mono(13, .bold)) }
-                ReceiptRule()
-                ReceiptLine(value: Money.format(charged)) {
-                    Text("On your statements (\(chargeIDs.count) \(chargeIDs.count == 1 ? "charge" : "charges"))").foregroundStyle(.secondary)
-                }
-                Text(unpaid == 0 ? "Every order here has its card charge. Totals can still differ by points or a gift balance."
-                                 : "\(unpaid.formatted()) \(unpaid == 1 ? "order has" : "orders have") no card charge on file: older than your statements, paid with a gift balance or another card, or newer than the last statement.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if store.isReadingOrders {
                     Label("Still reading what each item is. Names and categories fill in as it goes.", systemImage: "sparkles")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
-        .frame(maxWidth: 400)
+        .frame(width: 360)
     }
 
     // MARK: Where it went
@@ -240,7 +315,7 @@ struct OrdersView: View {
         let sum = max(1, totals.reduce(0) { $0 + $1.cents })
         let chosen = store.orderCategory
         return Card(padding: 16) {
-            HStack(alignment: .center, spacing: 18) {
+            HStack(alignment: .center, spacing: 20) {
                 Chart(totals.filter { $0.cents * 250 >= sum }, id: \.category) { item in
                     SectorMark(angle: .value("Amount", item.cents), innerRadius: .ratio(0.62),
                                outerRadius: chosen == item.category ? .ratio(1) : .ratio(0.93), angularInset: 1.5)
@@ -248,26 +323,28 @@ struct OrdersView: View {
                         .foregroundStyle(item.category.color.gradient)
                         .opacity(chosen == nil || chosen == item.category ? 1 : 0.35)
                 }
-                .frame(width: 150, height: 150)
-                VStack(alignment: .leading, spacing: 5) {
+                .frame(width: 132, height: 132)
+                // Every name in full: a legend that reads "Sho…" says nothing.
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
                     ForEach(totals.prefix(8), id: \.category) { item in
-                        Button {
-                            withAnimation(.snappy(duration: 0.2)) { store.orderCategory = chosen == item.category ? nil : item.category }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Circle().fill(item.category.color).frame(width: 9, height: 9)
-                                Text(item.category.displayName).lineLimit(1)
-                                    .fontWeight(chosen == item.category ? .semibold : .regular)
-                                Spacer(minLength: 8)
-                                Text("\(Int((Double(item.cents) / Double(sum) * 100).rounded()))%").foregroundStyle(.secondary).monospacedDigit()
-                                Text(Self.money(item.cents)).font(Theme.mono(12, .medium)).frame(minWidth: 78, alignment: .trailing)
+                        GridRow {
+                            Button {
+                                withAnimation(.snappy(duration: 0.2)) { store.orderCategory = chosen == item.category ? nil : item.category }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Circle().fill(item.category.color).frame(width: 9, height: 9)
+                                    Text(item.category.displayName).fontWeight(chosen == item.category ? .semibold : .regular).fixedSize()
+                                }
+                                .contentShape(Rectangle())
                             }
-                            .font(.callout)
-                            .opacity(chosen == nil || chosen == item.category ? 1 : 0.5)
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            .help(chosen == item.category ? "Show every category again" : "Show only \(item.category.displayName)")
+                            Text("\(Int((Double(item.cents) / Double(sum) * 100).rounded()))%").foregroundStyle(.secondary).monospacedDigit()
+                                .gridColumnAlignment(.trailing)
+                            Text(Self.money(item.cents, cents: false)).font(Theme.mono(12.5, .medium)).gridColumnAlignment(.trailing).fixedSize()
                         }
-                        .buttonStyle(.plain)
-                        .help(chosen == item.category ? "Show every category again" : "Show only \(item.category.displayName)")
+                        .font(.callout)
+                        .opacity(chosen == nil || chosen == item.category ? 1 : 0.5)
                     }
                     if totals.count > 8 {
                         Text("and \(totals.count - 8) smaller").font(.caption).foregroundStyle(.tertiary)
@@ -275,7 +352,7 @@ struct OrdersView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     // MARK: How it moved
@@ -330,39 +407,160 @@ struct OrdersView: View {
         }
     }
 
+    // MARK: The things themselves
+
+    /// What keeps coming back, and what cost the most: the two questions people ask of an order history.
+    @ViewBuilder private func favourites(_ list: [Row]) -> some View {
+        let again = Self.repeats(list).prefix(6)
+        let biggest = list.sorted { $0.net > $1.net }.prefix(6)
+        HStack(alignment: .top, spacing: 18) {
+            if !again.isEmpty {
+                Card(padding: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("BOUGHT AGAIN AND AGAIN").font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
+                        ForEach(Array(again), id: \.name) { item in
+                            Button { store.orderSearch = item.name } label: {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text("\(item.times)×").font(Theme.mono(12, .bold)).foregroundStyle(Theme.accent).frame(width: 34, alignment: .trailing)
+                                    Text(item.name).font(.callout).lineLimit(1)
+                                    Spacer(minLength: 8)
+                                    Text(Self.money(item.cents, cents: false)).font(Theme.mono(12, .medium))
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).help("Show every time this was ordered")
+                        }
+                    }
+                }
+            }
+            Card(padding: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("THE BIGGEST THINGS").font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
+                    ForEach(Array(biggest)) { row in
+                        Button { store.orderOnly = row.item.orderID } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Circle().fill(row.category.color).frame(width: 8, height: 8)
+                                Text(row.name).font(.callout).lineLimit(1)
+                                Spacer(minLength: 8)
+                                Text(row.date.formatted(.dateTime.month(.abbreviated).year())).font(.caption).foregroundStyle(.secondary)
+                                Text(Self.money(row.net, cents: false)).font(Theme.mono(12, .medium)).frame(minWidth: 56, alignment: .trailing)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).help("Open this order")
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: How it ties to the cards
+
+    /// Order totals and card charges are two sets of books. This says, without fuss, how far they
+    /// agree for the stretch on screen and what the gap is made of; it narrows as more history is added.
+    @ViewBuilder private func tieOut() -> some View {
+        let charges = store.orderChargeList.filter { charge in
+            guard let date = DateParsing.parse(charge.date, format: "yyyy-MM-dd") else { return false }
+            return inStretch(Month(date: date))
+        }
+        if !charges.isEmpty {
+            let total = charges.reduce(0) { $0 + $1.amount }
+            let open = charges.filter { !$0.itemized }
+            let openTotal = open.reduce(0) { $0 + $1.amount }
+            let through = store.orderCoverage.through.map { DateParsing.iso.string(from: $0) } ?? ""
+            let newer = open.filter { $0.date > through }
+            let share = total > 0 ? Int(((total - openTotal) / total * 100).rounded()) : 0
+            let firstCharge = store.orderChargeList.map(\.date).min() ?? ""
+            let stretch = rows(ignoringCategory: true)
+            let unpaid = Dictionary(grouping: stretch, by: \.item.orderID).filter { !$0.value.contains { $0.charge != nil } }
+            let early = unpaid.filter { ($0.value.map { DateParsing.iso.string(from: $0.date) }.max() ?? "") < firstCharge }.count
+            let lastCharge = store.orderChargeList.map(\.date).max() ?? ""
+            let late = unpaid.filter { ($0.value.map { DateParsing.iso.string(from: $0.date) }.min() ?? "") > lastCharge }.count
+            Card(padding: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("HOW THIS TIES TO YOUR CARDS").font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(share)% of the dollars tie").font(.callout.weight(.medium)).foregroundStyle(share >= 95 ? Theme.good : .primary)
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.primary.opacity(0.08))
+                            Capsule().fill(Theme.inkFill.gradient).frame(width: max(4, geo.size.width * CGFloat(share) / 100))
+                        }
+                    }
+                    .frame(height: 7)
+                    ReceiptLine(value: Money.format(total)) { Text("\(charges.count.formatted()) card charges from these shops, \(scopeTitle.lowercased())").font(.callout) }
+                    ReceiptLine(value: Money.format(total - openTotal)) { Text("\((charges.count - open.count).formatted()) of them matched to an order, item by item").font(.callout) }
+                    if !open.isEmpty {
+                        ReceiptLine(value: Money.format(openTotal)) {
+                            Button {
+                                store.showCharges(TransactionFilter(ids: Set(open.map(\.id)), title: "Amazon charges with no order behind them"))
+                            } label: {
+                                (Text("\(open.count.formatted()) not matched") + Text("  See them").foregroundStyle(Theme.accent)).font(.callout)
+                            }
+                            .buttonStyle(.plain).help("List the card charges no order explains")
+                        }
+                    }
+                    Text(Self.gapNote(newer: newer.count, open: open.count, unpaid: unpaid.count, early: early, late: late))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private static func gapNote(newer: Int, open: Int, unpaid: Int, early: Int, late: Int) -> String {
+        var parts: [String] = []
+        if open > 0 {
+            parts.append(newer > 0 ? "\(newer) of the unmatched charges are newer than the order history, and will match when a fresh one is added."
+                                   : "Unmatched charges are usually part-paid with a gift balance or points, or ordered on an account whose history isn't here.")
+        }
+        if unpaid > 0 {
+            var why: [String] = []
+            if early > 0 { why.append("\(early.formatted()) from before your statements begin") }
+            if late > 0 { why.append("\(late.formatted()) newer than your last statement") }
+            let other = unpaid - early - late
+            if other > 0 { why.append("\(other.formatted()) paid with a gift balance or another card") }
+            parts.append("\(unpaid.formatted()) \(unpaid == 1 ? "order has" : "orders have") no card charge: " + why.joined(separator: ", ") + ".")
+        }
+        parts.append("The two sets of books never tie to the cent; the gap narrows as more history is added.")
+        return parts.joined(separator: " ")
+    }
+
     // MARK: The orders themselves
 
     @ViewBuilder private func listing(_ list: [Row]) -> some View {
         @Bindable var store = store
-        let limit = scrolls ? 250 : 14
-        HStack {
-            Picker("Show", selection: $store.orderList) {
-                ForEach(BudgetStore.OrderList.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented).labelsHidden().fixedSize()
-            if let category = store.orderCategory {
-                Button { withAnimation(.snappy(duration: 0.2)) { store.orderCategory = nil } } label: {
-                    Label("Only \(category.displayName)", systemImage: "xmark.circle.fill").font(.callout)
+        let limit = scrolls ? 250 : 12
+        if store.orderOnly == nil {
+            HStack {
+                Picker("Show", selection: $store.orderList) {
+                    ForEach(BudgetStore.OrderList.allCases) { Text($0.rawValue).tag($0) }
                 }
-                .buttonStyle(.bordered).help("Show every category again")
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                if let category = store.orderCategory {
+                    Button { withAnimation(.snappy(duration: 0.2)) { store.orderCategory = nil } } label: {
+                        Label("Only \(category.displayName)", systemImage: "xmark.circle.fill").font(.callout)
+                    }
+                    .buttonStyle(.bordered).help("Show every category again")
+                }
+                Spacer()
             }
-            Spacer()
         }
-        switch store.orderList {
-        case .orders:
+        if store.orderList == .orders || store.orderOnly != nil {
             let orders = Self.orders(list)
             Card(padding: 8) {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(orders.prefix(limit).enumerated()), id: \.element.id) { index, order in
                         if index > 0 { Divider().padding(.leading, 14) }
-                        OrderRowView(order: order, isOpen: open == order.id) {
+                        OrderRowView(order: order, isOpen: open == order.id || store.orderOnly == order.id) {
                             withAnimation(.snappy(duration: 0.2)) { open = open == order.id ? nil : order.id }
                         }
                     }
                 }
             }
             if orders.count > limit { more(orders.count, limit, "orders") }
-        case .items:
+        } else {
             Card(padding: 8) {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(list.reversed().prefix(limit).enumerated()), id: \.element.id) { index, row in
@@ -398,22 +596,43 @@ struct OrdersView: View {
     }
 }
 
-/// The card charge behind an order or an item, with the way back to its statement.
+/// The card charge behind an order or an item, with the ways onward: the charge itself, its
+/// payee, and the line in the original statement.
 private struct ChargeLine: View {
     @Environment(BudgetStore.self) private var store
     let id: UUID
 
     var body: some View {
         if let charge = store.transactions.first(where: { $0.id == id }) {
-            HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Charged \(Money.format(charge.amount)) to \(charge.account) on \(charge.date.formatted(.dateTime.month(.abbreviated).day().year()))")
                         .font(.callout)
                     Text(charge.description).font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Spacer()
-                Button("Show in Statement", systemImage: "doc.text.magnifyingglass") { store.showOriginal(of: charge.id) }
+                HStack(spacing: 8) {
+                    Button("Open the Charge", systemImage: "creditcard") {
+                        store.showCharges(TransactionFilter(ids: [charge.id], title: "\(charge.merchant), \(charge.date.formatted(.dateTime.month(.abbreviated).day().year()))"))
+                    }
+                    .help("The card charge, with its category, note and trip")
+                    Button("Everything at \(charge.merchant)", systemImage: "storefront") { store.showPlace(charge.merchant) }
+                        .help("Every charge from this payee")
+                    Button("Show in Statement", systemImage: "doc.text.magnifyingglass") { store.showOriginal(of: charge.id) }
+                }
+                .controlSize(.small)
             }
+        }
+    }
+}
+
+/// Opens a page at the shop in the person's browser.
+private struct ShopLink: View {
+    let title: String
+    let url: URL?
+    var body: some View {
+        if let url {
+            Button(title, systemImage: "arrow.up.forward.square") { NSWorkspace.shared.open(url) }
+                .help("Opens in your browser. Amazon may ask you to sign in.")
         }
     }
 }
@@ -436,7 +655,8 @@ private struct OrderRowView: View {
                         Text(order.rows.prefix(3).map(\.name).joined(separator: ", ") + (count > 3 ? ", and \(count - 3) more" : ""))
                             .font(.body.weight(.medium)).lineLimit(1)
                         Text(([order.date.formatted(.dateTime.month(.abbreviated).day().year()), order.who, count == 1 ? "1 item" : "\(count) items",
-                               order.refunded > 0 ? "\(Money.format(Double(order.refunded) / 100)) refunded" : nil] as [String?]).compactMap { $0 }.joined(separator: " · "))
+                               order.refunded > 0 ? "\(Money.format(Double(order.refunded) / 100)) refunded" : nil,
+                               order.charges.isEmpty ? "no card charge on file" : nil] as [String?]).compactMap { $0 }.joined(separator: " · "))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 12)
@@ -450,7 +670,7 @@ private struct OrderRowView: View {
             }
             .buttonStyle(.plain)
             if isOpen {
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(order.rows) { row in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Circle().fill(row.category.color).frame(width: 8, height: 8)
@@ -463,6 +683,10 @@ private struct OrderRowView: View {
                             Spacer(minLength: 8)
                             Text(row.category.displayName).font(.caption).foregroundStyle(.secondary)
                             Text(Money.format(Double(row.item.cents) / 100)).font(Theme.mono(12, .medium)).frame(minWidth: 70, alignment: .trailing)
+                            if let url = row.item.productURL {
+                                Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.forward.square") }
+                                    .buttonStyle(.borderless).help("See this product on Amazon")
+                            }
                         }
                     }
                     Divider()
@@ -471,6 +695,7 @@ private struct OrderRowView: View {
                     } else {
                         ForEach(order.charges, id: \.self) { ChargeLine(id: $0) }
                     }
+                    ShopLink(title: "This Order on Amazon", url: order.rows.first?.item.orderURL).controlSize(.small)
                 }
                 .padding(.horizontal, 10).padding(.bottom, 10)
             }
@@ -480,8 +705,10 @@ private struct OrderRowView: View {
     }
 }
 
-/// One item ordered. Clicking it shows the listing as the shop wrote it and the charge that paid for it.
+/// One item ordered. Clicking it shows the listing as the shop wrote it, the way to it at the shop,
+/// and the charge that paid for it.
 private struct ItemRowView: View {
+    @Environment(BudgetStore.self) private var store
     let row: BudgetStore.OrderRow
     let isOpen: Bool
     let toggle: () -> Void
@@ -509,10 +736,16 @@ private struct ItemRowView: View {
             }
             .buttonStyle(.plain)
             if isOpen {
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 8) {
                     if row.name != row.item.name {
                         Text(row.item.name).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
+                    HStack(spacing: 8) {
+                        ShopLink(title: "See It on Amazon", url: row.item.productURL)
+                        Button("The Whole Order", systemImage: "shippingbox") { store.orderOnly = row.item.orderID }
+                            .help("Everything that was ordered with it")
+                    }
+                    .controlSize(.small)
                     if let charge = row.charge { ChargeLine(id: charge) } else {
                         Text(noCharge).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
