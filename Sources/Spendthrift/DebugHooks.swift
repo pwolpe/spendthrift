@@ -189,6 +189,14 @@ enum DebugHooks {
             for line in store.orderReport() { print("ORDERS \(line)") }
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_CHECKS=1: read the pictures of paid checks, print what each turned out to be, then quit.
+        if env["SPENDTHRIFT_CHECKS"] != nil {
+            let report = await store.readCheckPictures()
+            for line in report { print("CHECKS \(line)") }
+            print("CHECKS named \(report.count)")
+            store.saveForQuit()
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_CLEANUP=1: re-key lines the app now reads better, print what changed, then quit.
         if env["SPENDTHRIFT_CLEANUP"] != nil {
             for line in store.cleanUpPayees() { print("CLEANUP \(line)") }

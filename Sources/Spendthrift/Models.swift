@@ -221,6 +221,8 @@ struct SourceFile: Codable, Identifiable, Hashable {
     var periodEnd: String?
     /// Why it's marked "mismatch", in a sentence: which totals didn't tie, or which lines two readings disagreed on.
     var checkNote: String?
+    /// True once the pictures of paid checks in this statement have been read (or it has none).
+    var checksRead: Bool?
 
     var isPDF: Bool { ext == "pdf" }
     var isPicture: Bool { Scans.imageExtensions.contains(ext) }

@@ -387,6 +387,58 @@ final class BudgetStore {
         return report
     }
 
+    /// Gives each paid check the payee written on it. A statement lists "Check #109 $175,000"; the
+    /// picture of the check on a later page says who it went to and why. For every kept statement
+    /// that hasn't been looked at, the model reads those pictures and each check is filed under its
+    /// payee (checks to the same payee together), with the memo saved as the charge's note.
+    /// A check the person already named is left alone. Returns what it did, for tests.
+    @discardableResult
+    func readCheckPictures() async -> [String] {
+        guard CloudAI.canReadStatements, !isImporting else { return [] }
+        var report: [String] = []
+        let isCheck = { (e: LedgerEntry) in e.amount > 0 && e.description.range(of: #"^check\s*#?\s*\d+"#, options: [.regularExpression, .caseInsensitive]) != nil }
+        let number = { (e: LedgerEntry) in String(e.description.filter(\.isNumber).drop(while: { $0 == "0" })) }
+        for source in (library.sources ?? []) where source.isPDF && source.checksRead != true {
+            let waiting = library.entries.contains { $0.sourceID == source.id && isCheck($0) }
+            var pictures: [Data] = []
+            if waiting, let document = PDFDocument(url: paths.statementFile(source)), !document.isLocked {
+                pictures = CheckReader.picturePages(of: document).compactMap(CheckReader.picture)
+            }
+            var read: [CheckReader.Check] = [], failed = false
+            for picture in pictures {
+                if let checks = await CheckReader.read(picture) { read += checks } else { failed = true }
+            }
+            guard !failed else { continue }     // the model couldn't be reached: try this statement again another time
+            for check in read {
+                guard let i = library.entries.firstIndex(where: { e in
+                    e.accountID == source.accountID && isCheck(e) && number(e) == check.number && abs(e.amount - check.amount) < 0.005
+                }) else { continue }
+                let entry = library.entries[i]
+                // Named by the person already (or by an earlier reading): theirs stands.
+                if entry.merchantKey.hasPrefix("own:") || entry.merchantKey.hasPrefix("CHECK TO ") || library.merchants[entry.merchantKey]?.source == .user { continue }
+                let key = "CHECK TO " + check.payee.uppercased().filter { $0.isLetter || $0.isNumber || $0 == " " }
+                if library.merchants[key] == nil {
+                    library.merchants[key] = MerchantInfo(name: check.payee, category: check.category ?? .other,
+                                                          source: check.confident && check.category != nil ? .cloud : .cloudGuess,
+                                                          sample: "\(entry.description) to \(check.payee)" + (check.memo.isEmpty ? "" : " (\(check.memo))"))
+                }
+                library.entries[i].merchantKey = key
+                if (entry.note ?? "").isEmpty {
+                    library.entries[i].note = "To \(check.payee)." + (check.memo.isEmpty ? "" : " Memo: \(check.memo).")
+                }
+                report.append("\(entry.date) \(entry.description) \(Money.format(entry.amount)) → \(check.payee) | \(check.memo) | \(library.merchants[key]?.category?.rawValue ?? "")")
+            }
+            if let s = library.sources?.firstIndex(where: { $0.id == source.id }) { library.sources?[s].checksRead = true }
+        }
+        if !report.isEmpty {
+            pruneUnusedPlaces()
+            withAnimation(.snappy) { changed() }
+        } else {
+            saveNow()
+        }
+        return report
+    }
+
     /// A file that was already added, exactly as it is: skipped without being read.
     private struct AlreadyHere: Error {}
 
@@ -905,6 +957,7 @@ final class BudgetStore {
         await adoptWineCategory()
         await lookUpGuesses()
         await guessWhatTheyWere()
+        await readCheckPictures()
         await findStoriesIfNeeded()
         await findDiscoveriesIfNeeded()
     }
