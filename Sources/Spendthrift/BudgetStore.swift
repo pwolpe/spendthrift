@@ -2110,6 +2110,17 @@ final class BudgetStore {
         }
     }
 
+    /// What was bought on this day in an earlier year, and on tomorrow's: the subjects of the
+    /// daily picture, today's first. Empty until there is more than a year of statements.
+    func memoryHighlights(_ now: Date = .now) -> [DailyPicture.Highlight] {
+        [now, now.addingTimeInterval(86_400)].compactMap { day in
+            guard let t = onThisDay(day)?.charge else { return nil }
+            let trip = story(containing: t.id).flatMap { $0.kind == .trip ? $0 : nil }
+            return DailyPicture.Highlight(merchant: t.merchant, category: t.category, amount: t.amount, date: t.date,
+                                          trip: trip?.name, tripPlace: trip?.place, entry: t.id)
+        }
+    }
+
     /// Charges from trips of the last two years that would make a good picture: for each trip, its
     /// larger charges at places with a name (not the airline or the card's foreign fee).
     func tripHighlights() -> [DailyPicture.Highlight] {

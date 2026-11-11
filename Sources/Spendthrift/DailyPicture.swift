@@ -78,12 +78,13 @@ final class DailyPicture {
     private var captionFile: URL { folder.appendingPathComponent("\(todayKey).txt") }
     private var lastHighlights: [Highlight] = []
     private var lastTrips: [Highlight] = []
+    private var lastMemories: [Highlight] = []
 
     /// Coming back to the app is another chance to prepare the next picture, if this launch hasn't yet.
     func retryIfNeeded() {
         guard !preparedThisLaunch, !isGenerating, !lastHighlights.isEmpty else { return }
-        let highlights = lastHighlights, trips = lastTrips
-        Task { await prepareNext(highlights: highlights, trips: trips) }
+        let highlights = lastHighlights, trips = lastTrips, memories = lastMemories
+        Task { await prepareNext(highlights: highlights, trips: trips, memories: memories) }
     }
 
     /// The caricature as a PNG no larger than 1024 pixels, to send along as the reference for a drawing.
@@ -112,6 +113,8 @@ final class DailyPicture {
         /// The trip this was bought on, and where it was, when the app knows.
         var trip: String? = nil
         var tripPlace: String? = nil
+        /// The charge itself, so the picture can lead back to it.
+        var entry: UUID? = nil
     }
 
     // MARK: The pictures
@@ -135,7 +138,24 @@ final class DailyPicture {
         /// True when someone in the picture holds the receipt. Pictures drawn before that was the rule
         /// stay on disk but are no longer shown.
         var receipt: Bool?
+        /// The charge the picture is about (a `Transaction` id), so clicking it can show that charge.
+        var entry: String?
     }
+
+    /// True when a picture is about something bought on today's date in an earlier year.
+    private func isMemory(_ picture: Picture, of day: String) -> Bool {
+        guard picture.receipt == true, let date = picture.date, date.count == 10, day.count == 10 else { return false }
+        return date.suffix(5) == day.suffix(5) && date.prefix(4) < day.prefix(4)
+    }
+    /// The picture on show is today's memory: this day, an earlier year.
+    var showsMemory: Bool { current.map { isMemory($0, of: todayKey) } ?? false }
+    /// How long ago the purchase in the picture was, when it is a memory ("Two years ago").
+    var yearsAgo: Int? {
+        guard showsMemory, let then = current?.date.flatMap({ Int($0.prefix(4)) }), let now = Int(todayKey.prefix(4)) else { return nil }
+        return now - then
+    }
+    /// The charge behind the picture on show.
+    var entry: UUID? { current?.entry.flatMap(UUID.init(uuidString:)) }
 
     /// What the picture is about ("Dunkin' · Nov 7"), shown under it. Nil for a starter.
     private(set) var source: String?
@@ -143,6 +163,7 @@ final class DailyPicture {
     private(set) var trip: String?
     private(set) var current: Picture?
     @ObservationIgnored private var preparedThisLaunch = false
+    @ObservationIgnored private var preparedOn = ""
     /// For tests: who the next picture stars, and permission to draw another in the same launch.
     @ObservationIgnored var forcedCast: String?
     @ObservationIgnored var forcedTrip = false
@@ -180,7 +201,7 @@ final class DailyPicture {
         var label: String?
         if let merchant = picture.merchant {
             let day = picture.date.flatMap { DateParsing.parse($0, format: "yyyy-MM-dd") }
-            label = day.map { "\(merchant) · \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? merchant
+            label = day.map { "\(merchant) · \($0.formatted(.dateTime.month(.abbreviated).day().year()))" } ?? merchant
             if let amount = picture.amount { label = (label ?? merchant) + " · " + Money.format(amount) }
         }
         let apply = { self.image = loaded; self.caption = picture.caption; self.source = label; self.current = picture; self.isAIImage = true; self.trip = picture.trip }
@@ -195,6 +216,13 @@ final class DailyPicture {
         let chosen = UserDefaults.standard.string(forKey: "pictureOfTheDay")?.components(separatedBy: "|") ?? []
         var saved = gallery
         let pool = Self.starters + saved.filter { $0.receipt == true }
+        // First choice, always: the picture of what was bought on this day in an earlier year.
+        if let index = saved.lastIndex(where: { isMemory($0, of: today) }), show(saved[index], animated: false) {
+            saved[index].seen = true
+            gallery = saved
+            UserDefaults.standard.set("\(today)|\(saved[index].file)", forKey: "pictureOfTheDay")
+            return
+        }
         if chosen.count == 2, chosen[0] == today, let same = pool.first(where: { $0.file == chosen[1] }), show(same, animated: false) { return }
         if let index = saved.lastIndex(where: { !$0.seen && $0.receipt == true }), show(saved[index], animated: false) {
             saved[index].seen = true
@@ -219,14 +247,51 @@ final class DailyPicture {
     fileprivate static let photo: Data? = bundled("tony")
     fileprivate static let paulPhoto: Data? = bundled("paul")
 
-    /// Once per launch, out of sight: choose the best image model there is today, pick a real recent
-    /// purchase, and draw the picture that will be waiting the next time the app opens.
-    func prepareNext(highlights: [Highlight], trips: [Highlight] = []) async {
+    /// Out of sight, once a day: draw the picture for what was bought on this day in an earlier year
+    /// (shown the moment it is ready) and the one for tomorrow, so it is waiting. `memories` are
+    /// those purchases, today's first. With no earlier year to look back on, a recent purchase is drawn instead.
+    func prepareNext(highlights: [Highlight], trips: [Highlight] = [], memories: [Highlight] = []) async {
         lastHighlights = highlights
         if !trips.isEmpty { lastTrips = trips }
-        guard CloudAI.isEnabled, !preparedThisLaunch, !isGenerating, !highlights.isEmpty, let photo = Self.photo else { return }
-        // One a day: if tomorrow's picture is already drawn and waiting, there is nothing to do.
-        if forcedCast == nil, gallery.contains(where: { !$0.seen && $0.receipt == true }) { preparedThisLaunch = true; return }
+        if !memories.isEmpty { lastMemories = memories }
+        let today = todayKey
+        if preparedOn != today { preparedThisLaunch = false }
+        guard CloudAI.isEnabled, !preparedThisLaunch, !isGenerating, !highlights.isEmpty, Self.photo != nil else { return }
+        preparedThisLaunch = true
+        preparedOn = today
+        isGenerating = true
+        defer { isGenerating = false }
+
+        if forcedCast == nil, !forcedTrip, !memories.isEmpty {
+            for memory in memories {
+                guard let id = memory.entry?.uuidString, !gallery.contains(where: { $0.receipt == true && $0.entry == id }) else { continue }
+                guard let picture = await draw(memory) else { preparedThisLaunch = false; return }
+                // Today's goes straight up; tomorrow's waits its turn.
+                if isMemory(picture, of: today), todayKey == today, show(picture, animated: true) {
+                    var saved = gallery
+                    if let index = saved.firstIndex(where: { $0.file == picture.file }) { saved[index].seen = true; gallery = saved }
+                    UserDefaults.standard.set("\(today)|\(picture.file)", forKey: "pictureOfTheDay")
+                }
+            }
+            return
+        }
+        // No earlier year to look back on (or a test asked for something specific): a recent purchase.
+        // One a day: if the next picture is already drawn and waiting, there is nothing to do.
+        if forcedCast == nil, gallery.contains(where: { !$0.seen && $0.receipt == true }) { return }
+        let saved = gallery
+        let lately = Set(saved.suffix(8).compactMap(\.merchant))
+        let recent = Array(highlights.prefix(15))
+        var pick = recent.filter { !lately.contains($0.merchant) }.randomElement() ?? recent.randomElement()!
+        // About one picture in three goes back to a trip: the two of them there, holding a receipt from it.
+        let latelyTrips = Set(saved.suffix(6).compactMap(\.trip))
+        let fresh = lastTrips.filter { !lately.contains($0.merchant) && !($0.trip.map(latelyTrips.contains) ?? false) }
+        if pick.trip == nil, let memory = fresh.randomElement(), forcedTrip || Int.random(in: 0..<3) == 0 { pick = memory }
+        if await draw(pick) == nil { preparedThisLaunch = false }
+    }
+
+    /// Draws one picture about one real purchase and files it with the others. Nil if nothing usable came back.
+    private func draw(_ pick: Highlight) async -> Picture? {
+        guard let photo = Self.photo else { return nil }
         // Who stars this time: Tony, Paul, or the two of them, a third of the time each. Whoever has
         // appeared least in the recent pictures goes next, and never the same as last time.
         var cast: [(name: String, photo: Data)] = [("Tony", photo)]
@@ -242,18 +307,6 @@ final class DailyPicture {
             if let forcedCast { who = forcedCast } else { who = fair }
             cast = who == "tony" ? [("Tony", photo)] : who == "paul" ? [("Paul", paul)] : [("Tony", photo), ("Paul", paul)]
         }
-        preparedThisLaunch = true
-        isGenerating = true
-        defer { isGenerating = false }
-
-        var saved = gallery
-        let lately = Set(saved.suffix(8).compactMap(\.merchant))
-        let recent = Array(highlights.prefix(15))
-        var pick = recent.filter { !lately.contains($0.merchant) }.randomElement() ?? recent.randomElement()!
-        // About one picture in three goes back to a trip: the two of them there, holding a receipt from it.
-        let latelyTrips = Set(saved.suffix(6).compactMap(\.trip))
-        let fresh = lastTrips.filter { !lately.contains($0.merchant) && !($0.trip.map(latelyTrips.contains) ?? false) }
-        if pick.trip == nil, let memory = fresh.randomElement(), forcedTrip || Int.random(in: 0..<3) == 0 { pick = memory }
         async let chosen = CloudImage.bestModel()
         let names = cast.map(\.name)
         async let planned = CloudImage.scene(merchant: pick.merchant, category: pick.category.displayName, amount: pick.amount, cast: names,
@@ -261,10 +314,10 @@ final class DailyPicture {
         let model = await chosen
         guard let scene = await planned else {
             if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG PICTURE no scene came back for \(pick.merchant)") }
-            preparedThisLaunch = false; return
+            return nil
         }
         // A style none of the last several pictures used.
-        let usedLately = Set(saved.suffix(7).compactMap(\.style))
+        let usedLately = Set(gallery.suffix(7).compactMap(\.style))
         let style = CloudImage.styles.filter { !usedLately.contains($0.id) }.randomElement() ?? CloudImage.styles.randomElement()!
         // The receipt in his hand is the point of the picture: the real place, what it sells, the real total.
         let receipt = CloudImage.Receipt(merchant: pick.merchant, what: scene.what, total: Money.format(pick.amount))
@@ -282,19 +335,23 @@ final class DailyPicture {
         }
         guard let drawn else {
             if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG PICTURE nothing was drawn (model \(model))") }
-            preparedThisLaunch = false; return
+            return nil
         }
 
         let file = "tony-\(Int(Date.now.timeIntervalSince1970)).png"
         try? drawn.write(to: folder.appendingPathComponent(file))
-        saved.append(Picture(file: file, caption: scene.caption, merchant: pick.merchant,
-                             date: pick.date.map { DateParsing.iso.string(from: $0) }, seen: false, model: used, style: style.id, who: who, amount: pick.amount, trip: pick.trip, receipt: true))
+        let picture = Picture(file: file, caption: scene.caption, merchant: pick.merchant,
+                              date: pick.date.map { DateParsing.iso.string(from: $0) }, seen: false, model: used, style: style.id, who: who,
+                              amount: pick.amount, trip: pick.trip, receipt: true, entry: pick.entry?.uuidString)
+        var saved = gallery
+        saved.append(picture)
         // Keep the last thirty; older ones go, with their files.
         while saved.count > 30 { try? FileManager.default.removeItem(at: folder.appendingPathComponent(saved.removeFirst().file)) }
         gallery = saved
         if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
             print("DEBUG PICTURE next: \(pick.merchant) [\(used), \(style.id), \(who)] \(scene.caption)\n  scene: \(scene.scene)")
         }
+        return picture
     }
 }
 
@@ -322,10 +379,11 @@ struct BannerCard: View {
                 .clipShape(.rect(cornerRadius: 18, style: .continuous))
                 .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.hairline) }
                 .shadow(color: .black.opacity(0.10), radius: 16, y: 6)
+                .onTapGesture { if daily.source != nil { open() } }
 
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("\(daily.trip.map { "From \($0)" } ?? (daily.source == nil ? "From the daydream file" : "Today's receipt")) · \(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))".uppercased())
+                    Text(heading.uppercased())
                         .font(Theme.mono(11, .bold))
                         .tracking(1.2)
                         .foregroundStyle(Theme.accent)
@@ -334,9 +392,17 @@ struct BannerCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if let source = daily.source {
                         // The real purchase behind the picture: this is what makes it land.
-                        Label(source, systemImage: "receipt")
+                        Button { open() } label: {
+                            HStack(spacing: 6) {
+                                Label(source, systemImage: "receipt")
+                                Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
+                            }
                             .font(.callout)
                             .foregroundStyle(.secondary)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Show this charge")
                     }
                 }
                 Spacer(minLength: 0)
@@ -350,7 +416,26 @@ struct BannerCard: View {
         // Once the statements are in, quietly get the next picture ready.
         .task(id: "\(store.hasLoadedTransactions)-\(store.isImporting)-\(store.recentHighlights().first?.merchant ?? "")") {
             guard store.hasLoadedTransactions, !store.isImporting else { return }
-            await daily.prepareNext(highlights: store.recentHighlights(), trips: store.tripHighlights())
+            await daily.prepareNext(highlights: store.recentHighlights(), trips: store.tripHighlights(), memories: store.memoryHighlights())
+        }
+    }
+
+    /// "On this day · two years ago" when the picture is that; otherwise what it is and today's date.
+    private var heading: String {
+        if let years = daily.yearsAgo {
+            let ago = ["One year", "Two years", "Three years", "Four years", "Five years", "Six years"]
+            return "On this day · \(years <= ago.count ? ago[years - 1] : "\(years) years") ago"
+        }
+        let what = daily.trip.map { "From \($0)" } ?? (daily.source == nil ? "From the daydream file" : "From the receipt drawer")
+        return "\(what) · \(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))"
+    }
+
+    /// The charge the picture is about: that one charge if it is still here, else everything at the place.
+    private func open() {
+        if let id = daily.entry, let charge = store.transactions.first(where: { $0.id == id }) {
+            store.showCharges(TransactionFilter(ids: [id], title: "\(charge.merchant), \(charge.date.formatted(.dateTime.month(.wide).day().year()))"))
+        } else if let merchant = daily.current?.merchant {
+            store.showPlace(merchant)
         }
     }
 }
