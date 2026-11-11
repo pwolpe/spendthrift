@@ -23,6 +23,8 @@ struct OrderItem: Codable, Hashable {
     var who: String?
     /// The shop's own number for the product, when it has one: enough to open its page.
     var asin: String?
+    /// True when the order history says a gift balance paid part of it, so the card was charged less than it cost.
+    var giftPart: Bool?
 
     /// The product's page at the shop, when it can be worked out.
     var productURL: URL? {
@@ -212,10 +214,13 @@ enum OrderExport {
             let listed = cents(cell(row, "Shipment Item Subtotal")) + cents(cell(row, "Shipment Item Subtotal Tax"))
             let department = cell(row, "Department")
             let asin = cell(row, "ASIN")
+            let method = cell(row, "Payment Method Type").lowercased()
+            let giftPart = method.contains("gift") && method.contains(" and ")
             return OrderItem(orderID: id, shop: groceries ? .groceries : .store, date: String(when.prefix(10)),
                              shipment: String(when.prefix(16)), name: name, department: department.isEmpty ? nil : department,
                              cents: cents(cell(row, "Total Amount")), quantity: max(1, Int(cell(row, "Original Quantity")) ?? 1),
-                             listedCents: listed > 0 ? listed : nil, asin: asin.hasPrefix("_") || asin.isEmpty ? nil : asin)
+                             listedCents: listed > 0 ? listed : nil, asin: asin.hasPrefix("_") || asin.isEmpty ? nil : asin,
+                             giftPart: giftPart ? true : nil)
         }
     }
 
@@ -366,6 +371,24 @@ enum OrderMatcher {
             }
             guard let best else { break }
             take(best.charge, best.group, .lessCredit)
+        }
+
+        // 4. A gift balance paid part: the charge is below a shipment the history says was paid
+        //    "gift card and card". How much the balance covered isn't recorded, so this is only taken
+        //    when one shipment, and only one, could be it.
+        for charge in charges where charge.shop == .store && result[charge.id.uuidString] == nil {
+            let could = groups(charge, before: 6, after: 2, by: { $0.orderID + "|" + $0.date })
+                .filter { group in total(group) > charge.cents && group.contains { items[$0].giftPart == true } }
+            if could.count == 1 { take(charge, could[0], .lessCredit) }
+        }
+
+        // 5. Slow to ship: a pre-order or a back-order is charged weeks from the date the history gives.
+        //    The amount still has to be exact, and again only one shipment (or whole order) may fit.
+        for charge in charges where result[charge.id.uuidString] == nil {
+            let wide = groups(charge, before: 45, after: 45, by: { $0.orderID + "|" + $0.date }).filter { total($0) == charge.cents }
+                + groups(charge, before: 45, after: 45, by: { $0.orderID }).filter { total($0) == charge.cents }
+            let distinct = Dictionary(grouping: wide, by: { items[$0[0]].orderID })
+            if distinct.count == 1, let group = wide.first { take(charge, group, .exact) }
         }
         return result
     }

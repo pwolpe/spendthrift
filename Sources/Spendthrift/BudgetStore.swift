@@ -157,6 +157,7 @@ final class BudgetStore {
         let date: String
         let amount: Double
         let itemized: Bool
+        let shop: OrderItem.Shop
     }
     private(set) var orderChargeList: [OrderCharge] = []
 
@@ -233,7 +234,7 @@ final class BudgetStore {
             if orders.matches[c.id.uuidString] != nil { coverage.itemized += 1 } else if let last, c.date > last { coverage.newer += 1 }
         }
         orderCoverage = coverage
-        orderChargeList = orderCharges.map { OrderCharge(id: $0.id, date: $0.date, amount: Double($0.cents) / 100, itemized: orders.matches[$0.id.uuidString] != nil) }
+        orderChargeList = orderCharges.map { OrderCharge(id: $0.id, date: $0.date, amount: Double($0.cents) / 100, itemized: orders.matches[$0.id.uuidString] != nil, shop: $0.shop) }
             .filter { charge in !apartEntryIDs.contains(charge.id) }
     }
 

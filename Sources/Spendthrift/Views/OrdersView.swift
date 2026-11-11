@@ -543,16 +543,19 @@ struct OrdersView: View {
                             .buttonStyle(.plain).help("List the card charges no order explains")
                         }
                     }
-                    Text(Self.gapNote(newer: newer.count, open: open.count, unpaid: unpaid.count, early: early, late: late))
+                    Text(Self.gapNote(newer: newer.count, open: open.count, inStore: open.filter { $0.shop == .groceries }.count, unpaid: unpaid.count, early: early, late: late))
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
     }
 
-    private static func gapNote(newer: Int, open: Int, unpaid: Int, early: Int, late: Int) -> String {
+    private static func gapNote(newer: Int, open: Int, inStore: Int, unpaid: Int, early: Int, late: Int) -> String {
         var parts: [String] = []
-        if open > 0 {
+        if inStore > 0 {
+            parts.append("\(inStore) of the unmatched \(inStore == 1 ? "is a grocery charge" : "are grocery charges"), most likely bought in the store, where there is no order to find.")
+        }
+        if open > inStore {
             parts.append(newer > 0 ? "\(newer) of the unmatched charges are newer than the order history, and will match when a fresh one is added."
                                    : "Unmatched charges are usually part-paid with a gift balance or points, or ordered on an account whose history isn't here.")
         }
