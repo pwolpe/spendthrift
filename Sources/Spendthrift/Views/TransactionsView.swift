@@ -250,6 +250,7 @@ struct TransactionInspector: View {
     var scrolls = true
     @State private var name = ""
     @State private var note = ""
+    @State private var separating = false
 
     private var sameplace: [Transaction] { store.transactions.filter { $0.merchantKey == transaction.merchantKey } }
 
@@ -348,6 +349,15 @@ struct TransactionInspector: View {
                     .menuStyle(.borderlessButton)
                     .fixedSize()
                     .font(.callout)
+                    if place.count > 1 {
+                        Button("This One Is a Different Payee…", systemImage: "pencil.line") { separating = true }
+                            .buttonStyle(.borderless)
+                            .font(.callout)
+                            .help("Name just this charge, leaving the others at \(t.merchant) alone")
+                            .popover(isPresented: $separating, arrowEdge: .leading) {
+                                OneChargeEditor(transaction: t) { separating = false }
+                            }
+                    }
                 }
 
                 if !store.stories.isEmpty {

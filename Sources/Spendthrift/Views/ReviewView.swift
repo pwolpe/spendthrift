@@ -87,6 +87,9 @@ private struct ReviewRow: View {
     @Environment(BudgetStore.self) private var store
     let item: ReviewItem
     @State private var said = ""
+    @State private var name = ""
+    /// The one charge being given its own payee, if any.
+    @State private var separating: Transaction.ID?
     @State private var failed = false
     @State private var filed = false
     @FocusState private var typing: Bool
@@ -121,7 +124,10 @@ private struct ReviewRow: View {
             HStack(spacing: 14) {
                 MerchantIcon(name: item.info.name, category: item.info.category ?? .unsorted, size: 42)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(item.info.name).font(.headline)
+                    EditableName(text: $name, font: .headline, help: "Rename this payee",
+                                 commit: { store.renamePlace(item.key, to: name) }, cancel: { name = item.info.name })
+                        .onAppear { name = item.info.name }
+                        .onChange(of: item.info.name) { name = item.info.name }
                     Text("\(item.count) \(item.total < 0 ? (item.count == 1 ? "deposit" : "deposits") : (item.count == 1 ? "charge" : "charges")) · \(item.total < 0 ? "\(Money.format(-item.total)) in" : Money.format(item.total))\(span(charges))")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -171,6 +177,18 @@ private struct ReviewRow: View {
                     }
                     .buttonStyle(.plain)
                     .help("Show this charge in its original statement")
+                    // A group can hold different things (every wire reads alike): any one line can be named by itself.
+                    .overlay(alignment: .trailing) {
+                        if charges.count > 1 {
+                            Button { separating = t.id } label: { Image(systemName: "pencil.line") }
+                                .buttonStyle(.borderless)
+                                .help("This one is something else: name just this line")
+                                .padding(.trailing, 26)
+                                .popover(isPresented: Binding(get: { separating == t.id }, set: { if !$0 { separating = nil } }), arrowEdge: .bottom) {
+                                    OneChargeEditor(transaction: t) { separating = nil }
+                                }
+                        }
+                    }
                 }
                 if charges.count > shown {
                     Divider()
@@ -216,5 +234,49 @@ private struct ReviewRow: View {
             }
           }
         }
+    }
+}
+
+/// Names one charge by itself: who it was paid to and what it was for. Used where a group of
+/// look-alike lines (wires, checks, transfers) turns out to hold different things.
+struct OneChargeEditor: View {
+    @Environment(BudgetStore.self) private var store
+    let transaction: Transaction
+    var done: () -> Void = {}
+    @State private var name = ""
+    @State private var category: Category?
+    @FocusState private var typing: Bool
+
+    private func file() {
+        store.setPayee(of: transaction.id, name: name, category: category)
+        done()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Just this one").font(.headline)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(transaction.date.formatted(.dateTime.month(.abbreviated).day().year())) · \(Money.format(abs(transaction.amount)))")
+                    .font(Theme.mono(12, .medium))
+                Text(transaction.description).font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            TextField("Who was it paid to?", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($typing)
+                .onSubmit { if !name.trimmingCharacters(in: .whitespaces).isEmpty { file() } }
+            HStack {
+                CategoryPill(category: category) { category = $0 }
+                Spacer()
+                Button("Cancel", action: done).keyboardShortcut(.cancelAction)
+                Button("File Just This One", action: file)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Text("The other lines in the group stay as they are.").font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(width: 380)
+        .onAppear { typing = true }
     }
 }

@@ -1399,6 +1399,27 @@ final class BudgetStore {
 
     func place(_ key: String) -> MerchantInfo? { library.merchants[key] }
 
+    /// One charge that isn't what the rest of its group is (a wire among wires, a check among checks):
+    /// it becomes its own payee, with the name and category the person gives it. The others stay put.
+    /// A name that is already a payee joins that payee, and takes its category unless one is given.
+    func setPayee(of id: Transaction.ID, name: String, category: Category?) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let i = library.entries.firstIndex(where: { $0.id == id }) else { return }
+        let entry = library.entries[i]
+        let old = library.merchants[entry.merchantKey]
+        let existing = library.merchants.first { $0.value.name.caseInsensitiveCompare(trimmed) == .orderedSame && $0.key != entry.merchantKey }?.value
+        let key = "own:" + UUID().uuidString
+        var info = MerchantInfo(name: existing?.name ?? trimmed, category: category ?? existing?.category ?? old?.category,
+                                source: .user, confirmed: true, sample: entry.description)
+        info.domain = existing?.domain
+        library.merchants[key] = info
+        library.entries[i].merchantKey = key
+        library.entries[i].override = nil
+        pruneUnusedPlaces()
+        withAnimation(.snappy) { changed() }
+        showToast("That one is now \(info.name)\(info.category.map { ", filed under \($0.displayName)" } ?? ""). The rest are unchanged.", symbol: "person.crop.circle.badge.checkmark")
+    }
+
     /// Saves what the person remembers about one charge. If the place is still a guess, the note is
     /// reason enough to have the model look at it again.
     func setNote(_ text: String, for id: Transaction.ID) {
