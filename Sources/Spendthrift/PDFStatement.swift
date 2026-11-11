@@ -485,7 +485,8 @@ enum PDFStatement {
             if let name = holders.first(where: { description.uppercased().hasPrefix($0) }) {
                 description = String(description.dropFirst(name.count)).trimmingCharacters(in: .whitespaces)
             }
-            guard description.filter(\.isLetter).count >= 3,
+            // (A ledger abbreviates: "CK# 104" is a whole description there.)
+            guard description.filter(\.isLetter).count >= (ledgerStyle ? 2 : 3),
                   !skipWords.contains(where: description.lowercased().hasPrefix) else { return }
             // "February 11, 2026" in a sentence is a date, not a charge dated Feb 11 called "2026 …".
             if description.range(of: #"^(19|20)\d\d\b"#, options: .regularExpression) != nil { return }

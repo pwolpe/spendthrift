@@ -318,6 +318,8 @@ final class BudgetStore {
             // (The text as stored and as laid out on the page: the telltale line can read differently in each.)
             let text = pages.compactMap(\.string).joined(separator: "\n") + "\n" + pages.map(PDFStatement.positionalText).joined(separator: "\n")
             guard text.range(of: #"(?im)^.*total withdrawals[^\n]*\d ?-(?: .*)?$"#, options: .regularExpression) != nil else { continue }
+            // One that already ties has been through this; its charges may since have been named by hand.
+            if source.check == "verified", library.entries.contains(where: { $0.sourceID == source.id }) { continue }
             guard let outcome = try? await CloudAI.$offline.withValue(true, operation: { try await StatementReader.read(url, data: data) }),
                   case .ready(let statement) = outcome, statement.check == .verified else {
                 report.append("LEFT \(source.name): today's reader can't prove it either")
@@ -336,6 +338,10 @@ final class BudgetStore {
                 library.entries[i].id = was.id
                 library.entries[i].note = was.note
                 library.entries[i].override = was.override
+                // A payee the person (or a check's picture) gave it stays too.
+                if was.merchantKey.hasPrefix("own:") || was.merchantKey.hasPrefix("CHECK TO ") || library.merchants[was.merchantKey]?.source == .user {
+                    library.entries[i].merchantKey = was.merchantKey
+                }
                 carried += 1
             }
             if let s = library.sources?.firstIndex(where: { $0.id == source.id }) {
