@@ -189,6 +189,11 @@ enum DebugHooks {
             for line in store.orderReport() { print("ORDERS \(line)") }
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_CLEANUP=1: re-key lines the app now reads better, print what changed, then quit.
+        if env["SPENDTHRIFT_CLEANUP"] != nil {
+            for line in store.cleanUpPayees() { print("CLEANUP \(line)") }
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_REREAD=1: read ledger-style statements again with today's reader, print what changed, then quit.
         if env["SPENDTHRIFT_REREAD"] != nil {
             let before = store.transactions.count

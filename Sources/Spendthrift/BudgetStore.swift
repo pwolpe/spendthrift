@@ -351,6 +351,42 @@ final class BudgetStore {
         return report
     }
 
+    /// Puts lines the app now reads better with the payee they belong to: a bank account's debit-card
+    /// purchases (once all one payee), mobile deposits (once a petrol station). Payees the person
+    /// named or chose a category for are left alone. Also drops captions of check pictures that were
+    /// taken for transactions, and trims a page footer that was taken for a payee.
+    func cleanUpPayees() -> [String] {
+        var report: [String] = []
+        let captions = library.entries.filter { $0.description.caseInsensitiveCompare("amount") == .orderedSame }
+        if !captions.isEmpty {
+            library.entries.removeAll { $0.description.caseInsensitiveCompare("amount") == .orderedSame }
+            report.append("removed \(captions.count) check-picture captions (\(Money.format(captions.reduce(0) { $0 + abs($1.amount) })))")
+        }
+        var moved = 0
+        for i in library.entries.indices {
+            var entry = library.entries[i]
+            if let footer = entry.description.range(of: " 24 hour automated banking", options: .caseInsensitive) {
+                entry.description = String(entry.description[..<footer.lowerBound])
+                library.entries[i].description = entry.description
+            }
+            let upper = entry.description.uppercased()
+            guard upper.range(of: #"^(?:RECURRING )?CARD PURCHASE"#, options: .regularExpression) != nil || upper.hasPrefix("MOBILE DEPOSIT") else { continue }
+            if library.merchants[entry.merchantKey]?.source == .user || entry.merchantKey.hasPrefix("own:") { continue }
+            let key = MerchantResolver.key(for: entry.description, amount: entry.amount, existingKeys: library.merchants.keys)
+            guard key != entry.merchantKey else { continue }
+            if library.merchants[key] == nil {
+                library.merchants[key] = MerchantResolver.instant(description: entry.description, amount: entry.amount, bankCategory: entry.bankCategory)
+            }
+            library.entries[i].merchantKey = key
+            moved += 1
+        }
+        report.append("gave \(moved) lines the payee they belong to")
+        pruneUnusedPlaces()
+        changed()
+        saveNow()
+        return report
+    }
+
     /// A file that was already added, exactly as it is: skipped without being read.
     private struct AlreadyHere: Error {}
 

@@ -79,7 +79,13 @@ enum KeywordExtractor {
     ]
 
     static func keyword(for description: String, maxTokens: Int) -> String {
-        let original = description.uppercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        var original = description.uppercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        // A bank account's debit card: "Card Purchase With Pin 03/01 Publix Super Mar 482 … Card 1207".
+        // The shop is what's between the date and the card number.
+        if let lead = original.range(of: #"^(?:RECURRING )?CARD PURCHASE(?: WITH PIN| RETURN)? \d{1,2}/\d{1,2} "#, options: .regularExpression) {
+            original = String(original[lead.upperBound...])
+            if let tail = original.range(of: #" CARD \d{4}$"#, options: .regularExpression) { original = String(original[..<tail.lowerBound]) }
+        }
         var s = stripPrefixes(original)
         if let star = s.firstIndex(of: "*") {
             let before = s[..<star].trimmingCharacters(in: .whitespaces)
@@ -305,7 +311,9 @@ enum KnownMerchants {
     /// `generic: false` returns only specific businesses (Starbucks, Con Edison…); `true` only generic words.
     /// - amount: positive = money out. Needed for the direction-dependent rules above.
     static func match(_ description: String, amount: Double? = nil, generic: Bool) -> Suggestion? {
-        let d = description.uppercased()
+        var d = description.uppercased()
+        // Words that merely begin like a brand: a "MOBILE DEPOSIT" is not a Mobil station.
+        d = d.replacingOccurrences(of: "MOBILE DEPOSIT", with: "DEPOSIT BY PHONE")
         if !generic, let hit = flows.first(where: { rule in
             d.contains(rule.pattern) && (rule.flow == 0 || amount == nil || (rule.flow > 0) == ((amount ?? 0) > 0))
         }) {

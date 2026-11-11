@@ -583,7 +583,7 @@ enum PDFStatement {
                 } else if let row = detailFor, leadingDate(tokens, closing: closing) == nil {
                     // Up to two lines under a row say who it was ("PAYMENT TO: STEPHEN MITCHELL" / "ID: 123");
                     // a line of digits is a reference number, and the page's footer ends it.
-                    let furniture = ["page ", "total", "www.", "account statement", "account activity", "date description"].contains(where: lower.hasPrefix)
+                    let furniture = ["page ", "total", "www.", "account statement", "account activity", "date description", "24 hour"].contains(where: lower.hasPrefix)
                         || lower.contains("member fdic")
                     if furniture { detailFor = nil }
                     else if line.count < 70, line.filter(\.isLetter).count >= 3 {
