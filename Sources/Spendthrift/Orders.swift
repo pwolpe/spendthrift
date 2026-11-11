@@ -69,6 +69,8 @@ struct OrderMatch: Codable, Hashable {
         case lessCredit
         /// Groceries: the charge is near the listed total (weights, bags and tips move it).
         case approximate
+        /// The shop's own payment record says this charge was for this order, whatever the amounts say.
+        case recorded
     }
     var items: [Int]
     var kind: Kind
@@ -84,6 +86,14 @@ struct OrderBook: Codable {
     var sorted: [String: ItemSort]?
     /// Money that came back, by order.
     var refunds: [String: Int]?
+    /// Charges the shop's own payment record ties to an order (charge id → the order, and what
+    /// points and gift balance paid toward it, in cents). These outrank anything worked out from amounts.
+    var pins: [String: Pin]?
+    struct Pin: Codable, Hashable {
+        var order: String
+        var gift: Int
+        var points: Int
+    }
     /// A few sentences the model wrote about one stretch of orders, kept with what they were written from.
     var reads: [String: String]?
 
@@ -268,11 +278,13 @@ enum OrderMatcher {
         return era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy
     }
 
-    static func match(_ charges: [Charge], to items: [OrderItem]) -> [String: OrderMatch] {
+    static func match(_ charges: [Charge], to items: [OrderItem], pins: [String: String] = [:]) -> [String: OrderMatch] {
         let days = items.map { dayNumber($0.date) }
         var free = Set(items.indices.filter { items[$0].cents >= 0 })
         var result: [String: OrderMatch] = [:]
-        let charges = charges.filter { $0.cents > 0 }.sorted { ($0.date, $0.cents, $0.id.uuidString) < ($1.date, $1.cents, $1.id.uuidString) }
+        let pinnedOrder = { (charge: Charge) in pins[charge.id.uuidString] ?? pins[charge.id.uuidString.lowercased()] }
+        let everyCharge = charges
+        let charges = charges.filter { $0.cents > 0 && pinnedOrder($0) == nil }.sorted { ($0.date, $0.cents, $0.id.uuidString) < ($1.date, $1.cents, $1.id.uuidString) }
 
         // Items by day, so a charge only looks at the days around it.
         var onDay: [Int: [Int]] = [:]
@@ -309,6 +321,23 @@ enum OrderMatcher {
             for charge in charges where result[charge.id.uuidString] == nil {
                 let fits = groups(charge, before: 8, after: 3, by: grouping).filter { total($0) == charge.cents }
                 if let best = fits.min(by: { gap(charge, $0) < gap(charge, $1) }) { take(charge, best, .exact) }
+            }
+        }
+
+        // 1½. What the shop's own record says: this charge was for that order, whatever the amounts say.
+        //     It takes the order's items no exact match has claimed; a second charge for the same order
+        //     shows the same items.
+        if !pins.isEmpty {
+            var byOrder: [String: [Int]] = [:]
+            for i in items.indices where items[i].cents > 0 { byOrder[items[i].orderID, default: []].append(i) }
+            var given: [String: [Int]] = [:]
+            for charge in everyCharge.sorted(by: { ($0.date, $0.id.uuidString) < ($1.date, $1.id.uuidString) }) {
+                guard let order = pinnedOrder(charge), let all = byOrder[order], !all.isEmpty else { continue }
+                let unclaimed = all.filter(free.contains)
+                let group = unclaimed.isEmpty ? (given[order] ?? all) : unclaimed
+                given[order] = group
+                result[charge.id.uuidString] = OrderMatch(items: group, kind: .recorded)
+                free.subtract(group)
             }
         }
 

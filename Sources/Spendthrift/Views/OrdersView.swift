@@ -15,6 +15,10 @@ struct OrderItemsList: View {
         case .exact: nil
         case .lessCredit: "Items come to \(Money.format(listed)). Points or a gift balance covered \(Money.format(listed - charged))."
         case .approximate: "Items as ordered. Weighed items, bag fees and tips make up the difference."
+        case .recorded:
+            listed - charged > 0.005 ? "Amazon's own payment record ties this charge to this order. Items come to \(Money.format(listed)); points or a gift balance paid \(Money.format(listed - charged))."
+                : charged - listed > 0.005 ? "Amazon's own payment record ties this charge to this order. The order was paid in more than one charge."
+                : "Amazon's own payment record ties this charge to this order."
         }
     }
 

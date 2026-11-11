@@ -317,7 +317,8 @@ final class BudgetStore {
     func rematchOrders() async {
         guard !orders.items.isEmpty else { return }
         let charges = orderCharges, items = orders.items, file = paths.ordersFile
-        let matches = await Task.detached { OrderMatcher.match(charges, to: items) }.value
+        let pins = (orders.pins ?? [:]).mapValues(\.order)
+        let matches = await Task.detached { OrderMatcher.match(charges, to: items, pins: pins) }.value
         guard items == orders.items else { return }   // another export arrived meanwhile; its own pass will follow
         guard matches != orders.matches || orderRows.isEmpty else { return }
         orders.matches = matches
