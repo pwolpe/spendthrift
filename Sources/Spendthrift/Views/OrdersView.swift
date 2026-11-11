@@ -75,7 +75,7 @@ struct OrdersView: View {
         return store.orderRows.filter { row in
             guard row.item.cents > 0, inStretch(row.month) else { return false }
             if let who = store.orderWho, row.item.who != who { return false }
-            if !ignoringCategory, let category = store.orderCategory, row.category != category { return false }
+            if !ignoringCategory, let kind = store.orderKind, row.kind != kind { return false }
             return query.isEmpty || row.haystack.contains(query)
         }
     }
@@ -89,7 +89,7 @@ struct OrdersView: View {
     }
     /// Nothing narrowing the page but the stretch: the state the tie-out and the summary are about.
     private var plain: Bool {
-        store.orderWho == nil && store.orderCategory == nil && store.orderOnly == nil && store.orderSearch.trimmingCharacters(in: .whitespaces).isEmpty
+        store.orderWho == nil && store.orderKind == nil && store.orderOnly == nil && store.orderSearch.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     static func money(_ cents: Int, cents showCents: Bool = true) -> String { Money.format(Double(cents) / 100, cents: showCents) }
@@ -98,7 +98,7 @@ struct OrdersView: View {
     var body: some View {
         @Bindable var store = store
         let everything = rows(ignoringCategory: true)
-        let list = store.orderCategory == nil ? everything : everything.filter { $0.category == store.orderCategory }
+        let list = store.orderKind == nil ? everything : everything.filter { $0.kind == store.orderKind }
         let finding = !store.orderSearch.trimmingCharacters(in: .whitespaces).isEmpty
         MaybeScroll(scrolls: scrolls) {
             VStack(alignment: .leading, spacing: 18) {
@@ -226,8 +226,8 @@ struct OrdersView: View {
     private func facts(_ list: [Row]) -> String {
         let total = list.reduce(0) { $0 + $1.net }
         var lines = ["Stretch: \(scopeTitle)", "Orders: \(Set(list.map(\.item.orderID)).count), items: \(list.count), total after refunds: \(Self.money(total, cents: false))"]
-        let byCategory = Dictionary(grouping: list, by: \.category).map { ($0.key.displayName, $0.value.reduce(0) { $0 + $1.net }) }.sorted { $0.1 > $1.1 }
-        lines.append("By category: " + byCategory.prefix(7).map { "\($0.0) \(Self.money($0.1, cents: false))" }.joined(separator: "; "))
+        let byCategory = Dictionary(grouping: list, by: \.kind).map { ($0.key, $0.value.reduce(0) { $0 + $1.net }) }.sorted { $0.1 > $1.1 }
+        lines.append("By kind of thing: " + byCategory.prefix(7).map { "\($0.0) \(Self.money($0.1, cents: false))" }.joined(separator: "; "))
         let people = Dictionary(grouping: list.filter { $0.item.who != nil }, by: { $0.item.who! }).map { ($0.key, $0.value.reduce(0) { $0 + $1.net }) }.sorted { $0.1 > $1.1 }
         if people.count > 1 { lines.append("By who ordered: " + people.map { "\($0.0) \(Self.money($0.1, cents: false))" }.joined(separator: "; ")) }
         lines.append("Biggest single items: " + list.sorted { $0.net > $1.net }.prefix(6).map { "\($0.name) \(Self.money($0.net, cents: false))" }.joined(separator: "; "))
@@ -284,7 +284,7 @@ struct OrdersView: View {
         let orders = Set(list.map(\.item.orderID)).count
         var title = ["What was ordered", scopeTitle]
         if let who = store.orderWho { title.append(who) }
-        if let category = store.orderCategory { title.append(category.displayName) }
+        if let kind = store.orderKind { title.append(kind) }
         if finding { title.append("“\(store.orderSearch.trimmingCharacters(in: .whitespaces))”") }
         return ReceiptPaper(padding: 16) {
             VStack(alignment: .leading, spacing: 8) {
@@ -302,52 +302,89 @@ struct OrdersView: View {
                 }
             }
         }
-        .frame(width: 360)
+        .frame(width: 320)
     }
 
     // MARK: Where it went
 
+    /// One colour per kind of thing, the same wherever it appears. Twelve colours that read apart
+    /// in light and dark, taken in turn down the list of kinds.
+    static func color(of kind: String) -> Color {
+        guard let index = ItemSorter.kinds.firstIndex(of: kind), kind != "Other" else { return .gray }
+        let palette: [Color] = [.pink, .blue, .orange, .purple, .mint, .brown, .indigo, .green, .red, .teal, .yellow, .cyan]
+        return palette[index % palette.count]
+    }
+
+    /// Where the money went, by the kind of thing bought. Click a slice or a line to see only that kind;
+    /// click it again to see everything.
     private func ring(_ list: [Row]) -> some View {
-        let totals = Dictionary(grouping: list, by: \.category)
-            .map { (category: $0.key, cents: $0.value.reduce(0) { $0 + $1.net }) }
+        let totals = Dictionary(grouping: list, by: \.kind)
+            .map { (kind: $0.key, cents: $0.value.reduce(0) { $0 + $1.net }) }
             .filter { $0.cents > 0 }
-            .sorted { ($0.cents, $1.category.rawValue) > ($1.cents, $0.category.rawValue) }
+            .sorted { ($0.cents, $1.kind) > ($1.cents, $0.kind) }
         let sum = max(1, totals.reduce(0) { $0 + $1.cents })
-        let chosen = store.orderCategory
+        let drawn = totals.filter { $0.cents * 250 >= sum }
+        let chosen = store.orderKind
+        let pick = { (kind: String) in
+            withAnimation(.snappy(duration: 0.2)) { store.orderKind = chosen == kind ? nil : kind }
+        }
         return Card(padding: 16) {
-            HStack(alignment: .center, spacing: 20) {
-                Chart(totals.filter { $0.cents * 250 >= sum }, id: \.category) { item in
+            HStack(alignment: .center, spacing: 14) {
+                Chart(drawn, id: \.kind) { item in
                     SectorMark(angle: .value("Amount", item.cents), innerRadius: .ratio(0.62),
-                               outerRadius: chosen == item.category ? .ratio(1) : .ratio(0.93), angularInset: 1.5)
+                               outerRadius: chosen == item.kind ? .ratio(1) : .ratio(0.93), angularInset: 1.5)
                         .cornerRadius(4)
-                        .foregroundStyle(item.category.color.gradient)
-                        .opacity(chosen == nil || chosen == item.category ? 1 : 0.35)
+                        .foregroundStyle(Self.color(of: item.kind).gradient)
+                        .opacity(chosen == nil || chosen == item.kind ? 1 : 0.35)
                 }
-                .frame(width: 132, height: 132)
-                // Every name in full: a legend that reads "Sho…" says nothing.
-                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-                    ForEach(totals.prefix(8), id: \.category) { item in
-                        GridRow {
-                            Button {
-                                withAnimation(.snappy(duration: 0.2)) { store.orderCategory = chosen == item.category ? nil : item.category }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Circle().fill(item.category.color).frame(width: 9, height: 9)
-                                    Text(item.category.displayName).fontWeight(chosen == item.category ? .semibold : .regular).fixedSize()
+                .frame(width: 124, height: 124)
+                // A click on the ring lands on a slice: slices start at twelve o'clock and run clockwise.
+                .overlay {
+                    GeometryReader { geo in
+                        Color.clear.contentShape(Circle())
+                            .onTapGesture { point in
+                                let dx = point.x - geo.size.width / 2, dy = point.y - geo.size.height / 2
+                                var turn = atan2(dx, -dy) / (2 * .pi)
+                                if turn < 0 { turn += 1 }
+                                let whole = Double(drawn.reduce(0) { $0 + $1.cents })
+                                var run = 0.0
+                                for item in drawn {
+                                    run += Double(item.cents) / max(whole, 1)
+                                    if turn <= run { pick(item.kind); return }
                                 }
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
-                            .help(chosen == item.category ? "Show every category again" : "Show only \(item.category.displayName)")
-                            Text("\(Int((Double(item.cents) / Double(sum) * 100).rounded()))%").foregroundStyle(.secondary).monospacedDigit()
-                                .gridColumnAlignment(.trailing)
-                            Text(Self.money(item.cents, cents: false)).font(Theme.mono(12.5, .medium)).gridColumnAlignment(.trailing).fixedSize()
-                        }
-                        .font(.callout)
-                        .opacity(chosen == nil || chosen == item.category ? 1 : 0.5)
                     }
-                    if totals.count > 8 {
-                        Text("and \(totals.count - 8) smaller").font(.caption).foregroundStyle(.tertiary)
+                }
+                .help("Click a slice to see only that kind of thing")
+                // Every name in full, and the whole line is the button.
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(totals.prefix(9), id: \.kind) { item in
+                        Button { pick(item.kind) } label: {
+                            HStack(spacing: 8) {
+                                Circle().fill(Self.color(of: item.kind)).frame(width: 9, height: 9)
+                                Text(item.kind).fontWeight(chosen == item.kind ? .semibold : .regular).fixedSize()
+                                Spacer(minLength: 8)
+                                Text("\(Int((Double(item.cents) / Double(sum) * 100).rounded()))%").foregroundStyle(.secondary).monospacedDigit()
+                                    .frame(width: 32, alignment: .trailing)
+                                Text(Self.money(item.cents, cents: false)).font(Theme.mono(12.5, .medium)).frame(width: 60, alignment: .trailing)
+                            }
+                            .font(.callout)
+                            .padding(.vertical, 3).padding(.horizontal, 6)
+                            .frame(maxWidth: .infinity)
+                            .background(chosen == item.kind ? Theme.accent.opacity(0.12) : .clear, in: .rect(cornerRadius: 6, style: .continuous))
+                            .opacity(chosen == nil || chosen == item.kind ? 1 : 0.5)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(chosen == item.kind ? "Show everything again" : "Show only \(item.kind)")
+                    }
+                    if totals.count > 9 {
+                        Menu("and \(totals.count - 9) smaller") {
+                            ForEach(totals.dropFirst(9), id: \.kind) { item in
+                                Button("\(item.kind)  \(Self.money(item.cents, cents: false))") { pick(item.kind) }
+                            }
+                        }
+                        .menuStyle(.borderlessButton).fixedSize().font(.caption).padding(.leading, 6)
                     }
                 }
             }
@@ -439,7 +476,7 @@ struct OrdersView: View {
                     ForEach(Array(biggest)) { row in
                         Button { store.orderOnly = row.item.orderID } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Circle().fill(row.category.color).frame(width: 8, height: 8)
+                                Circle().fill(Self.color(of: row.kind)).frame(width: 8, height: 8)
                                 Text(row.name).font(.callout).lineLimit(1)
                                 Spacer(minLength: 8)
                                 Text(row.date.formatted(.dateTime.month(.abbreviated).year())).font(.caption).foregroundStyle(.secondary)
@@ -538,11 +575,11 @@ struct OrdersView: View {
                     ForEach(BudgetStore.OrderList.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
-                if let category = store.orderCategory {
-                    Button { withAnimation(.snappy(duration: 0.2)) { store.orderCategory = nil } } label: {
-                        Label("Only \(category.displayName)", systemImage: "xmark.circle.fill").font(.callout)
+                if let kind = store.orderKind {
+                    Button { withAnimation(.snappy(duration: 0.2)) { store.orderKind = nil } } label: {
+                        Label("Only \(kind)", systemImage: "xmark.circle.fill").font(.callout)
                     }
-                    .buttonStyle(.bordered).help("Show every category again")
+                    .buttonStyle(.bordered).help("Show everything again")
                 }
                 Spacer()
             }
@@ -673,7 +710,7 @@ private struct OrderRowView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(order.rows) { row in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Circle().fill(row.category.color).frame(width: 8, height: 8)
+                            Circle().fill(OrdersView.color(of: row.kind)).frame(width: 8, height: 8)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(row.item.quantity > 1 ? "\(row.item.quantity) × \(row.name)" : row.name).font(.callout)
                                 if row.name != row.item.name {
@@ -681,7 +718,7 @@ private struct OrderRowView: View {
                                 }
                             }
                             Spacer(minLength: 8)
-                            Text(row.category.displayName).font(.caption).foregroundStyle(.secondary)
+                            Text(row.kind).font(.caption).foregroundStyle(.secondary)
                             Text(Money.format(Double(row.item.cents) / 100)).font(Theme.mono(12, .medium)).frame(minWidth: 70, alignment: .trailing)
                             if let url = row.item.productURL {
                                 Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.forward.square") }
@@ -718,11 +755,11 @@ private struct ItemRowView: View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: toggle) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Circle().fill(row.category.color).frame(width: 8, height: 8)
+                    Circle().fill(OrdersView.color(of: row.kind)).frame(width: 8, height: 8)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.item.quantity > 1 ? "\(row.item.quantity) × \(row.name)" : row.name)
                             .font(.body.weight(.medium)).lineLimit(1)
-                        Text(([row.category.displayName, row.date.formatted(.dateTime.month(.abbreviated).day().year()), row.item.who] as [String?]).compactMap { $0 }.joined(separator: " · "))
+                        Text(([row.kind, row.date.formatted(.dateTime.month(.abbreviated).day().year()), row.item.who] as [String?]).compactMap { $0 }.joined(separator: " · "))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 12)

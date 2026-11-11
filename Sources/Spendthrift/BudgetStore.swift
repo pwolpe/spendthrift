@@ -145,7 +145,8 @@ final class BudgetStore {
     /// The stretch of order history on screen, whose orders, and (after a click on the ring) which category.
     var orderScope = OrderScope.all
     var orderWho: String?
-    var orderCategory: Category?
+    /// The kind of thing clicked on the ring ("Baby & Kids"), when the page is narrowed to one.
+    var orderKind: String?
     var orderList = OrderList.orders
     /// One order on show by itself (arrived at from a charge), until the person clears it.
     var orderOnly: String?
@@ -170,6 +171,8 @@ final class BudgetStore {
         /// What it is in plain words (the model's reading of the listing), or the listing itself until it's read.
         let name: String
         let category: Category
+        /// What sort of thing it is, finer than the budget category.
+        let kind: String
         /// What it cost after any refund on its order, in cents.
         let net: Int
         /// Name, listing and category squeezed to letters and digits, for finding.
@@ -215,8 +218,10 @@ final class BudgetStore {
             if let back = refunds[item.orderID], let whole = ordered[item.orderID], whole > 0 {
                 net = max(0, item.cents - Int((Double(item.cents) * Double(min(back, whole)) / Double(whole)).rounded()))
             }
-            return OrderRow(id: i, item: item, date: date, month: Month(date: date), name: name, category: category, net: net,
-                            haystack: [name, item.name, category.rawValue, item.who ?? ""].map(PlacesView.squeeze).joined(separator: " "),
+            // Until the model has said what kind of thing it is, the shop's own shelf stands in.
+            let kind = read?.kind ?? (item.shop == .digital ? "Kindle & Digital Media" : item.shop == .groceries ? "Fresh Food" : "Not Read Yet")
+            return OrderRow(id: i, item: item, date: date, month: Month(date: date), name: name, category: category, kind: kind, net: net,
+                            haystack: [name, item.name, kind, category.rawValue, item.who ?? ""].map(PlacesView.squeeze).joined(separator: " "),
                             charge: charge[i])
         }
         orderPeople = Array(Set(orders.items.compactMap(\.who))).sorted()
@@ -240,7 +245,7 @@ final class BudgetStore {
         guard let order = orders.items(for: charge).first?.orderID else { return }
         withAnimation(.snappy(duration: 0.25)) {
             placeFocus = nil; chargesFocus = nil
-            orderScope = .all; orderWho = nil; orderCategory = nil; orderSearch = ""; orderList = .orders
+            orderScope = .all; orderWho = nil; orderKind = nil; orderSearch = ""; orderList = .orders
             orderOnly = order
             selection = .orders
         }
@@ -327,7 +332,7 @@ final class BudgetStore {
         guard CloudAI.isEnabled, !isReadingOrders else { return }
         let done = orders.sorted ?? [:]
         var seen: Set<String> = [], unread: [String] = []
-        for item in orders.items.reversed() where done[item.name] == nil && seen.insert(item.name).inserted { unread.append(item.name) }
+        for item in orders.items.reversed() where (done[item.name] == nil || done[item.name]?.kind == nil) && seen.insert(item.name).inserted { unread.append(item.name) }
         guard !unread.isEmpty else { return }
         isReadingOrders = true
         defer { isReadingOrders = false }
@@ -737,7 +742,7 @@ final class BudgetStore {
                 }
             } else if (e.override ?? info?.category) == .transfer, e.override == nil, e.amount > 0,
                       let name = info?.name, name.hasSuffix("Card Payment") {
-                payments.append(Payment(id: e.id, day: d, amount: e.amount, issuer: Self.issuer(in: name) ?? "Other cards"))
+                payments.append(Payment(id: e.id, day: d, amount: e.amount, issuer: Self.issuer(in: name) ?? Self.issuer(in: e.description) ?? "Other cards"))
             }
         }
         var statements: [String: [Statement]] = [:]

@@ -288,7 +288,7 @@ enum KnownMerchants {
         ("CHASE CREDIT CRD", "Chase Card Payment", .transfer, 0), ("AMEX EPAYMENT", "American Express Card Payment", .transfer, 0),
         ("AMERICAN EXPRESS ACH", "American Express Card Payment", .transfer, 0),
         ("CITI AUTOPAY", "Citi Card Payment", .transfer, 0), ("CITI CARD ONLINE", "Citi Card Payment", .transfer, 0),
-        ("CAPITAL ONE CRCARDPMT", "Capital One Card Payment", .transfer, 0), ("CAPITAL ONE MOBILE PMT", "Capital One Card Payment", .transfer, 0),
+        ("CAPITAL ONE CRCARDPMT", "Capital One Card Payment", .transfer, 0), ("CAPITAL ONE/CRCARDPMT", "Capital One Card Payment", .transfer, 0), ("CAPITAL ONE MOBILE PMT", "Capital One Card Payment", .transfer, 0),
         ("DISCOVER E-PAYMENT", "Discover Card Payment", .transfer, 0), ("APPLECARD GSBANK", "Apple Card Payment", .transfer, 0),
         ("BARCLAYCARD", "Barclays Card Payment", .transfer, 0),
         ("BANK OF AMERICA CREDIT CARD", "Bank of America Card Payment", .transfer, 0), ("BK OF AMER VISA", "Bank of America Card Payment", .transfer, 0),

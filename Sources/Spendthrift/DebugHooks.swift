@@ -180,6 +180,8 @@ enum DebugHooks {
             print("ORDERS \(String(format: "%.2f", Date.now.timeIntervalSince(started)))s")
             if env["SPENDTHRIFT_NO_CLOUD"] == nil {
                 await store.readOrderListings()
+                // (A reading begun at launch may still be going: wait for it.)
+                for _ in 0..<3_000 where store.isReadingOrders { try? await Task.sleep(for: .milliseconds(200)) }
                 print("ORDERS listings read in \(String(format: "%.0f", Date.now.timeIntervalSince(started)))s")
                 var byCategory: [String: Int] = [:]
                 for row in store.orderRows { byCategory[row.category.rawValue, default: 0] += 1 }

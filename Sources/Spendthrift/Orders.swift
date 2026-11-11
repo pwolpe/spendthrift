@@ -91,6 +91,8 @@ struct OrderBook: Codable {
     struct ItemSort: Codable, Hashable {
         var name: String
         var category: String
+        /// What sort of thing it is, finer than a budget category ("Baby & Kids", "Coffee & Tea").
+        var kind: String?
     }
 
     func items(for entry: UUID) -> [OrderItem] {
@@ -346,6 +348,17 @@ enum OrderMatcher {
 /// Fatty Acids - Compare to Omega 3-6-9 and See…"). The model reads each one and says what it is
 /// and where it belongs in the budget. Only the listing text is sent: no prices, dates or names.
 enum ItemSorter {
+    /// What sort of thing an item is. "Shopping" says nothing about a stroller or a phone charger;
+    /// these do. A fixed list, so the same kind of thing always lands in the same place.
+    static let kinds = [
+        "Baby & Kids", "Clothing & Shoes", "Electronics & Gadgets", "Computers & Accessories", "Phones & Chargers",
+        "Kitchen & Cooking", "Coffee & Tea", "Pantry & Snacks", "Fresh Food", "Drinks", "Wine, Beer & Spirits",
+        "Cleaning & Laundry", "Tools & Home Improvement", "Furniture & Decor", "Bedding & Bath", "Storage & Organization",
+        "Lighting & Electrical", "Garden & Outdoor", "Vitamins & Supplements", "Medicine & First Aid", "Skincare & Grooming",
+        "Dental Care", "Fitness & Sports", "Books", "Kindle & Digital Media", "Movies, Music & Games", "Toys & Hobbies",
+        "Office & Stationery", "Travel & Luggage", "Pet Supplies", "Gifts & Party", "Car & Bike", "Memberships & Fees", "Other",
+    ]
+
     static func instructions() -> String {
         """
         You tidy a household's online shopping history for a personal budgeting app. Each numbered item is a product \
@@ -355,6 +368,10 @@ enum ItemSorter {
         point ("Sonos Move 2 speaker", "Aesop hand wash", "Counter Culture coffee beans"), drop sizes, counts, colours \
         and sales talk. For a book, film or album, the title.
         - category: exactly one from this list (use the names exactly): \(Category.spendingCases.map(\.rawValue).joined(separator: "; "))
+        - kind: what sort of thing it is, exactly one from this list (use the names exactly): \(kinds.joined(separator: "; ")). \
+        Choose the most specific one that fits; a baby monitor is "Baby & Kids" not "Electronics & Gadgets", coffee beans \
+        are "Coffee & Tea" not "Pantry & Snacks", a paper book is "Books" and an ebook or audiobook is "Kindle & Digital Media". \
+        Use "Other" only when the listing really doesn't say what the thing is.
 
         Rules:
         - Food, drink and pantry goods to have at home are Groceries. Wine, liquor and spirits are "Wine & Spirits".
@@ -369,7 +386,7 @@ enum ItemSorter {
         - If the person made a category of their own that fits (for example one for children or pets), prefer it.
         - Use Other only when the listing really doesn't say what the thing is.
 
-        Reply with JSON only: {"results": [{"id": 1, "name": "…", "category": "…"}]} with one result per item.
+        Reply with JSON only: {"results": [{"id": 1, "name": "…", "category": "…", "kind": "…"}]} with one result per item.
         """
     }
 
@@ -380,7 +397,7 @@ enum ItemSorter {
         guard let body = try? JSONSerialization.data(withJSONObject: ["items": payload]), let user = String(data: body, encoding: .utf8) else { return nil }
         let system = instructions()
         let reply = await Timeout.run(120) {
-            try? await CloudAI.complete(job: "Reading order items", system: system, user: user, json: true, maxTokens: 60 * listings.count + 2_000)
+            try? await CloudAI.complete(job: "Reading order items", system: system, user: user, json: true, maxTokens: 80 * listings.count + 2_000)
         }
         guard let reply, let results = CloudAI.object(from: reply)?["results"] as? [[String: Any]] else { return nil }
         var out: [String: OrderBook.ItemSort] = [:]
@@ -390,7 +407,9 @@ enum ItemSorter {
                   let category = Category.spendingCases.first(where: { $0.rawValue.caseInsensitiveCompare(wanted) == .orderedSame }) else { continue }
             var name = ((result["name"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if name.isEmpty || name.count > 70 { name = String(listings[id - 1].prefix(60)) }
-            out[listings[id - 1]] = .init(name: name, category: category.rawValue)
+            let wantedKind = (result["kind"] as? String) ?? ""
+            let kind = kinds.first { $0.caseInsensitiveCompare(wantedKind) == .orderedSame } ?? "Other"
+            out[listings[id - 1]] = .init(name: name, category: category.rawValue, kind: kind)
         }
         return out
     }
