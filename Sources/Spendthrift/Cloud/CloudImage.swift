@@ -8,7 +8,7 @@ import Observation
 /// The banner picture, drawn by a cloud image model from Tony's real photo: a cartoon of him living
 /// out a daydream about a purchase he really made. The photo goes along every time so it stays him.
 enum CloudImage {
-    static let defaultModel = "google/gemini-nano-banana-2.1"
+    static let defaultModel = Models.image
     static var model: String {
         get { UserDefaults.standard.string(forKey: "cloudImageModel") ?? defaultModel }
         set { UserDefaults.standard.set(newValue, forKey: "cloudImageModel") }

@@ -39,9 +39,8 @@ enum Decisions {
         var probabilities: [String: Double] = [:]
     }
 
-    /// The decision model used unless a caller names another. Chosen by measurement: see the
-    /// benchmark in DebugHooks (`SPENDTHRIFT_DECISION_BENCH`).
-    static let standard = "typesafe/jev-1.14"
+    /// The decision model used unless a caller names another (only the benchmark does).
+    static let standard = Models.decision
 
     /// Asks every question about one state. Nil when there is no key, no connection, or the model refused.
     static func ask(job: String, model: String = standard, state: String, questions: [String: Question]) async -> [String: Answer]? {

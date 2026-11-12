@@ -203,7 +203,7 @@ extension BudgetStore {
             states[item.key] = "Transaction text: \(Redactor.scrub(item.description)). Money \(item.averageAmount < 0 ? "came in" : "went out"). "
                 + "Typical amount $\(String(format: "%.2f", abs(item.averageAmount))). Appears \(item.count) time\(item.count == 1 ? "" : "s")."
         }
-        let answers = await Decisions.askAll(job: "Sorting payees, first pass", model: Self.factsModel, states: states,
+        let answers = await Decisions.askAll(job: "Sorting payees, first pass", states: states,
                                              questions: ["category": CategoryQuestion.question()], atOnce: 24)
         var filed = 0
         for (key, answer) in answers {

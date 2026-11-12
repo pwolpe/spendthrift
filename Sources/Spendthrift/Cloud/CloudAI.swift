@@ -13,18 +13,15 @@ import Observation
 /// Totals are always computed in code. If the cloud can't be reached, everything falls back to
 /// the on-device paths, so the app never depends on it.
 enum CloudAI {
-    static let defaultModel = "anthropic/claude-sonnet-5.5"
-    static let models: [(id: String, label: String)] = [
-        ("anthropic/claude-haiku-5.5", "Claude Haiku 5.5 · fastest, lowest cost"),
-        ("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5 · recommended"),
-        ("anthropic/claude-opus-5.5", "Claude Opus 5.5 · most capable"),
-    ]
+    static let defaultModel = Models.writing
+    static let models = Models.writingChoices
 
     /// For comparing models: use this one for everything inside the task, whatever Setup says.
     @TaskLocal static var modelOverride: String?
 
     static var model: String {
-        get { modelOverride ?? UserDefaults.standard.string(forKey: "cloudModel") ?? defaultModel }
+        // A choice saved before the list changed is no longer a choice: the current default stands in.
+        get { modelOverride ?? UserDefaults.standard.string(forKey: "cloudModel").flatMap { saved in models.contains { $0.id == saved } ? saved : nil } ?? defaultModel }
         set { UserDefaults.standard.set(newValue, forKey: "cloudModel") }
     }
     /// Reading whole statements sends more than merchant names, so it has its own switch.

@@ -8,8 +8,6 @@ import SwiftUI
 /// A decision model is asked once per payee and its answer kept. Until it has answered, and whenever
 /// there is no key, the category's usual answer stands in, so every figure works offline.
 extension BudgetStore {
-    static let factsModel = "google/gemini-decision-1"
-
     /// What a category usually is, when nothing better is known about the payee.
     static func usuallyOptional(_ category: Category) -> Bool {
         [.dining, .travel, .entertainment, .shopping, .wine, .gifts, .personal, .subscriptions].contains(category)
@@ -98,7 +96,7 @@ extension BudgetStore {
         guard !states.isEmpty else { return }
         isLearningFacts = true
         defer { isLearningFacts = false }
-        let answers = await Decisions.askAll(job: "Needs and wants", model: Self.factsModel, states: states, questions: ["optional": Self.optionalQuestion])
+        let answers = await Decisions.askAll(job: "Needs and wants", states: states, questions: ["optional": Self.optionalQuestion])
         let learned = applyOptional(answers.compactMapValues { $0["optional"]?.yes })
         if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("FACTS asked about \(states.count) payees, learned \(learned)") }
         if learned > 0 { changed() }

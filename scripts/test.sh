@@ -48,6 +48,10 @@ if [[ -n $LIBRARY ]]; then
   run "a copy of the library" "$WORK/library-home" ""
 fi
 
+# Models are named in one file, so the whole app can be moved to new ones at once.
+strays=$(grep -rnE '"(anthropic|google|openai|typesafe|meta|mistralai|x-ai|deepseek)/[a-z0-9.:-]+"' Sources --include='*.swift' | grep -v "Cloud/ModelNames.swift" || true)
+if [[ -n "$strays" ]]; then echo "a model is named outside Cloud/ModelNames.swift:"; echo "$strays"; bad=1; fi
+
 # How long the app takes to open, for the record: the middle of five runs (single runs vary by a
 # tenth of a second). "Drawn" is when the first page is really on screen, timed from inside the pass
 # that draws it; "all in" is when the pictures and lower cards have followed and the app is free.

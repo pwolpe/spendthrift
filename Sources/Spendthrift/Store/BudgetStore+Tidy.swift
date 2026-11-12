@@ -3,9 +3,6 @@ import SwiftUI
 /// Acting on what `TidyEngine` finds: asking a decision model about each pair once, combining and
 /// separating payees when it is sure, and keeping a record that can be shown and undone.
 extension BudgetStore {
-    /// The model that judges pairs. Chosen by measurement on a real library (it called real
-    /// duplicates "the same" with high confidence and almost never a wrong pair).
-    static let tidyModel = "google/gemini-decision-1"
 
     /// What was tidied automatically, newest first.
     /// (A split-off payee that the sorter then gave its old name back is no change at all, and is left out.)
@@ -32,7 +29,7 @@ extension BudgetStore {
         let pairs = TidyEngine.pairs(in: spellings, alreadyJudged: skip)
         guard !pairs.isEmpty else { return }
         let states = Dictionary(pairs.map { ($0.id, TidyEngine.state(for: $0)) }, uniquingKeysWith: { first, _ in first })
-        let answers = await Decisions.askAll(job: "Tidying payees", model: Self.tidyModel, states: states, questions: ["same": TidyEngine.sameBusiness])
+        let answers = await Decisions.askAll(job: "Tidying payees", states: states, questions: ["same": TidyEngine.sameBusiness])
         // Nothing at all came back: the model was out of reach, which says nothing about the pairs.
         guard !answers.isEmpty else { return }
         // The answers took a while. If statements are being read or sorted meanwhile, wait for them

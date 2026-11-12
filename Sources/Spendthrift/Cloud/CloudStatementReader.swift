@@ -38,7 +38,7 @@ enum CloudStatementReader {
 
     /// The model asked for a second, independent reading when the first can't be checked against printed
     /// totals. Chosen because it errs differently from the main model, so the two agreeing means something.
-    static let secondReader = "google/gemini-3.7-flash"
+    static let secondReader = Models.secondReader
 
     /// Lines one reading has and the other doesn't, matching on amount and allowing a few days
     /// between dates (one reading may give the purchase date, the other the posting date).
