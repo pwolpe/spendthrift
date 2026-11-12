@@ -26,7 +26,10 @@ keeps, and how to check your work.
    Views/Components.swift. If you need a second copy of something, make the first one reusable.
 9. **A new saved field is optional and decoded.** `Library` has a hand-written `init(from:)`: add the
    field there, or it will vanish at the next launch. The self-test checks this.
-10. **Plain words.** "Payee", "charge", "trip or event". Speak to the reader as "you". No jargon,
+10. **A decision model's answer is acted on automatically only above a measured confidence, is
+    always recorded, and can always be undone.** Below that it is offered or ignored. Models in
+    `Cloud/Decisions.swift` only judge; the threshold is chosen by measurement, not by feel.
+11. **Plain words.** "Payee", "charge", "trip or event". Speak to the reader as "you". No jargon,
     no exclamation marks.
 
 ## Checking your work
@@ -53,4 +56,4 @@ open $HOME_DIR/snaps
 Pickers and text fields cannot be drawn this way and appear as yellow placeholders.
 
 The app should stay fast: the test script prints the time to the first frame. If your change moves
-it, find out why before going further (`SPENDTHRIFT_TIMING=1` prints each step).
+it, find out why before going further (`SPENDTHRIFT_TIMING=1` prints each step; `SPENDTHRIFT_BENCH=1` times what pages do repeatedly, then quits).

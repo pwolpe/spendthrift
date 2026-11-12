@@ -52,7 +52,7 @@ enum CheckReader {
         Never copy an account number, routing number or Social Security number into any field.
         Reply with JSON only: {"checks": [{"number": "", "amount": 0, "payee": "", "memo": "", "category": "", "confident": true}]}
         """
-        let model = DecisionSorter.handles(CloudAI.model) ? CloudAI.defaultModel : CloudAI.model
+        let model = CloudAI.model
         let body: [String: Any] = [
             "model": model,
             "max_tokens": 3_000,

@@ -187,6 +187,33 @@ extension BudgetStore {
     /// The cloud model reviews every place that isn't the person's own choice or a business the app knows
     /// for certain: unsorted places, on-device guesses, the bank's broad categories and word matches.
     /// What it's sure of is simply filed; only what it calls a guess goes to Double-Check.
+    /// A first, instant pass over a large batch of new payees. A decision model answers "which
+    /// category?" for each in a few hundredths of a second; where it is at least nine parts in ten
+    /// sure (it then agrees with the careful model 99 times in 100, measured on a real library), the
+    /// category is shown straight away. The careful pass that follows still names every payee and
+    /// has the last word on every category: this only means the page fills in while it works.
+    private func fileTheObviousAtOnce(_ items: [CloudItem]) async {
+        let fresh = items.filter { library.merchants[$0.key]?.category == nil }
+        guard fresh.count >= 20 else { return }
+        var states: [String: String] = [:]
+        for item in fresh {
+            states[item.key] = "Transaction text: \(Redactor.scrub(item.description)). Money \(item.averageAmount < 0 ? "came in" : "went out"). "
+                + "Typical amount $\(String(format: "%.2f", abs(item.averageAmount))). Appears \(item.count) time\(item.count == 1 ? "" : "s")."
+        }
+        let answers = await Decisions.askAll(job: "Sorting payees, first pass", model: Self.factsModel, states: states,
+                                             questions: ["category": CategoryQuestion.question()], atOnce: 24)
+        var filed = 0
+        for (key, answer) in answers {
+            guard let pick = answer["category"], (pick.confidence ?? 0) >= 0.9, let choice = pick.choice,
+                  let category = Category.pickable.first(where: { $0.rawValue == choice }),
+                  library.merchants[key] != nil, library.merchants[key]?.category == nil else { continue }
+            library.merchants[key]?.category = category
+            filed += 1
+        }
+        if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG FIRST PASS asked \(states.count), filed \(filed)") }
+        if filed > 0 { withAnimation(.snappy) { changed() } }
+    }
+
     private func sortWithCloud() async {
         while true {
             let used = Dictionary(grouping: library.entries, by: \.merchantKey)
@@ -204,6 +231,7 @@ extension BudgetStore {
             }
             guard !waiting.isEmpty else { relearnKeys.removeAll(); return }
             waiting.sort { $0.weight > $1.weight }
+            await fileTheObviousAtOnce(waiting.map(\.item))
             let examples = library.merchants.values
                 .filter { $0.confirmed && $0.category != nil }
                 .map { MerchantRule(name: $0.name, category: $0.category!) }

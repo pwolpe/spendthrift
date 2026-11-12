@@ -76,7 +76,6 @@ extension BudgetStore {
         let keys = library.merchants.filter { $0.value.name == name }.map(\.key)
         for key in keys { library.merchants[key]?.note = trimmed.isEmpty ? nil : trimmed }
         changed()
-        Forecaster.forget()
         if !trimmed.isEmpty, CloudAI.isEnabled, let guess = keys.first(where: { library.merchants[$0]?.confirmed == false }) {
             Task { await explain(guess, said: trimmed) }
         }

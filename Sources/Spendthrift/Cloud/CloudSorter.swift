@@ -153,7 +153,6 @@ enum CloudSorter {
     /// Nil when the cloud couldn't be used (the caller falls back to on-device sorting).
     static func sort(_ items: [CloudItem], examples: [MerchantRule]) async -> [String: CloudVerdict]? {
         guard !items.isEmpty else { return [:] }
-        if DecisionSorter.handles(CloudAI.model) { return await DecisionSorter.sort(items, examples: examples) }
         let payload: [[String: Any]] = items.enumerated().map { i, item in
             var entry: [String: Any] = [
                 "id": i + 1,
@@ -191,20 +190,11 @@ enum CloudSorter {
     }
 }
 
-// MARK: - Job 1, alternative: a "decision" model (Cloudflare Clef) picks the category
+// MARK: - "Which category?" as a question with fixed answers
 
-/// Decision models don't write text: given a state and a multiple-choice question they return the
-/// chosen option with probabilities. That's a natural fit for "which category?", one request per
-/// place. They can't tidy a merchant's name, so the app's own cleanup is used for that.
-///
-/// Not offered in Settings. Measured in Nov 2026 on 563 real places against Claude Sonnet 5.5:
-/// Clef (27B) was about twice as fast (25s vs 47s) and far cheaper, but agreed on only 64% of
-/// categories, with plain errors (airlines and parking as Subscriptions, restaurants as Shopping).
-/// Claude Haiku 5.5 agreed on 88%. Kept for experiments: `defaults write com.pwolpe.spendthrift
-/// cloudModel cloudflare/clef`. Jobs that need writing still use the default model.
-enum DecisionSorter {
-    static func handles(_ model: String) -> Bool { model.hasPrefix("cloudflare/clef") }
-
+/// What each category covers, in a line, and the question built from them. Decision models (see
+/// Decisions.swift) answer it with one of the categories and how sure they are.
+enum CategoryQuestion {
     private static let meanings: [Category: String] = [
         .groceries: "Supermarkets, food markets, butchers, bakeries selling food to take home",
         .wine: "Wine shops, liquor stores, wineries, distilleries, wine clubs and wine auctions: bottles bought to keep or take home (not drinks at a bar)",
@@ -230,75 +220,12 @@ enum DecisionSorter {
     ]
 
     /// "Which category?" as a question a decision model can answer: every category the person can pick, with what it covers.
-    static func categoryQuestion() -> Decisions.Question {
+    static func question() -> Decisions.Question {
         var options: [String: String] = [:]
         for category in Category.pickable {
             options[category.rawValue] = meanings[category] ?? "A category this person created for themselves; use it whenever the transaction fits its name"
         }
         return .choice("Pick the budget category for this bank or credit card transaction. A refund belongs in the category of what was bought. "
                        + "\"TST*\" and \"SQ *\" are payment processors used by restaurants and small shops.", options: options)
-    }
-
-    static func sort(_ items: [CloudItem], examples: [MerchantRule]) async -> [String: CloudVerdict]? {
-        var criteria: [String: String] = [:]
-        for category in Category.pickable {
-            criteria[category.rawValue] = meanings[category] ?? "A category this person created for themselves; use it whenever the transaction fits its name"
-        }
-        var instructions = "Pick the budget category for this bank or credit card transaction. A refund belongs in the category of what was bought. "
-            + "\"TST*\" and \"SQ *\" are payment processors used by restaurants and small shops."
-        if !examples.isEmpty {
-            instructions += " This person has already sorted: " + examples.suffix(15).map { "\($0.name) = \($0.category.rawValue)" }.joined(separator: "; ") + "."
-        }
-        let question: [String: Any] = ["type": "choice", "instructions": instructions, "criteria": criteria]
-
-        var out: [String: CloudVerdict] = [:]
-        var failures = 0
-        await withTaskGroup(of: (CloudItem, (Category, Double)?).self) { group in
-            var next = 0
-            func start() {
-                guard next < items.count else { return }
-                let item = items[next]; next += 1
-                group.addTask { (item, await decide(item, question: question)) }
-            }
-            for _ in 0..<10 { start() }
-            for await (item, answer) in group {
-                if let (category, confidence) = answer {
-                    out[item.key] = CloudVerdict(name: KeywordExtractor.displayName(for: item.description), category: category,
-                                                 confident: confidence >= 0.75)
-                } else { failures += 1 }
-                start()
-            }
-        }
-        return out.isEmpty && failures > 0 ? nil : out
-    }
-
-    private static func decide(_ item: CloudItem, question: [String: Any]) async -> (Category, Double)? {
-        guard let key = CloudKey.load() else { return nil }
-        var state = "Transaction text: \(Redactor.scrub(item.description)). Money \(item.averageAmount < 0 ? "came in" : "went out"). "
-            + "Typical amount $\(String(format: "%.2f", abs(item.averageAmount))). Appears \(item.count) time\(item.count == 1 ? "" : "s")."
-        if item.amounts.count > 1 { state += " Recent amounts: " + item.amounts.map { String(format: "%.2f", $0) }.joined(separator: ", ") + "." }
-        if let bank = item.bankCategory { state += " The bank's own category: \(bank)." }
-        var request = URLRequest(url: URL(string: "https://openrouter.ai/api/alpha/decisions")!, timeoutInterval: 30)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["model": CloudAI.model, "state": state, "questions": ["category": question]])
-        for attempt in 0..<2 {
-            if attempt > 0 { try? await Task.sleep(for: .seconds(1)) }
-            guard let (data, response) = try? await URLSession.shared.data(for: request) else { continue }
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            if status == 429 || status >= 500 { continue }
-            guard status == 200, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let answer = (object["answers"] as? [String: Any])?["category"] as? [String: Any],
-                  let choice = answer["choice"] as? String,
-                  let category = Category.pickable.first(where: { $0.rawValue == choice }) else {
-                if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil, attempt == 0 {
-                    print("DEBUG DECISION status \(status) \(String(data: data.prefix(300), encoding: .utf8) ?? "")")
-                }
-                return nil
-            }
-            return (category, (answer["confidence"] as? Double) ?? 0)
-        }
-        return nil
     }
 }

@@ -230,7 +230,7 @@ enum DebugHooks {
             print("DECISION gold payees: \(states.count)")
             for model in models {
                 let began = Date.now
-                let answers = await Decisions.askAll(job: "Benchmark", model: model, states: states, questions: ["category": DecisionSorter.categoryQuestion()])
+                let answers = await Decisions.askAll(job: "Benchmark", model: model, states: states, questions: ["category": CategoryQuestion.question()])
                 let seconds = Date.now.timeIntervalSince(began)
                 var right = 0, sure = 0, sureRight = 0, quite = 0, quiteRight = 0
                 for (key, info) in gold {
@@ -485,20 +485,6 @@ enum DebugHooks {
         }
         await snap("06-stories", outDir) { StoriesView(scrolls: false) }
         await snap("11-coverage", outDir) { CoverageCard().padding(28).frame(width: 1000) }
-        // SPENDTHRIFT_FORECAST=1 (optionally "Place|note" first): print the estimate for next month.
-        if let spec = ProcessInfo.processInfo.environment["SPENDTHRIFT_FORECAST"], let next = store.months.last?.adding(1) {
-            let parts = spec.split(separator: "|", maxSplits: 1).map(String.init)
-            if parts.count == 2 { store.setNote(parts[1], forPlace: store.transactions.first { $0.merchant.localizedCaseInsensitiveContains(parts[0]) }?.merchant ?? parts[0]) }
-            let history = store.months.suffix(12).map { m -> String in
-                let top = store.categoryTotals(in: m).prefix(6).map { "\($0.category.displayName) \(Int($0.total))" }.joined(separator: ", ")
-                return "\(m.title): total \(Int(store.totalSpent(in: m))) (\(top))"
-            }
-            let repeating = store.subscriptions().map { "\($0.merchant): \(Money.format($0.monthlyAmount)) a month" }
-            Forecaster.forget()
-            let e = await Forecaster.estimate(month: next.title, history: history, repeating: repeating, notes: store.allNotes(), basis: "test-\(spec)")
-            print("FORECAST \(next.title): \(e.map { "about \(Int($0.amount)) (\(Int($0.low))–\(Int($0.high))): \($0.because)" } ?? "none") | notes: \(store.allNotes().count)")
-            Forecaster.forget()
-        }
         for (i, kind) in PremiereCard.Kind.available(in: store).enumerated() {
             await snap("20-premiere-\(i + 1)", outDir) { PremiereCard(kind: kind).padding(.vertical, 50).frame(width: 900) }
         }

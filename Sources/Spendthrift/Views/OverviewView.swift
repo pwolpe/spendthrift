@@ -36,8 +36,9 @@ struct OverviewView: View {
 
     /// The stretch on screen, summed: a month, or a year.
     private var flowData: CashFlowData? {
-        if store.overviewShowsYear { return currentPeriod.map { CashFlowData(store: store, period: $0) } }
-        return currentMonth.map { CashFlowData(store: store, month: $0) }
+        // Kept until the data changes: this page redraws on every hover, and the sums read every transaction.
+        if store.overviewShowsYear { return currentPeriod.map { period in store.cached("flow|\(period.id)") { CashFlowData(store: store, period: period) } } }
+        return currentMonth.map { month in store.cached("flow|\(month.key)") { CashFlowData(store: store, month: month) } }
     }
 
     // MARK: The summary: one answer, then a few cards to step into
@@ -63,7 +64,8 @@ struct OverviewView: View {
                     yearChanges(period)
                 }
             }
-            let figures = Figures(store: store, data: data, month: store.overviewShowsYear ? nil : currentMonth)
+            let shownMonth = store.overviewShowsYear ? nil : currentMonth
+            let figures = store.cached("figures|\(data.title)|\(shownMonth?.key ?? "")") { Figures(store: store, data: data, month: shownMonth) }
             HStack(alignment: .top, spacing: 16) {
                 SummaryCard(title: "Spending", symbol: "creditcard.fill", color: Theme.spent,
                             figure: Money.format(data.spending, cents: false), note: figures.spendingNote, noteColor: figures.spendingNoteColor,

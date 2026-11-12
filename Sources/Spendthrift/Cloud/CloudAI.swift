@@ -75,7 +75,7 @@ enum CloudAI {
         request.setValue("Spendthrift", forHTTPHeaderField: "X-Title")
         var body: [String: Any] = [
             // A decision model can't write text; jobs that need writing use the default model.
-            "model": DecisionSorter.handles(model) ? defaultModel : model,
+            "model": model,
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
             "max_tokens": maxTokens,
             "temperature": temperature,

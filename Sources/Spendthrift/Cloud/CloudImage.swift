@@ -225,7 +225,7 @@ extension CloudImage {
         could read the name and the total at a glance, without zooming. If there is no receipt, use empty strings and false.
         """
         let body: [String: Any] = [
-            "model": DecisionSorter.handles(CloudAI.model) ? CloudAI.defaultModel : CloudAI.model,
+            "model": CloudAI.model,
             "max_tokens": 1_500,
             "usage": ["include": true],
             "messages": [["role": "user", "content": [
