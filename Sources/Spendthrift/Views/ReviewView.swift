@@ -185,7 +185,7 @@ private struct ReviewRow: View {
                                 .help("This one is something else: name just this line")
                                 .padding(.trailing, 26)
                                 .popover(isPresented: Binding(get: { separating == t.id }, set: { if !$0 { separating = nil } }), arrowEdge: .bottom) {
-                                    OneChargeEditor(transaction: t) { separating = nil }
+                                    PayeeEditor(charges: [t]) { separating = nil }
                                 }
                         }
                     }
@@ -237,29 +237,39 @@ private struct ReviewRow: View {
     }
 }
 
-/// Names one charge by itself: who it was paid to and what it was for. Used where a group of
-/// look-alike lines (wires, checks, transfers) turns out to hold different things.
-struct OneChargeEditor: View {
+/// Says that some charges are a different payee from the one they were gathered under: one charge,
+/// or every charge written one way on statements.
+struct PayeeEditor: View {
     @Environment(BudgetStore.self) private var store
-    let transaction: Transaction
+    let charges: [Transaction]
+    /// Set when the charges are everything written this way: the choice then holds for future statements too.
+    var spelling: String?
     var done: () -> Void = {}
     @State private var name = ""
     @State private var category: Category?
     @FocusState private var typing: Bool
 
     private func file() {
-        store.setPayee(of: transaction.id, name: name, category: category)
+        if let spelling, let payee = charges.first?.merchant {
+            store.separate(spelling: spelling, from: payee, as: name, category: category)
+        } else if let one = charges.first {
+            store.setPayee(of: one.id, name: name, category: category)
+        }
         done()
     }
 
     var body: some View {
+        let total = charges.reduce(0) { $0 + abs($1.amount) }
         VStack(alignment: .leading, spacing: 12) {
-            Text("Just this one").font(.headline)
+            Text(spelling == nil ? "Just this one" : "A different payee").font(.headline)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(transaction.date.formatted(.dateTime.month(.abbreviated).day().year())) · \(Money.format(abs(transaction.amount)))")
-                    .font(Theme.mono(12, .medium))
-                Text(transaction.description).font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let spelling {
+                    Text("\(charges.count == 1 ? "1 charge" : "\(charges.count) charges") · \(Money.format(total))").font(Theme.mono(12, .medium))
+                    Text(spelling).font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                } else if let one = charges.first {
+                    Text("\(one.date.formatted(.dateTime.month(.abbreviated).day().year())) · \(Money.format(total))").font(Theme.mono(12, .medium))
+                    Text(one.description).font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                }
             }
             TextField("Who was it paid to?", text: $name)
                 .textFieldStyle(.roundedBorder)
@@ -269,14 +279,20 @@ struct OneChargeEditor: View {
                 CategoryPill(category: category) { category = $0 }
                 Spacer()
                 Button("Cancel", action: done).keyboardShortcut(.cancelAction)
-                Button("File Just This One", action: file)
+                Button(spelling == nil ? "File Just This One" : "Separate", action: file)
                     .buttonStyle(.borderedProminent)
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            Text("The other lines in the group stay as they are.").font(.caption).foregroundStyle(.secondary)
+            Text(spelling == nil ? "The other lines in the group stay as they are."
+                                 : "Everything else stays where it is. Lines written this way go to the new payee from now on.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .frame(width: 380)
-        .onAppear { typing = true }
+        .onAppear {
+            // For a whole spelling, the statement's own words are the best first guess at the name.
+            if spelling != nil, let sample = charges.first?.description { name = KeywordExtractor.displayName(for: sample) }
+            typing = true
+        }
     }
 }

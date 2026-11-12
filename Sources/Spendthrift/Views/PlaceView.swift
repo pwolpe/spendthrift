@@ -11,6 +11,8 @@ struct PlaceView: View {
     var scrolls = true
     @State private var draft = ""
     @State private var note = ""
+    /// The statement spelling being made into a payee of its own, while its editor is open.
+    @State private var separating: String?
 
     private var charges: [Transaction] {
         store.transactions.filter { $0.merchant == name }.sorted { $0.date > $1.date }
@@ -178,19 +180,25 @@ struct PlaceView: View {
     /// The different ways this place is written on statements, so it's clear what was gathered here.
     @ViewBuilder
     private func spellings(_ all: [Transaction]) -> some View {
-        let groups = Dictionary(grouping: all) { $0.description.replacingOccurrences(of: "[0-9#*]{3,}", with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespaces) }
-            .map { (text: $0.key, count: $0.value.count) }
-            .sorted { $0.count > $1.count }
+        let groups = Dictionary(grouping: all) { MerchantResolver.spelling($0.description) }
+            .map { (text: $0.key, charges: $0.value) }
+            .sorted { ($0.charges.count, $1.text) > ($1.charges.count, $0.text) }
         if groups.count > 1 {
             Card {
                 VStack(alignment: .leading, spacing: 10) {
-                    SectionHeader(title: "How it appears on your statements", subtitle: "All of these are counted here as \(name).")
+                    SectionHeader(title: "How it appears on your statements",
+                                  subtitle: "All of these are counted here as \(name). If one of them is someone else, separate it.")
                     ForEach(groups.prefix(12), id: \.text) { group in
-                        HStack {
+                        HStack(spacing: 12) {
                             Text(group.text).font(.callout.monospaced()).lineLimit(1).truncationMode(.middle)
                             Spacer()
-                            Text(group.count == 1 ? "once" : "\(group.count) times").font(.callout).foregroundStyle(.secondary)
+                            Text(group.charges.count == 1 ? "once" : "\(group.charges.count) times").font(.callout).foregroundStyle(.secondary)
+                            Button("Not \(name)?") { separating = group.text }
+                                .buttonStyle(.borderless).font(.callout)
+                                .help("Make everything written this way its own payee, now and on future statements")
+                                .popover(isPresented: Binding(get: { separating == group.text }, set: { if !$0 { separating = nil } }), arrowEdge: .trailing) {
+                                    PayeeEditor(charges: group.charges, spelling: group.text) { separating = nil }
+                                }
                         }
                     }
                     if groups.count > 12 { Text("and \(groups.count - 12) more").font(.caption).foregroundStyle(.tertiary) }

@@ -151,11 +151,29 @@ extension BudgetStore {
 
     /// One charge that isn't what the rest of its group is (a wire among wires, a check among checks):
     /// it becomes its own payee, with the name and category the person gives it. The others stay put.
-    /// A name that is already a payee joins that payee, and takes its category unless one is given.
     func setPayee(of id: Transaction.ID, name: String, category: Category?) {
+        guard let info = moveToOwnPayee([id], name: name, category: category)?.info else { return }
+        showToast("That one is now \(info.name)\(info.category.map { ", filed under \($0.displayName)" } ?? ""). The rest are unchanged.", symbol: "person.crop.circle.badge.checkmark")
+    }
+
+    /// One way a payee is written turns out to be someone else (a hotel gathered under a streaming
+    /// service of the same name). Every charge written that way moves to its own payee, and so does
+    /// any that arrives later.
+    func separate(spelling: String, from payee: String, as name: String, category: Category?) {
+        let ids = Set(transactions.filter { $0.merchant == payee && MerchantResolver.spelling($0.description) == spelling }.map(\.id))
+        guard let moved = moveToOwnPayee(ids, name: name, category: category) else { return }
+        library.spellings = (library.spellings ?? [:]).merging([spelling.uppercased(): moved.key]) { _, new in new }
+        changed()
+        showToast("\(ids.count == 1 ? "1 charge is" : "\(ids.count) charges are") now \(moved.info.name). Lines written that way will go there from now on.", symbol: "arrow.triangle.branch")
+    }
+
+    /// Moves charges out of whatever payee they were gathered under into one of their own.
+    /// A name that is already a payee joins that payee, and takes its category unless one is given.
+    private func moveToOwnPayee(_ ids: Set<Transaction.ID>, name: String, category: Category?) -> (key: String, info: MerchantInfo)? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let i = library.entries.firstIndex(where: { $0.id == id }) else { return }
-        let entry = library.entries[i]
+        let indices = library.entries.indices.filter { ids.contains(library.entries[$0].id) }
+        guard !trimmed.isEmpty, let first = indices.first else { return nil }
+        let entry = library.entries[first]
         let old = library.merchants[entry.merchantKey]
         let existing = library.merchants.first { $0.value.name.caseInsensitiveCompare(trimmed) == .orderedSame && $0.key != entry.merchantKey }?.value
         let key = "own:" + UUID().uuidString
@@ -163,11 +181,13 @@ extension BudgetStore {
                                 source: .user, confirmed: true, sample: entry.description)
         info.domain = existing?.domain
         library.merchants[key] = info
-        library.entries[i].merchantKey = key
-        library.entries[i].override = nil
+        for i in indices {
+            library.entries[i].merchantKey = key
+            library.entries[i].override = nil
+        }
         pruneUnusedPlaces()
         withAnimation(.snappy) { changed() }
-        showToast("That one is now \(info.name)\(info.category.map { ", filed under \($0.displayName)" } ?? ""). The rest are unchanged.", symbol: "person.crop.circle.badge.checkmark")
+        return (key, info)
     }
 
     /// Saves what the person remembers about one charge. If the place is still a guess, the note is

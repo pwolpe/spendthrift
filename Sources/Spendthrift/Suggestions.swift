@@ -160,7 +160,7 @@ enum KnownMerchants {
         ("HBO MAX", "Max", .subscriptions), ("APPLE.COM/BILL", "Apple", .subscriptions),
         ("PRIME VIDEO", "Prime Video", .subscriptions), ("AMAZON PRIME", "Amazon Prime", .subscriptions),
         ("AUDIBLE", "Audible", .subscriptions), ("YOUTUBE", "YouTube", .subscriptions),
-        ("PARAMOUNT", "Paramount+", .subscriptions), ("PEACOCK", "Peacock", .subscriptions),
+        ("PARAMOUNT+", "Paramount+", .subscriptions), ("PARAMOUNTPLUS", "Paramount+", .subscriptions), ("PARAMOUNT PLUS", "Paramount+", .subscriptions), ("PEACOCK", "Peacock", .subscriptions),
         ("SIRIUSXM", "SiriusXM", .subscriptions), ("NYTIMES", "New York Times", .subscriptions), ("NEW YORK TIMES", "New York Times", .subscriptions),
         ("PATREON", "Patreon", .subscriptions), ("DROPBOX", "Dropbox", .subscriptions),
         ("ADOBE", "Adobe", .subscriptions), ("MICROSOFT", "Microsoft", .subscriptions),

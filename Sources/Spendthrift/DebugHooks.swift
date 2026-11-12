@@ -492,6 +492,17 @@ enum DebugHooks {
     private static func selfTest(files: [URL]) async {
         let store = BudgetStore.shared
         func check(_ name: String, _ ok: Bool) { print("SELFTEST \(ok ? "PASS" : "FAIL") \(name)") }
+        // One way a payee is written can be made a payee of its own; the rest stay, and the choice is kept.
+        let bySpelling = Dictionary(grouping: store.transactions, by: \.merchant)
+            .mapValues { Dictionary(grouping: $0) { MerchantResolver.spelling($0.description) } }
+        if let (payee, spellings) = bySpelling.first(where: { $0.value.count > 1 }), let (spelling, moving) = spellings.min(by: { $0.value.count < $1.value.count }) {
+            let before = store.transactions.filter { $0.merchant == payee }.count
+            store.separate(spelling: spelling, from: payee, as: "Somebody Else Entirely", category: .travel)
+            let moved = store.transactions.filter { $0.merchant == "Somebody Else Entirely" }
+            check("separate one spelling from a payee", moved.count == moving.count && moved.allSatisfy { $0.category == .travel }
+                  && store.transactions.filter { $0.merchant == payee }.count == before - moving.count
+                  && moved.first.map { MerchantResolver.key(for: $0.description, amount: $0.amount, existingKeys: [String](), spellings: [spelling.uppercased(): $0.merchantKey]) == $0.merchantKey } == true)
+        } else { print("SELFTEST SKIP separate one spelling (no payee here is written two ways)") }
         // Back always returns to where a link was followed from, however deep; the sidebar is a fresh start.
         if let payee = store.transactions.first?.merchant, let month = store.months.first {
             store.selection = .overview

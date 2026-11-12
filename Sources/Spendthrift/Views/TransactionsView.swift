@@ -377,7 +377,7 @@ struct TransactionInspector: View {
                             .font(.callout)
                             .help("Name just this charge, leaving the others at \(t.merchant) alone")
                             .popover(isPresented: $separating, arrowEdge: .leading) {
-                                OneChargeEditor(transaction: t) { separating = false }
+                                PayeeEditor(charges: [t]) { separating = false }
                             }
                     }
                 }

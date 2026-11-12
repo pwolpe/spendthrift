@@ -60,6 +60,9 @@ struct Library: Codable {
     var dismissedDownloads: Set<String> = []
     var dismissedInsights: Set<String> = []
     var customCategories: [CustomCategory]?
+    /// Ways of writing a line that the person said are a payee of their own ("PARAMOUNT HOTEL NEW YORK NY"
+    /// is not Paramount+): the spelling, to that payee's key. These win over every other way of telling.
+    var spellings: [String: String]?
     /// Trips and events the app noticed, and which data they were worked out from.
     var stories: [Story]?
     var storiesBasis: String?
@@ -194,7 +197,15 @@ struct LossyDictionary<T: Decodable>: Decodable {
 /// Anything left over goes to Apple Intelligence (see `BudgetStore.sortRemaining`).
 enum MerchantResolver {
     /// - existingKeys: places already known, so "DICKSON'S FARMSTAND M" joins "DICKSON'S FARMSTAND".
-    static func key(for description: String, amount: Double, existingKeys: some Collection<String>) -> String {
+    /// A statement line with what changes from one charge to the next (long runs of digits, reference
+    /// marks) taken out: the way a payee is written, as opposed to one charge of it.
+    static func spelling(_ description: String) -> String {
+        description.replacingOccurrences(of: "[0-9#*]{3,}", with: "", options: .regularExpression)
+            .split(separator: " ").joined(separator: " ")
+    }
+
+    static func key(for description: String, amount: Double, existingKeys: some Collection<String>, spellings: [String: String] = [:]) -> String {
+        if let own = spellings[spelling(description).uppercased()] { return own }
         if let known = KnownMerchants.match(description, amount: amount, generic: false) { return "known:" + known.name }
         // A wire is whoever it was sent to, not the words every wire begins with.
         if let recipient = KeywordExtractor.wireRecipient(description) { return "WIRE " + recipient }

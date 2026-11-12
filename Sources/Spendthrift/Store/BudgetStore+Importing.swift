@@ -486,7 +486,8 @@ extension BudgetStore {
             let cacheKey = (amount > 0 ? "+" : "-") + row.description
             if let cached = keyCache[cacheKey] { key = cached }
             else {
-                key = MerchantResolver.key(for: row.description, amount: amount, existingKeys: library.merchants.keys)
+                key = MerchantResolver.key(for: row.description, amount: amount, existingKeys: library.merchants.keys,
+                                           spellings: (library.spellings ?? [:]).filter { library.merchants[$0.value] != nil })
                 keyCache[cacheKey] = key
             }
             var entry = LedgerEntry(accountID: accountID, date: row.date, description: row.description, amount: amount,
