@@ -37,21 +37,7 @@ struct SpendthriftApp: App {
                 Button("Show My Data in Finder") { NSWorkspace.shared.activateFileViewerSelecting([BudgetStore.shared.paths.libraryFile]) }
                 Button("Save a Backup to the Desktop") { BudgetStore.shared.backUpToDesktop() }
             }
-            CommandMenu("Go") {
-                Button("Overview") { BudgetStore.shared.selection = .overview }.keyboardShortcut("1")
-                Button("Money In and Out") { BudgetStore.shared.stepInto(.flow) }.keyboardShortcut("2")
-                Button("Trips & Events") { BudgetStore.shared.selection = .stories }.keyboardShortcut("3")
-                Button("Transactions") { BudgetStore.shared.selection = .transactions }.keyboardShortcut("4")
-                Button("Find a Payee…") { BudgetStore.shared.selection = .places }.keyboardShortcut("f")
-                Divider()
-                Button("Ask a Question") { BudgetStore.shared.showsAsk.toggle() }.keyboardShortcut("k")
-                Button("Last Month's Recap") { if let month = BudgetStore.shared.lastFullMonth { BudgetStore.shared.playRecap(of: month) } }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
-                Divider()
-                Button("Double-Check") { BudgetStore.shared.selection = .review }.keyboardShortcut("5")
-                Button("Accounts") { BudgetStore.shared.selection = .accounts }.keyboardShortcut("6")
-                Button("Categories") { BudgetStore.shared.selection = .categories }.keyboardShortcut("7")
-            }
+            GoMenu()
         }
 
         // Spendthrift → Settings… (⌘,)
@@ -72,4 +58,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+}
+
+/// The Go menu: every section the sidebar can show, by the same names. Amazon, Kept Apart and Double-Check
+/// appear when the sidebar has them.
+struct GoMenu: Commands {
+    private var store: BudgetStore { .shared }
+
+    var body: some Commands {
+        CommandMenu("Go") {
+            Button("Overview") { store.selection = .overview }.keyboardShortcut("1")
+            Button("Money In and Out") { store.stepInto(.flow) }.keyboardShortcut("2")
+            Button("Trips & Events") { store.selection = .stories }.keyboardShortcut("3")
+            Button("Transactions") { store.selection = .transactions }.keyboardShortcut("4")
+            Button("Find a Payee…") { store.selection = .places }.keyboardShortcut("f")
+            if !store.orderRows.isEmpty {
+                Button("Amazon") { store.selection = .orders }.keyboardShortcut("8")
+            }
+            if store.accounts.contains(where: { $0.apart != nil }) {
+                Button("Kept Apart") { store.selection = .apart }
+            }
+            Button("Statements") { store.selection = .statements }.keyboardShortcut("9")
+            Divider()
+            Button("Ask a Question") { store.showsAsk.toggle() }.keyboardShortcut("k")
+            Button("Last Month's Recap") { if let month = store.lastFullMonth { store.playRecap(of: month) } }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            Divider()
+            Button("Double-Check") { store.selection = .review }.keyboardShortcut("5")
+            Button("Setup") { store.selection = .accounts }.keyboardShortcut("6")
+            Button("Setup: Categories") { store.selection = .categories }.keyboardShortcut("7")
+        }
+    }
 }

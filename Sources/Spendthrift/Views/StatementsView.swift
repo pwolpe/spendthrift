@@ -128,17 +128,7 @@ struct StatementsView: View {
                     Text(mine.count == 1 ? "1 statement" : "\(mine.count) statements")
                         .font(Theme.mono(10, .semibold)).tracking(1).foregroundStyle(.secondary).textCase(.uppercase)
                     if mine.count > 12 {
-                        HStack(spacing: 6) {
-                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                            TextField("Month, year or file name", text: $search).textFieldStyle(.plain)
-                            if !search.isEmpty {
-                                Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.tertiary)
-                                    .help("Clear the search").accessibilityLabel("Clear search")
-                            }
-                        }
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(Theme.sheet, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.hairline))
+                        SearchField(prompt: "Month, year or file name", text: $search, large: false)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

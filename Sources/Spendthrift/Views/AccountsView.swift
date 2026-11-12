@@ -42,6 +42,11 @@ private struct AccountCard: View {
     @State private var confirmRemove = false
     @State private var confirmFlip = false
 
+    /// An account kept apart has a page of its own.
+    private func showCharges() {
+        if account.apart != nil { store.go(to: .apart) } else { store.showCharges(TransactionFilter(accountID: account.id)) }
+    }
+
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
@@ -57,9 +62,7 @@ private struct AccountCard: View {
                         .onSubmit { store.renameAccount(account.id, to: name) }
                         .help("Click to rename")
                     Menu {
-                        Button("Show Transactions", systemImage: "list.bullet") {
-                            if account.apart != nil { store.go(to: .apart) } else { store.showCharges(TransactionFilter(accountID: account.id)) }
-                        }
+                        Button("Show Charges", systemImage: "list.bullet") { showCharges() }
                         if account.apart != nil {
                             Button("Count in My Totals Again", systemImage: "tray.and.arrow.down") { store.keepApart(account.id, as: nil) }
                         } else {
@@ -80,12 +83,16 @@ private struct AccountCard: View {
                 }
                 Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
                     GridRow {
-                        Text("Transactions").foregroundStyle(.secondary)
-                        Text("\(store.transactionCount(for: account))").monospacedDigit()
+                        Text("Charges").foregroundStyle(.secondary)
+                        LinkText(text: "\(store.transactionCount(for: account))", font: .callout, color: .primary,
+                                 help: "Open every charge on \(account.name)") { showCharges() }
+                            .monospacedDigit()
                     }
                     GridRow {
                         Text("Spent").foregroundStyle(.secondary)
-                        Text(Money.format(store.spent(in: account), cents: false)).monospacedDigit()
+                        LinkText(text: Money.format(store.spent(in: account), cents: false), font: .callout, color: .primary,
+                                 help: "Open every charge on \(account.name)") { showCharges() }
+                            .monospacedDigit()
                     }
                     if let range = store.dateRange(for: account) {
                         GridRow {
@@ -115,7 +122,7 @@ private struct AccountCard: View {
         .confirmationDialog("Remove \(account.name)?", isPresented: $confirmRemove) {
             Button("Remove Account", role: .destructive) { store.removeAccount(account.id) }
         } message: {
-            Text("Its transactions will be removed from Spendthrift. What you taught me about each payee is kept.")
+            Text("Its charges will be removed from Spendthrift. What you taught me about each payee is kept.")
         }
         .confirmationDialog("Swap purchases and payments for \(account.name)?", isPresented: $confirmFlip) {
             Button("Swap Them") { store.flipAmounts(account.id) }
@@ -322,7 +329,7 @@ struct SpendCard: View {
             Card {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline) {
-                        SectionHeader(title: "What the AI cost", subtitle: "Each request to the model, as OpenRouter priced it, added up by job.")
+                        SectionHeader(title: "What Smarter AI cost", subtitle: "Each request to Smarter AI, as OpenRouter priced it, added up by job.")
                         Spacer()
                         Picker("When", selection: $span) {
                             Text("Today").tag(1); Text("7 Days").tag(7); Text("30 Days").tag(30)
@@ -330,7 +337,7 @@ struct SpendCard: View {
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
                     }
                     if lines.isEmpty {
-                        Text("Nothing was asked of the model in this stretch.").font(.callout).foregroundStyle(.secondary)
+                        Text("Nothing was asked of Smarter AI in this stretch.").font(.callout).foregroundStyle(.secondary)
                     } else {
                         VStack(spacing: 7) {
                             ForEach(lines) { line in

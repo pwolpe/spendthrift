@@ -52,74 +52,74 @@ private struct CategoryManageRow: View {
     let total: Double
     let count: Int
     let fraction: Double
-    @State private var hovering = false
     @State private var confirmDelete = false
 
     private var custom: CustomCategory? { store.customCategories.first { $0.name == category.rawValue } }
 
     var body: some View {
-        HStack(spacing: 12) {
-            CategoryIcon(category: category, size: 34)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(category.displayName).font(.body.weight(.medium))
-                    if custom != nil {
-                        Text("Yours")
-                            .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Capsule().fill(Theme.accent.opacity(0.16)))
-                            .foregroundStyle(Theme.accent)
+        HoverRow(radius: 10, tint: .primary, strength: 0.04) { hovering in
+            HStack(spacing: 12) {
+                CategoryIcon(category: category, size: 34)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(category.displayName).font(.body.weight(.medium))
+                        if custom != nil {
+                            Text("Yours")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Capsule().fill(Theme.accent.opacity(0.16)))
+                                .foregroundStyle(Theme.accent)
+                        }
                     }
+                    Text(count == 0 ? "Nothing yet" : (count == 1 ? "1 charge" : "\(count) charges"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Text(count == 0 ? "Nothing yet" : (count == 1 ? "1 transaction" : "\(count) transactions"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if category.isSpending, category != .unsorted {
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.primary.opacity(0.06))
-                    Capsule().fill(category.color.gradient).frame(width: max(3, 120 * fraction))
+                Spacer()
+                if category.isSpending, category != .unsorted {
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.primary.opacity(0.06))
+                        Capsule().fill(category.color.gradient).frame(width: max(3, 120 * fraction))
+                    }
+                    .frame(width: 120, height: 6)
                 }
-                .frame(width: 120, height: 6)
-            }
-            Text(Money.format(total, cents: false))
-                .monospacedDigit()
-                .frame(width: 90, alignment: .trailing)
-            if let custom {
-                Menu {
-                    Button("Edit…", systemImage: "pencil") { store.categoryEditor = CategoryEditorRequest(editing: custom) }
-                    Button("Delete…", systemImage: "trash", role: .destructive) { confirmDelete = true }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+                Text(Money.format(total, cents: false))
+                    .monospacedDigit()
+                    .frame(width: 90, alignment: .trailing)
+                if let custom {
+                    Menu {
+                        Button("Edit…", systemImage: "pencil") { store.categoryEditor = CategoryEditorRequest(editing: custom) }
+                        Button("Delete…", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Edit or delete this category").accessibilityLabel("More for this category")
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .opacity(hovering && count > 0 ? 1 : 0)
+                        .frame(width: 16)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Edit or delete this category").accessibilityLabel("More for this category")
-            } else {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .opacity(hovering && count > 0 ? 1 : 0)
-                    .frame(width: 16)
             }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(hovering ? 0.04 : 0)))
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
         .onTapGesture {
             guard count > 0 else { return }
             store.showCharges(TransactionFilter(category: category))
         }
+        .help(count > 0 ? "Open every charge filed under \(category.displayName)" : "")
         .accessibilityAddTraits(count > 0 ? .isButton : [])
-        .accessibilityAction(named: "Show transactions") { if count > 0 { store.showCharges(TransactionFilter(category: category)) } }
+        .accessibilityAction(named: "Show charges") { if count > 0 { store.showCharges(TransactionFilter(category: category)) } }
         .confirmationDialog("Delete \(category.displayName)?", isPresented: $confirmDelete) {
             Button("Delete Category", role: .destructive) { if let custom { store.deleteCategory(custom) } }
         } message: {
-            Text(count == 0 ? "Nothing is filed under it." : "Its \(count) transactions will move to Other.")
+            Text(count == 0 ? "Nothing is filed under it." : "Its \(count) charges will move to Other.")
         }
     }
 }

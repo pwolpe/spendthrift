@@ -198,20 +198,15 @@ struct PlaceView: View {
     }
 
     private func monthly(_ all: [Transaction]) -> some View {
-        let calendar = Calendar.current
-        let byMonth = Dictionary(grouping: all) { calendar.date(from: calendar.dateComponents([.year, .month], from: $0.date)) ?? $0.date }
-            .map { (month: $0.key, total: abs($0.value.reduce(0) { $0 + $1.amount })) }
+        let bars = Dictionary(grouping: all, by: \.month)
+            .map { MonthBars.Bar(month: $0.key, total: abs($0.value.reduce(0) { $0 + $1.amount })) }
             .sorted { $0.month < $1.month }
         return Card {
             VStack(alignment: .leading, spacing: 14) {
                 SectionHeader(title: "Month by month")
-                Chart(byMonth, id: \.month) { item in
-                    BarMark(x: .value("Month", item.month, unit: .month), y: .value("Total", item.total))
-                        .foregroundStyle(Theme.accent.gradient)
-                        .cornerRadius(4)
+                MonthBars(bars: bars, help: "Click a month to see its charges at \(name)") { month in
+                    store.showCharges(TransactionFilter(month: month, merchant: name))
                 }
-                .chartYAxis { AxisMarks(format: .currency(code: "USD").precision(.fractionLength(0))) }
-                .frame(height: 180)
             }
         }
     }
@@ -263,7 +258,9 @@ struct PlaceView: View {
                             .monospacedDigit()
                             .frame(width: 110, alignment: .leading)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(t.account).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                            LinkText(text: t.account, help: "Open every charge on \(t.account)") {
+                                store.showCharges(TransactionFilter(accountID: t.accountID))
+                            }
                             if let trip = store.story(containing: t.id) {
                                 Button { store.showCharges(TransactionFilter(storyID: trip.id)) } label: {
                                     Label(trip.name, systemImage: "airplane.departure").font(.caption).foregroundStyle(Theme.accent)
@@ -285,7 +282,7 @@ struct PlaceView: View {
 }
 
 /// A plain page of charges: what a click on a bar or a row in an answer opens. One title, one
-/// total, the places that make it up, and the charges. No filters, no table columns, no inspector.
+/// total, the payees that make it up, and the charges. No filters, no table columns, no inspector.
 struct ChargesView: View {
     private var store: BudgetStore { .shared }
     let filter: TransactionFilter
@@ -321,7 +318,7 @@ struct ChargesView: View {
                         .font(.system(size: 40, weight: .bold, design: .rounded))
                         .monospacedDigit()
                 }
-                // A trip or an occasion gets its own picture: them, there, holding a receipt from it.
+                // A trip or event gets its own picture: them, there, holding a receipt from it.
                 if let id = filter.storyID, let story = store.stories.first(where: { $0.id == id }), scrolls { TripPictureCard(story: story) }
                 if all.isEmpty {
                     EmptyState(title: "Nothing here", message: "No charges match. Try another month or category.", art: "nothing")
@@ -331,18 +328,12 @@ struct ChargesView: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 SectionHeader(title: "Where", subtitle: "Click a payee for everything you've ever paid them.")
                                 ForEach(Array(places.prefix(8).enumerated()), id: \.element.name) { i, place in
-                                    Button { store.showPlace(place.name) } label: {
-                                        HStack(spacing: 12) {
-                                            MerchantIcon(name: place.name, category: place.category, size: 28)
-                                            Text(place.name).font(.body.weight(.medium)).lineLimit(1)
-                                            Text(place.count == 1 ? "once" : "\(place.count) times").font(.callout).foregroundStyle(.secondary)
-                                            Spacer()
-                                            Text(Money.format(place.total, cents: false)).monospacedDigit()
-                                        }
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    if i < min(places.count, 8) - 1 { Divider().padding(.leading, 40) }
+                                    PayeeLine(name: place.name, category: place.category,
+                                              detail: place.count == 1 ? "once" : "\(place.count) times",
+                                              amount: place.total, iconSize: 28,
+                                              amountText: Money.format(place.total, cents: false),
+                                              help: "Open \(place.name): everything you've paid them") { store.showPlace(place.name) }
+                                    if i < min(places.count, 8) - 1 { Divider().padding(.leading, 48) }
                                 }
                                 if places.count > 8 { Text("and \(places.count - 8) more payees below").font(.caption).foregroundStyle(.tertiary) }
                             }

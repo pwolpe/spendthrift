@@ -57,7 +57,12 @@ struct OverviewView: View {
             if !DebugHooks.off("hero") { FlowHero(data: data) { store.stepInto(.flow) } }
             // Why it differs from usual. A month is cheap to explain; the year waits for the first frame.
             if !store.overviewShowsYear, let m = currentMonth, let why = store.changes(in: m) { ChangeCard(explanation: why) }
-            if store.overviewShowsYear, let period = currentPeriod { AfterFirstFrame { yearChanges(period) } }
+            if store.overviewShowsYear, let period = currentPeriod {
+                AfterFirstFrame {
+                    shortVersion(data, period: period)
+                    yearChanges(period)
+                }
+            }
             let figures = Figures(store: store, data: data, month: store.overviewShowsYear ? nil : currentMonth)
             HStack(alignment: .top, spacing: 16) {
                 SummaryCard(title: "Spending", symbol: "creditcard.fill", color: Theme.spent,
@@ -95,6 +100,11 @@ struct OverviewView: View {
         } else {
             EmptyState(title: "Nothing here yet", message: "Drop a statement into this window and it all gets added up.", art: "welcome")
         }
+    }
+
+    private func shortVersion(_ data: CashFlowData, period: ReportPeriod) -> some View {
+        let given = store.overviewFacts(data, period: period)
+        return ShortVersion(key: "overview-\(period.id)", basis: given.basis, facts: given.facts)
     }
 
     @ViewBuilder

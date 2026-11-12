@@ -32,17 +32,17 @@ struct StoriesView: View {
                 if store.isFindingStories {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
-                        Text("Looking for stories…").foregroundStyle(.secondary)
+                        Text("Looking for trips and events…").foregroundStyle(.secondary)
                     }
                 }
             }
             if stories.isEmpty {
                 if store.isFindingStories {
-                    EmptyState(title: "Reading between the lines…", message: "I'm looking through your spending for trips and occasions. This takes a minute the first time.", art: "nothing")
+                    EmptyState(title: "Reading between the lines…", message: "I'm looking through your spending for trips and events. This takes a minute the first time.", art: "nothing")
                 } else if !CloudAI.isEnabled {
-                    EmptyState(title: "This one needs Smarter AI", message: "With a key entered in Settings, I can spot trips and occasions in your spending and tell you what each one cost.", art: "notrips")
+                    EmptyState(title: "This one needs Smarter AI", message: "With a key entered in Settings, I can spot trips and events in your spending and tell you what each one cost.", art: "notrips")
                 } else {
-                    EmptyState(title: "No trips yet", message: "When your statements show a trip or a big occasion, it will appear here with what it cost.", art: "notrips")
+                    EmptyState(title: "No trips yet", message: "When your statements show a trip or a big event, it will appear here with what it cost.", art: "notrips")
                 }
             } else {
                 // A year at a time, newest first: with several years of statements there can be dozens.
@@ -52,7 +52,7 @@ struct StoriesView: View {
                     let total = list.reduce(0.0) { sum, story in sum + store.transactions(in: story).reduce(0) { $0 + $1.amount } }
                     HStack(alignment: .firstTextBaseline) {
                         Text(year).font(.system(size: 22, weight: .bold, design: .serif))
-                        Text("\(list.count == 1 ? "1 trip" : "\(list.count) trips") · \(Money.format(total, cents: false))")
+                        Text("\(Self.tally(list)) · \(Money.format(total, cents: false))")
                             .font(.callout).foregroundStyle(.secondary)
                         Spacer()
                     }
@@ -73,13 +73,18 @@ struct StoriesView: View {
     }
 
     private func subtitle(_ stories: [Story]) -> String {
-        guard !stories.isEmpty else { return "The stories in your spending, noticed for you." }
-        let trips = stories.filter { $0.kind == .trip }.count, events = stories.count - trips
+        guard !stories.isEmpty else { return "The trips and events in your spending, noticed for you." }
         let total = stories.reduce(0.0) { sum, story in sum + store.transactions(in: story).reduce(0) { $0 + $1.amount } }
+        return Self.tally(stories) + ", \(Money.format(total, cents: false)) in all."
+    }
+
+    /// "2 trips and 1 event".
+    private static func tally(_ stories: [Story]) -> String {
+        let trips = stories.filter { $0.kind == .trip }.count, events = stories.count - trips
         var parts: [String] = []
         if trips > 0 { parts.append(trips == 1 ? "1 trip" : "\(trips) trips") }
         if events > 0 { parts.append(events == 1 ? "1 event" : "\(events) events") }
-        return parts.joined(separator: " and ") + ", \(Money.format(total, cents: false)) in all."
+        return parts.joined(separator: " and ")
     }
 }
 

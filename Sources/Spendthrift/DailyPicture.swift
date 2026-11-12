@@ -572,13 +572,18 @@ struct TripPictureCard: View {
                         .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.hairline) }
                         .shadow(color: .black.opacity(0.10), radius: 14, y: 5)
                     Text(info.caption).font(.system(size: 19, weight: .bold, design: .serif)).fixedSize(horizontal: false, vertical: true)
-                    Label("\(info.merchant) · \(Money.format(info.amount))", systemImage: "receipt").font(.callout).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Image(systemName: "receipt")
+                        LinkText(text: info.merchant, help: "Open \(info.merchant): every charge, by month") { BudgetStore.shared.showPlace(info.merchant) }
+                        Text("· \(Money.format(info.amount))").font(.callout)
+                    }
+                    .font(.callout).foregroundStyle(.secondary)
                 }
                 .transition(.opacity)
             } else if pictures.isDrawing(story) {
                 HStack(spacing: 10) {
                     ProgressView().controlSize(.small)
-                    Text("Drawing a picture from this \(story.kind == .trip ? "trip" : "occasion")…").font(.callout).foregroundStyle(.secondary)
+                    Text("Drawing a picture from this \(story.kind == .trip ? "trip" : "event")…").font(.callout).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)

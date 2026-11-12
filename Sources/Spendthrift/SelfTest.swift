@@ -504,7 +504,7 @@ enum SelfTest {
         check("library: two accounts with one id become one", lib?.accounts.filter { $0.id.uuidString == a }.count == 1 && lib?.accounts.count == 2)
         let doubled = lib.map { Dictionary($0.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }) }
         check("library: looking accounts up by id cannot fail", doubled?.count == lib?.accounts.count)
-        check("library: a new stored field must be added to the decoder (23 today)", Mirror(reflecting: Library()).children.count == 23)
+        check("library: a new stored field must be added to the decoder (24 today)", Mirror(reflecting: Library()).children.count == 24)
 
         // Saving says whether it worked.
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SpendthriftTest-\(UUID().uuidString)", isDirectory: true)

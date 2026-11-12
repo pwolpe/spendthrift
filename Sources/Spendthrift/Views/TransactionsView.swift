@@ -38,7 +38,7 @@ struct TransactionsView: View {
         }
         .searchable(text: Bindable(store).transactionSearch, prompt: "Search payees or categories")
         .navigationTitle("Transactions")
-        .navigationSubtitle(rows.count == 1 ? "1 transaction" : "\(rows.count) transactions")
+        .navigationSubtitle(rows.count == 1 ? "1 charge" : "\(rows.count) charges")
         // One pane on the right at a time: while the question pane is open, the details pane stays
         // closed (double-click a charge for its place instead).
         .inspector(isPresented: Binding(get: { showInspector && !store.showsAsk }, set: { showInspector = $0 })) {
@@ -86,7 +86,7 @@ struct TransactionsView: View {
                 CategoryPill(category: t.isUnknown ? nil : t.category, sparkle: t.needsCheck && !t.isUnknown) { c in
                     store.setCategory(c, for: [t.id], wholePlace: true)
                 }
-                .help(t.needsCheck ? (t.source == .ai ? "Sorted by Apple Intelligence. Click to change." : "The AI's best guess. Click to change.") : "Click to change the category for \(t.merchant)")
+                .help(t.needsCheck ? (t.source == .ai ? "Sorted by Apple Intelligence. Click to change." : "Smarter AI's best guess. Click to change.") : "Click to change the category for \(t.merchant)")
             }
             .width(min: 150, ideal: 190)
 
@@ -117,7 +117,7 @@ struct TransactionsView: View {
                 }
                 if places.count == 1 {
                     Divider()
-                    Button("Everything at \(first.merchant)") { store.showPlace(first.merchant) }
+                    Button("Open \(first.merchant)") { store.showPlace(first.merchant) }
                 }
                 if chosen.count == 1 {
                     Button("Show in Statement", systemImage: "doc.text.magnifyingglass") { store.showOriginal(of: first.id) }
@@ -181,7 +181,7 @@ private struct FilterBar: View {
                 chip(name, symbol: "mappin.circle.fill") { store.transactionFilter.merchant = nil }
             }
             if store.transactionFilter.needsCheck {
-                chip("AI guesses", symbol: "sparkles") { store.transactionFilter.needsCheck = false }
+                chip("Best guesses", symbol: "sparkles") { store.transactionFilter.needsCheck = false }
             }
             if let id = store.transactionFilter.storyID {
                 chip(store.stories.first { $0.id == id }?.name ?? "One trip", symbol: "airplane") { store.transactionFilter.storyID = nil }
@@ -243,7 +243,7 @@ struct TransactionInspector: View {
         case .generic: return ("Guessed from the name.", "text.magnifyingglass")
         case .ai: return (transaction.isUnknown ? "Not sorted yet." : "Sorted by Apple Intelligence, on this Mac.", "apple.intelligence")
         case .cloud: return ("Sorted by AI.", "sparkles")
-        case .cloudGuess: return ("AI's best guess. Change it if it's wrong.", "sparkles")
+        case .cloudGuess: return ("Smarter AI's best guess. Change it if it's wrong.", "sparkles")
         }
     }
 
@@ -259,9 +259,10 @@ struct TransactionInspector: View {
                         EditableName(text: $name, font: .system(size: 19, weight: .bold, design: .serif), centered: true,
                                      help: "Rename this payee",
                                      commit: { store.renamePlace(t.merchantKey, to: name) }, cancel: { name = t.merchant })
-                        Text(t.date.formatted(date: .complete, time: .omitted))
-                            .font(Theme.mono(11))
-                            .foregroundStyle(.secondary)
+                        LinkText(text: t.date.formatted(date: .complete, time: .omitted), font: Theme.mono(11),
+                                 help: "Open every charge in \(t.month.title)") {
+                            store.showCharges(TransactionFilter(month: t.month))
+                        }
                         ReceiptRule()
                         Text(t.description)
                             .font(Theme.mono(11))
@@ -271,8 +272,11 @@ struct TransactionInspector: View {
                             .frame(maxWidth: .infinity)
                             .help("The line exactly as your statement prints it")
                         VStack(spacing: 6) {
-                            ReceiptLine(value: t.account) { Text("Paid with").font(.callout) }
-                            ReceiptLine(value: t.isUnknown ? "Not sorted" : t.category.displayName) { Text("Filed under").font(.callout) }
+                            ReceiptLine(value: t.account, help: "Open every charge on \(t.account)",
+                                        action: { store.showCharges(TransactionFilter(accountID: t.accountID)) }) { Text("Paid with").font(.callout) }
+                            ReceiptLine(value: t.isUnknown ? "Not sorted" : t.category.displayName,
+                                        help: "Open every charge filed under \(t.isUnknown ? "Not sorted" : t.category.displayName)",
+                                        action: { store.showCharges(TransactionFilter(category: t.category)) }) { Text("Filed under").font(.callout) }
                         }
                         // What was in the box, when an order history says.
                         if let detail = store.orderDetail(for: t.id) {
@@ -366,14 +370,25 @@ struct TransactionInspector: View {
                 if !store.stories.isEmpty {
                     let trip = store.story(containing: t.id)
                     group("Trip or event") {
-                        Menu {
-                            StoryChoices(ids: [t.id])
-                        } label: {
-                            Label(trip?.name ?? "Not part of one",
-                                  systemImage: trip == nil ? "minus.circle" : "airplane.departure")
+                        HStack(spacing: 12) {
+                            Menu {
+                                StoryChoices(ids: [t.id])
+                            } label: {
+                                Label(trip?.name ?? "Not part of one",
+                                      systemImage: trip == nil ? "minus.circle" : "airplane.departure")
+                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
+                            if let trip {
+                                Spacer(minLength: 0)
+                                Button("Open Trip", systemImage: "arrow.up.forward.circle") {
+                                    store.showCharges(TransactionFilter(storyID: trip.id))
+                                }
+                                .buttonStyle(.borderless)
+                                .font(.callout)
+                                .help("Open \(trip.name): everything spent on it")
+                            }
                         }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
                         if trip == nil {
                             Text("If this belongs to a trip, choose it here and it will count toward that trip.")
                                 .font(.caption)
@@ -440,13 +455,15 @@ struct TransactionInspector: View {
 }
 
 private struct PlaceHistory: View {
+    @Environment(BudgetStore.self) private var store
     let transactions: [Transaction]
 
     var body: some View {
         let total = transactions.reduce(0) { $0 + $1.amount }
-        let byMonth = Dictionary(grouping: transactions, by: \.month)
-            .map { (month: $0.key, total: $0.value.reduce(0) { $0 + $1.amount }) }
+        let bars = Dictionary(grouping: transactions, by: \.month)
+            .map { MonthBars.Bar(month: $0.key, total: max($0.value.reduce(0) { $0 + $1.amount }, 0)) }
             .sorted { $0.month < $1.month }
+        let name = transactions.first?.merchant ?? ""
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 stat("Total", Money.format(total, cents: false))
@@ -455,19 +472,10 @@ private struct PlaceHistory: View {
                 Spacer()
                 stat("Usually", Money.format(total / Double(transactions.count)))
             }
-            if byMonth.count > 1 {
-                Chart(byMonth, id: \.month) { item in
-                    BarMark(x: .value("Month", item.month.firstDay, unit: .month), y: .value("Spent", max(item.total, 0)))
-                        .cornerRadius(3)
-                        .foregroundStyle(Theme.accent.gradient)
+            if bars.count > 1 {
+                MonthBars(bars: bars, height: 70, compact: true, help: "Click a month to see its charges at \(name)") { month in
+                    store.showCharges(TransactionFilter(month: month, merchant: name))
                 }
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .month)) { _ in
-                        AxisValueLabel(format: .dateTime.month(.narrow), centered: true)
-                    }
-                }
-                .chartYAxis(.hidden)
-                .frame(height: 70)
             }
         }
     }

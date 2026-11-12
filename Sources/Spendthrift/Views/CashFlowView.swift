@@ -186,9 +186,9 @@ struct CashFlowContent: View {
             }
             FlowHero(data: data)
             HStack(alignment: .top, spacing: 22) {
-                StatementCard(data: data, open: interactive ? open : nil)
+                StatementCard(data: data, open: interactive ? open : nil, openSpending: interactive ? { store.stepInto(.spending) } : nil)
                 // (Which card statements are here lives in Setup, with the rest of what's missing.)
-                MonthlyFlowCard(data: data)
+                MonthlyFlowCard(data: data, interactive: interactive)
                     .frame(minWidth: 380)
             }
             if !data.investmentLines.isEmpty { InvestmentsCard(data: data, open: interactive ? openPlace : nil) }
@@ -328,6 +328,8 @@ private struct PurposeCard: View {
 private struct StatementCard: View {
     let data: CashFlowData
     let open: ((Category) -> Void)?
+    /// "Everyday spending" is not one category: it opens the Spending page.
+    let openSpending: (() -> Void)?
 
     var body: some View {
         Card {
@@ -338,7 +340,7 @@ private struct StatementCard: View {
                     row("Deposits not labelled yet", data.unsortedIn, sign: 1, category: .unsorted,
                         note: "Label these in Double-Check so they land in the right place")
                 }
-                row("Everyday spending", data.spending, sign: -1, category: nil,
+                row("Everyday spending", data.spending, sign: -1, category: nil, link: openSpending,
                     note: data.uncoveredCards > 0 ? "includes \(Money.format(data.uncoveredCards, cents: false)) paid to cards whose statements aren't added yet" : nil)
                 row("Income taxes", data.taxes, sign: -1, category: .taxes)
                 total("Everyday result", data.everydayResult,
@@ -387,7 +389,7 @@ private struct StatementCard: View {
     }
 
     /// - sign: +1 always shown as money in, -1 as money out, 0 = `amount` is already signed.
-    private func row(_ title: String, _ amount: Double, sign: Int, category: Category?, note: String? = nil, invested: Bool = false) -> some View {
+    private func row(_ title: String, _ amount: Double, sign: Int, category: Category?, link: (() -> Void)? = nil, note: String? = nil, invested: Bool = false) -> some View {
         let value = sign == 0 ? amount : Double(sign) * amount
         return HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 1) {
@@ -397,13 +399,14 @@ private struct StatementCard: View {
             Spacer()
             // Money going into investments is gold, never the color of spending.
             Text(signed(value)).monospacedDigit().foregroundStyle(value > 0 ? Theme.good : invested ? Theme.goldDeep : Color.primary)
-            if open != nil, category != nil {
+            if link != nil || (open != nil && category != nil) {
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { if let category { open?(category) } }
-        .accessibilityAddTraits(open != nil && category != nil ? .isButton : [])
+        .onTapGesture { if let link { link() } else if let category { open?(category) } }
+        .help(link != nil ? "Open the Spending page" : (open != nil && category != nil ? "Open these charges" : ""))
+        .accessibilityAddTraits(link != nil || (open != nil && category != nil) ? .isButton : [])
     }
 
     private func total(_ title: String, _ amount: Double, note: String?, invested: Bool = false) -> some View {
@@ -422,7 +425,10 @@ private struct StatementCard: View {
 // MARK: - Month by month
 
 private struct MonthlyFlowCard: View {
+    private var store: BudgetStore { .shared }
     let data: CashFlowData
+    let interactive: Bool
+    @State private var hovered: Month?
 
     var body: some View {
         Card {
@@ -433,6 +439,7 @@ private struct MonthlyFlowCard: View {
                         BarMark(x: .value("Month", bar.month.firstDay, unit: .month),
                                 y: .value("Amount", bar.amount), width: .ratio(0.62))
                             .foregroundStyle(by: .value("Lane", bar.lane))
+                            .opacity(hovered == nil || hovered == bar.month ? 1 : 0.55)
                     }
                     RuleMark(y: .value("Zero", 0)).foregroundStyle(Color.primary.opacity(0.35)).lineStyle(StrokeStyle(lineWidth: 1))
                 }
@@ -451,7 +458,13 @@ private struct MonthlyFlowCard: View {
                         }
                     }
                 }
+                .chartOverlay { proxy in
+                    if interactive {
+                        Color.clear.monthPointer(proxy, hover: { hovered = $0 }) { store.showSpending(in: $0) }
+                    }
+                }
                 .frame(height: 260)
+                .help(interactive ? "Click a month to see what was spent in it" : "")
             }
         }
     }
@@ -650,7 +663,7 @@ struct IncomeDetail: View {
                             .font(.callout).foregroundStyle(.secondary)
                     }
                 }
-                if data.months.count > 1 { MonthlyFlowCard(data: data).frame(minWidth: 360) }
+                if data.months.count > 1 { MonthlyFlowCard(data: data, interactive: true).frame(minWidth: 360) }
             }
         }
     }

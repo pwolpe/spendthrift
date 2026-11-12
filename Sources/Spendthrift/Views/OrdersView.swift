@@ -45,7 +45,6 @@ struct OrderItemsList: View {
 /// A closer look at charges the statements only name; the rest of the app works the same without it.
 struct OrdersView: View {
     private var store: BudgetStore { .shared }
-    @FocusState private var searching: Bool
     @State private var open: String? = PageMemory.shared.ordersOpen
     @State private var read: String?
     /// False when rendered for a test snapshot.
@@ -105,21 +104,7 @@ struct OrdersView: View {
                     .background(Theme.accent.opacity(0.08), in: .rect(cornerRadius: 10, style: .continuous))
                 } else {
                     controls
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Find anything you ordered: coffee, charger, a book title…", text: $store.orderSearch)
-                            .textFieldStyle(.plain)
-                            .font(.title3)
-                            .focused($searching)
-                        if finding {
-                            Button { store.orderSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
-                                .buttonStyle(.plain).foregroundStyle(.tertiary)
-                                .help("Clear the search").accessibilityLabel("Clear search")
-                        }
-                    }
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(Theme.sheet, in: .rect(cornerRadius: 12, style: .continuous))
-                    .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(searching ? Theme.accent.opacity(0.55) : Theme.hairline) }
+                    SearchField(prompt: "Find anything you ordered: coffee, charger, a book title…", text: $store.orderSearch)
                 }
 
                 if everything.isEmpty {
@@ -641,71 +626,70 @@ private struct OrderRowView: View {
     let order: OrdersView.Order
     let isOpen: Bool
     let toggle: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         let count = order.rows.count
-        VStack(alignment: .leading, spacing: 0) {
-            Button(action: toggle) {
-                HStack(alignment: .center, spacing: 12) {
-                    // The first few things in the box, overlapping like a small pile.
-                    HStack(spacing: -14) {
-                        ForEach(Array(order.rows.prefix(3).enumerated()), id: \.element.id) { index, row in
-                            ProductThumb(asin: row.item.asin, kind: row.kind, size: 38).zIndex(Double(3 - index))
+        HoverRow(held: isOpen) { hovering in
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: toggle) {
+                    HStack(alignment: .center, spacing: 12) {
+                        // The first few things in the box, overlapping like a small pile.
+                        HStack(spacing: -14) {
+                            ForEach(Array(order.rows.prefix(3).enumerated()), id: \.element.id) { index, row in
+                                ProductThumb(asin: row.item.asin, kind: row.kind, size: 38).zIndex(Double(3 - index))
+                            }
                         }
+                        .frame(width: 38 + CGFloat(min(count, 3) - 1) * 24, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(order.rows.prefix(3).map(\.name).joined(separator: ", ") + (count > 3 ? ", and \(count - 3) more" : ""))
+                                .font(.body.weight(.medium)).lineLimit(1)
+                            Text(([order.date.formatted(.dateTime.month(.abbreviated).day().year()), order.who, count == 1 ? "1 item" : "\(count) items",
+                                   order.refunded > 0 ? "\(Money.format(Double(order.refunded) / 100)) refunded" : nil,
+                                   order.charges.isEmpty ? "no card charge on file" : nil] as [String?]).compactMap { $0 }.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 12)
+                        Text(Money.format(Double(order.net) / 100)).font(Theme.mono(14, .semibold))
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                            .foregroundStyle(hovering || isOpen ? Theme.accent : Color.secondary.opacity(0.4))
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
                     }
-                    .frame(width: 38 + CGFloat(min(count, 3) - 1) * 24, alignment: .leading)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(order.rows.prefix(3).map(\.name).joined(separator: ", ") + (count > 3 ? ", and \(count - 3) more" : ""))
-                            .font(.body.weight(.medium)).lineLimit(1)
-                        Text(([order.date.formatted(.dateTime.month(.abbreviated).day().year()), order.who, count == 1 ? "1 item" : "\(count) items",
-                               order.refunded > 0 ? "\(Money.format(Double(order.refunded) / 100)) refunded" : nil,
-                               order.charges.isEmpty ? "no card charge on file" : nil] as [String?]).compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 12)
-                    Text(Money.format(Double(order.net) / 100)).font(Theme.mono(14, .semibold))
-                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-                        .foregroundStyle(hovering || isOpen ? Theme.accent : Color.secondary.opacity(0.4))
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 10).padding(.vertical, 8)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if isOpen {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(order.rows) { row in
-                        HStack(alignment: .center, spacing: 10) {
-                            ProductThumb(asin: row.item.asin, kind: row.kind, size: 44)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(row.item.quantity > 1 ? "\(row.item.quantity) × \(row.name)" : row.name).font(.callout)
-                                if row.name != row.item.name {
-                                    Text(row.item.name).font(.caption).foregroundStyle(.tertiary).lineLimit(2)
+                .buttonStyle(.plain)
+                if isOpen {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(order.rows) { row in
+                            HStack(alignment: .center, spacing: 10) {
+                                ProductThumb(asin: row.item.asin, kind: row.kind, size: 44)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(row.item.quantity > 1 ? "\(row.item.quantity) × \(row.name)" : row.name).font(.callout)
+                                    if row.name != row.item.name {
+                                        Text(row.item.name).font(.caption).foregroundStyle(.tertiary).lineLimit(2)
+                                    }
+                                }
+                                Spacer(minLength: 8)
+                                Text(row.kind).font(.caption).foregroundStyle(.secondary)
+                                Text(Money.format(Double(row.item.cents) / 100)).font(Theme.mono(12, .medium)).frame(minWidth: 70, alignment: .trailing)
+                                if let url = row.item.productURL {
+                                    Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.forward.square") }
+                                        .buttonStyle(.borderless).help("See this product on Amazon").accessibilityLabel("See this product on Amazon")
                                 }
                             }
-                            Spacer(minLength: 8)
-                            Text(row.kind).font(.caption).foregroundStyle(.secondary)
-                            Text(Money.format(Double(row.item.cents) / 100)).font(Theme.mono(12, .medium)).frame(minWidth: 70, alignment: .trailing)
-                            if let url = row.item.productURL {
-                                Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.forward.square") }
-                                    .buttonStyle(.borderless).help("See this product on Amazon").accessibilityLabel("See this product on Amazon")
-                            }
                         }
+                        Divider()
+                        if order.charges.isEmpty {
+                            Text(noCharge).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            ForEach(order.charges, id: \.self) { ChargeLine(id: $0) }
+                        }
+                        ShopLink(title: "This Order on Amazon", url: order.rows.first?.item.orderURL).controlSize(.small)
                     }
-                    Divider()
-                    if order.charges.isEmpty {
-                        Text(noCharge).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        ForEach(order.charges, id: \.self) { ChargeLine(id: $0) }
-                    }
-                    ShopLink(title: "This Order on Amazon", url: order.rows.first?.item.orderURL).controlSize(.small)
+                    .padding(.horizontal, 10).padding(.bottom, 10)
                 }
-                .padding(.horizontal, 10).padding(.bottom, 10)
             }
         }
-        .background(hovering || isOpen ? Theme.accent.opacity(0.06) : .clear, in: .rect(cornerRadius: 9, style: .continuous))
-        .onHover { hovering = $0 }
     }
 }
 
@@ -716,49 +700,48 @@ private struct ItemRowView: View {
     let row: BudgetStore.OrderRow
     let isOpen: Bool
     let toggle: () -> Void
-    @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button(action: toggle) {
-                HStack(alignment: .center, spacing: 12) {
-                    ProductThumb(asin: row.item.asin, kind: row.kind, size: 38)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(row.item.quantity > 1 ? "\(row.item.quantity) × \(row.name)" : row.name)
-                            .font(.body.weight(.medium)).lineLimit(1)
-                        Text(([row.kind, row.date.formatted(.dateTime.month(.abbreviated).day().year()), row.item.who] as [String?]).compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(.secondary)
+        HoverRow(held: isOpen) { hovering in
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: toggle) {
+                    HStack(alignment: .center, spacing: 12) {
+                        ProductThumb(asin: row.item.asin, kind: row.kind, size: 38)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.item.quantity > 1 ? "\(row.item.quantity) × \(row.name)" : row.name)
+                                .font(.body.weight(.medium)).lineLimit(1)
+                            Text(([row.kind, row.date.formatted(.dateTime.month(.abbreviated).day().year()), row.item.who] as [String?]).compactMap { $0 }.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 12)
+                        Text(Money.format(Double(row.net) / 100)).font(Theme.mono(14, .semibold))
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                            .foregroundStyle(hovering || isOpen ? Theme.accent : Color.secondary.opacity(0.4))
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
                     }
-                    Spacer(minLength: 12)
-                    Text(Money.format(Double(row.net) / 100)).font(Theme.mono(14, .semibold))
-                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-                        .foregroundStyle(hovering || isOpen ? Theme.accent : Color.secondary.opacity(0.4))
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 10).padding(.vertical, 8)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if isOpen {
-                VStack(alignment: .leading, spacing: 8) {
-                    if row.name != row.item.name {
-                        Text(row.item.name).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .buttonStyle(.plain)
+                if isOpen {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if row.name != row.item.name {
+                            Text(row.item.name).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        HStack(spacing: 8) {
+                            ShopLink(title: "See It on Amazon", url: row.item.productURL)
+                            Button("The Whole Order", systemImage: "shippingbox") { store.navigate { store.orderOnly = row.item.orderID } }
+                                .help("Everything that was ordered with it")
+                        }
+                        .controlSize(.small)
+                        if let charge = row.charge { ChargeLine(id: charge) } else {
+                            Text(noCharge).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    HStack(spacing: 8) {
-                        ShopLink(title: "See It on Amazon", url: row.item.productURL)
-                        Button("The Whole Order", systemImage: "shippingbox") { store.navigate { store.orderOnly = row.item.orderID } }
-                            .help("Everything that was ordered with it")
-                    }
-                    .controlSize(.small)
-                    if let charge = row.charge { ChargeLine(id: charge) } else {
-                        Text(noCharge).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
+                    .padding(.horizontal, 26).padding(.bottom, 10)
                 }
-                .padding(.horizontal, 26).padding(.bottom, 10)
             }
         }
-        .background(hovering || isOpen ? Theme.accent.opacity(0.06) : .clear, in: .rect(cornerRadius: 9, style: .continuous))
-        .onHover { hovering = $0 }
     }
 }
 

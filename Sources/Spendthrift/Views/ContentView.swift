@@ -14,28 +14,27 @@ struct ContentView: View {
                 Group {
                     if store.accounts.isEmpty {
                         WelcomeView(isDropTargeted: isDropTargeted)
-                    } else if let page = store.route.last {
-                        VStack(spacing: 0) {
-                            BackBar()
-                            switch page {
-                            case .place(let name): PlaceView(name: name)
-                            case .charges(let filter): ChargesView(filter: filter)
-                            }
-                        }
                     } else {
                         VStack(spacing: 0) {
-                        BackBar()
-                        switch store.selection ?? .overview {
-                        case .overview: OverviewView()
-                        case .stories: StoriesView()
-                        case .places: PlacesView()
-                        case .orders: OrdersView()
-                        case .apart: SetApartView()
-                        case .transactions: TransactionsView()
-                        case .statements: StatementsView()
-                        case .review: ReviewView()
-                        case .categories, .accounts: SetupView()
-                        }
+                            BackBar()
+                            if let page = store.route.last {
+                                switch page {
+                                case .place(let name): PlaceView(name: name)
+                                case .charges(let filter): ChargesView(filter: filter)
+                                }
+                            } else {
+                                switch store.selection ?? .overview {
+                                case .overview: OverviewView()
+                                case .stories: StoriesView()
+                                case .places: PlacesView()
+                                case .orders: OrdersView()
+                                case .apart: SetApartView()
+                                case .transactions: TransactionsView()
+                                case .statements: StatementsView()
+                                case .review: ReviewView()
+                                case .categories, .accounts: SetupView()
+                                }
+                            }
                         }
                     }
                 }

@@ -248,6 +248,14 @@ enum DebugHooks {
             for line in CloudSpend.shared.lines(days: 1) where line.job == "Benchmark" { print("DECISION cost \(line)") }
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_READ=1: print the figures given for the Overview's short version, and what was written from them.
+        if env["SPENDTHRIFT_READ"] != nil, let period = ReportData.periods(for: store).first(where: { $0 == .last12 }) ?? ReportData.periods(for: store).first {
+            let given = store.overviewFacts(CashFlowData(store: store, period: period), period: period)
+            for fact in given.facts { print("READ FACT \(fact)") }
+            print("READ TEXT \(await store.read("overview-\(period.id)", basis: given.basis, facts: given.facts) ?? "(nothing written)")")
+            store.saveNow()
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_TIDY=1: compare payees, act where the model is sure, print every pair and what was done, then quit.
         if env["SPENDTHRIFT_TIDY"] != nil {
             for _ in 0..<100 where store.isSuggesting || store.isTidying { try? await Task.sleep(for: .milliseconds(200)) }

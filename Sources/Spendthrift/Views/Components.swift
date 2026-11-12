@@ -100,16 +100,36 @@ struct ReceiptLine<Label: View>: View {
     var value: String
     var valueColor: Color = .primary
     var bold = false
+    /// When given, the whole line opens something, and says what.
+    var help: String?
+    var action: (() -> Void)?
     @ViewBuilder var label: Label
+    @State private var hovering = false
 
     var body: some View {
+        if let action {
+            Button(action: action) { line }
+                .buttonStyle(.plain)
+                .onHover { hovering = $0 }
+                .help(help ?? "")
+        } else {
+            line
+        }
+    }
+
+    private var line: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             label.layoutPriority(1)
             Dots().stroke(Color.primary.opacity(0.25), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [0.1, 4.5]))
                 .frame(height: 1).frame(minWidth: 12)
                 .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 1 }
-            Text(value).font(Theme.mono(13, bold ? .bold : .medium)).foregroundStyle(valueColor).lineLimit(1).layoutPriority(2)
+            Text(value).font(Theme.mono(13, bold ? .bold : .medium)).foregroundStyle(hovering ? Theme.accent : valueColor).lineLimit(1).layoutPriority(2)
+            if action != nil {
+                Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+                    .foregroundStyle(hovering ? Theme.accent : Color.secondary.opacity(0.5))
+            }
         }
+        .contentShape(Rectangle())
     }
     private struct Dots: Shape {
         func path(in rect: CGRect) -> Path { Path { $0.move(to: CGPoint(x: rect.minX, y: rect.midY)); $0.addLine(to: CGPoint(x: rect.maxX, y: rect.midY)) } }
@@ -637,9 +657,18 @@ extension View {
     /// Makes the bars of a chart respond to the pointer by their label: anywhere in a bar's column
     /// counts, so a short bar is as easy to hit as a tall one.
     func barPointer(_ proxy: ChartProxy, hover: ((String?) -> Void)? = nil, tap: @escaping (String) -> Void) -> some View {
+        columnPointer(proxy, as: String.self, hover: hover, tap: tap)
+    }
+
+    /// The same for a chart whose bars are months on a date axis.
+    func monthPointer(_ proxy: ChartProxy, hover: ((Month?) -> Void)? = nil, tap: @escaping (Month) -> Void) -> some View {
+        columnPointer(proxy, as: Date.self, hover: hover.map { hover in { hover($0.map(Month.init(date:))) } }, tap: { tap(Month(date: $0)) })
+    }
+
+    private func columnPointer<V: Plottable>(_ proxy: ChartProxy, as type: V.Type, hover: ((V?) -> Void)?, tap: @escaping (V) -> Void) -> some View {
         GeometryReader { geo in
-            let label = { (point: CGPoint) -> String? in
-                proxy.plotFrame.map { geo[$0] }.flatMap { proxy.value(atX: point.x - $0.origin.x) }
+            let label = { (point: CGPoint) -> V? in
+                proxy.plotFrame.map { geo[$0] }.flatMap { proxy.value(atX: point.x - $0.origin.x, as: V.self) }
             }
             Rectangle().fill(.clear).contentShape(Rectangle())
                 .onContinuousHover { phase in
@@ -651,26 +680,181 @@ extension View {
     }
 }
 
-/// A payee on one line: its icon, its name, a word about it, and an amount. Opens something when given a way to.
+/// A row that tints when the pointer is over it, or while it is held open. `content` is told whether
+/// the pointer is on the row, so a chevron can light up with it.
+struct HoverRow<Content: View>: View {
+    var radius: CGFloat = 9
+    var tint: Color = Theme.accent
+    var strength = 0.06
+    /// Stays tinted without the pointer (an open row).
+    var held = false
+    var enabled = true
+    let content: (Bool) -> Content
+    @State private var hovering = false
+
+    init(radius: CGFloat = 9, tint: Color = Theme.accent, strength: Double = 0.06, held: Bool = false, enabled: Bool = true,
+         @ViewBuilder content: @escaping (Bool) -> Content) {
+        self.radius = radius; self.tint = tint; self.strength = strength; self.held = held; self.enabled = enabled
+        self.content = content
+    }
+
+    var body: some View {
+        let on = hovering && enabled
+        content(on)
+            .background(on || held ? tint.opacity(strength) : .clear, in: .rect(cornerRadius: radius, style: .continuous))
+            .onHover { hovering = $0 }
+    }
+}
+
+/// A name or figure that opens something: tinted and underlined under the pointer.
+struct LinkText: View {
+    let text: String
+    var font: Font = .callout
+    var color: Color = .secondary
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(text).font(font).lineLimit(1)
+                .foregroundStyle(hovering ? Theme.accent : color)
+                .underline(hovering)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+    }
+}
+
+/// A search box with a clear button. Looks the same on every page that has one.
+struct SearchField: View {
+    let prompt: String
+    @Binding var text: String
+    /// Large for a page's own search; small for one inside a pane.
+    var large = true
+    var autofocus = false
+    var onSubmit: () -> Void = {}
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let radius: CGFloat = large ? 12 : 8
+        HStack(spacing: large ? 8 : 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain)
+                .font(large ? .title3 : .body)
+                .focused($focused)
+                .onSubmit(onSubmit)
+            if !text.trimmingCharacters(in: .whitespaces).isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundStyle(.tertiary)
+                    .help("Clear the search").accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, large ? 14 : 10).padding(.vertical, large ? 10 : 6)
+        .background(Theme.sheet, in: .rect(cornerRadius: radius, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(large && focused ? Theme.accent.opacity(0.55) : Theme.hairline) }
+        .onAppear { if autofocus { focused = true } }
+    }
+}
+
+/// Bars for the months a payee was paid, each opening that month's charges when given a way to.
+struct MonthBars: View {
+    struct Bar: Identifiable {
+        let month: Month
+        let total: Double
+        var id: Month { month }
+    }
+    let bars: [Bar]
+    var height: CGFloat = 180
+    /// Small: initials under the bars and no money scale (for a narrow pane).
+    var compact = false
+    var help: String?
+    var onPick: ((Month) -> Void)?
+    @State private var hovered: Month?
+
+    var body: some View {
+        Chart(bars) { bar in
+            BarMark(x: .value("Month", bar.month.firstDay, unit: .month), y: .value("Total", bar.total))
+                .foregroundStyle(Theme.accent.gradient)
+                .cornerRadius(compact ? 3 : 4)
+                .opacity(hovered == nil || hovered == bar.month ? 1 : 0.55)
+        }
+        .chartXAxis {
+            if compact {
+                AxisMarks(values: .stride(by: .month)) { _ in AxisValueLabel(format: .dateTime.month(.narrow), centered: true) }
+            } else {
+                AxisMarks()
+            }
+        }
+        .chartYAxis {
+            if !compact { AxisMarks(format: .currency(code: "USD").precision(.fractionLength(0))) }
+        }
+        .chartOverlay { proxy in
+            if let onPick {
+                Color.clear.monthPointer(proxy, hover: { hovered = $0 }, tap: onPick)
+            }
+        }
+        .frame(height: height)
+        .help(onPick == nil ? "" : (help ?? "Click a month to see its charges"))
+    }
+}
+
+/// A payee on one line: its icon, its name, a word about it, and an amount. Opens something when given
+/// a way to, and then looks like it: a chevron, and a tint under the pointer.
 struct PayeeLine: View {
     let name: String
     let category: Category
     var detail: String?
     let amount: Double
+    /// Its place in a ranking: the first three are gold.
+    var rank: Int?
+    var iconSize: CGFloat = 30
+    /// The amount as written, when it is not simply the money format of `amount`.
+    var amountText: String?
+    var amountFont: Font = .body
+    var amountColor: Color = .primary
+    var help: String?
     var action: (() -> Void)?
 
     var body: some View {
-        let row = HStack(spacing: 12) {
-            MerchantIcon(name: name, category: category, size: 30)
+        if let action {
+            Button(action: action) {
+                HoverRow { hovering in
+                    line(chevron: hovering)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                }
+            }
+            .buttonStyle(.plain)
+            .help(help ?? "Open \(name)")
+        } else {
+            line(chevron: nil)
+        }
+    }
+
+    private func line(chevron hovering: Bool?) -> some View {
+        HStack(spacing: 12) {
+            if let rank {
+                Text("\(rank)")
+                    .font(.callout.weight(.bold)).monospacedDigit()
+                    .foregroundStyle(rank <= 3 ? AnyShapeStyle(Theme.gold) : AnyShapeStyle(.tertiary))
+                    .frame(width: 20)
+            }
+            MerchantIcon(name: name, category: category, size: iconSize)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.body.weight(.medium)).lineLimit(1)
-                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             }
-            Spacer()
-            Text(Money.format(amount)).monospacedDigit()
+            Spacer(minLength: 8)
+            Text(amountText ?? Money.format(amount)).font(amountFont).monospacedDigit().foregroundStyle(amountColor)
+            if let hovering {
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                    .foregroundStyle(hovering ? Theme.accent : Color.secondary.opacity(0.4))
+            }
         }
-        .contentShape(Rectangle())
-        if let action { Button(action: action) { row }.buttonStyle(.plain) } else { row }
     }
 }
 

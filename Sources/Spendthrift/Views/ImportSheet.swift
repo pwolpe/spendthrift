@@ -98,7 +98,7 @@ struct ImportSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { store.cancelImport(pending) }
                     .keyboardShortcut(.cancelAction)
-                Button(target == nil ? "Add Account" : "Add Transactions") {
+                Button(target == nil ? "Add Account" : "Add Charges") {
                     if let mapping {
                         store.completeImport(pending, existingAccount: target, newName: name, mapping: mapping)
                     }
@@ -134,7 +134,7 @@ struct ImportSheet: View {
                 if i < preview.count - 1 { Divider() }
             }
             if preview.isEmpty {
-                Text("No transactions found with these columns.")
+                Text("No charges found with these columns.")
                     .foregroundStyle(.secondary)
                     .padding(12)
             }

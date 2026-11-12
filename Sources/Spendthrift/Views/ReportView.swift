@@ -203,10 +203,10 @@ struct ReportContent: View {
                 }
                 CategoryTableCard(data: data, open: interactive ? open : nil)
                 HStack(alignment: .top, spacing: 22) {
-                    PlacesCard(places: data.places)
+                    PlacesCard(places: data.places, interactive: interactive)
                     BiggestCard(transactions: data.biggest)
                 }
-                TaxTimeCard(months: Set(data.months))
+                TaxTimeCard(months: Set(data.months), interactive: interactive)
             }
             Text("Prepared by Spendthrift on \(Date.now.formatted(date: .long, time: .omitted)). Payments between accounts are left out of spending.")
                 .font(.caption)
@@ -354,7 +354,6 @@ private struct MonthlyChartCard: View {
         }
         .chartForegroundStyleScale(domain: data.barGroups, range: colors)
         .chartLegend(position: .bottom, alignment: .leading, spacing: 14)
-        .chartXSelection(value: $selected)
         .chartXAxis {
             AxisMarks(values: .stride(by: .month)) { _ in
                 AxisValueLabel(format: .dateTime.month(.abbreviated), centered: true)
@@ -370,8 +369,10 @@ private struct MonthlyChartCard: View {
         }
         .animation(.snappy, value: selectedMonth)
         // The month under the pointer is the one a click opens.
-        .onTapGesture { if let month = selectedMonth { BudgetStore.shared.showSpending(in: month) } }
-        .help("Click a month to see what's in it")
+        .chartOverlay { proxy in
+            Color.clear.monthPointer(proxy, hover: { selected = $0?.firstDay }) { BudgetStore.shared.showSpending(in: $0) }
+        }
+        .help("Click a month to see what was spent in it")
     }
 }
 
@@ -384,7 +385,7 @@ private struct CategoryTableCard: View {
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Categories", subtitle: open == nil ? nil : "Click a category to see its transactions")
+                SectionHeader(title: "Categories", subtitle: open == nil ? nil : "Click a category to see its charges")
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 0) {
                     GridRow {
                         Text("Category")
@@ -491,31 +492,19 @@ struct Sparkline: View {
 
 private struct PlacesCard: View {
     let places: [ReportData.Place]
+    var interactive = true
 
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(title: "Top Payees")
                 ForEach(Array(places.enumerated()), id: \.element.id) { i, place in
-                    Button { BudgetStore.shared.showPlace(place.name) } label: {
-                    HStack(spacing: 12) {
-                        Text("\(i + 1)")
-                            .font(.callout.weight(.bold))
-                            .monospacedDigit()
-                            .foregroundStyle(i < 3 ? AnyShapeStyle(Gold.gradient) : AnyShapeStyle(.tertiary))
-                            .frame(width: 20)
-                        MerchantIcon(name: place.name, category: place.category, size: 28)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(place.name).font(.body.weight(.medium)).lineLimit(1)
-                            Text(place.count == 1 ? "1 visit" : "\(place.count) visits")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Text(Money.format(place.total, cents: false)).monospacedDigit()
-                    }
-                    .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                    PayeeLine(name: place.name, category: place.category,
+                              detail: place.count == 1 ? "1 visit" : "\(place.count) visits",
+                              amount: place.total, rank: i + 1, iconSize: 28,
+                              amountText: Money.format(place.total, cents: false),
+                              help: "Open \(place.name): every charge, by month",
+                              action: interactive ? { BudgetStore.shared.showPlace(place.name) } : nil)
                     if i < places.count - 1 { Divider().padding(.leading, 72) }
                 }
                 if places.isEmpty { Text("Nothing yet.").foregroundStyle(.secondary) }
@@ -543,11 +532,6 @@ private struct BiggestCard: View {
     }
 }
 
-enum Gold {
-    static let gradient = LinearGradient(colors: [Color(red: 0.98, green: 0.82, blue: 0.36), Color(red: 0.78, green: 0.56, blue: 0.13)],
-                                         startPoint: .top, endPoint: .bottom)
-}
-
 // MARK: - For tax time
 
 /// The figures an accountant asks for, gathered in one place. Not tax advice: just the totals,
@@ -555,6 +539,7 @@ enum Gold {
 private struct TaxTimeCard: View {
     private var store: BudgetStore { .shared }   // not from the environment: menus and sheets don't always pass it down
     let months: Set<Month>
+    var interactive = true
 
     private struct Line: Identifiable {
         var id: String { title }
@@ -564,6 +549,7 @@ private struct TaxTimeCard: View {
         let symbol: String
         let color: Color
         let details: [(String, Double)]
+        let ids: Set<UUID>
     }
 
     private var lines: [Line] {
@@ -579,7 +565,7 @@ private struct TaxTimeCard: View {
             guard abs(total) > 0.005 else { return nil }
             let byPlace = Dictionary(grouping: list, by: \.merchant).map { ($0.key, $0.value.reduce(0) { $0 + $1.amount }) }
                 .sorted { abs($0.1) > abs($1.1) }
-            return Line(title: title, note: note, total: total, symbol: symbol, color: color, details: Array(byPlace.prefix(4)))
+            return Line(title: title, note: note, total: total, symbol: symbol, color: color, details: Array(byPlace.prefix(4)), ids: Set(list.map(\.id)))
         }
         let named = { (t: Transaction, words: [String]) in words.contains { t.merchant.localizedCaseInsensitiveContains($0) } }
         return [
@@ -612,13 +598,33 @@ private struct TaxTimeCard: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(line.title).font(.body.weight(.medium))
                                 Text(line.note).font(.caption).foregroundStyle(.secondary)
-                                Text(line.details.map { "\($0.0) \(Money.format($0.1, cents: false))" }.joined(separator: "  ·  "))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
+                                if interactive {
+                                    FlowLayout(spacing: 6) {
+                                        ForEach(Array(line.details.enumerated()), id: \.offset) { i, detail in
+                                            HStack(spacing: 4) {
+                                                LinkText(text: detail.0, font: .caption, help: "Open \(detail.0): every charge, by month") { store.showPlace(detail.0) }
+                                                Text(Money.format(detail.1, cents: false) + (i < line.details.count - 1 ? "  ·" : ""))
+                                                    .font(.caption).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Text(line.details.map { "\($0.0) \(Money.format($0.1, cents: false))" }.joined(separator: "  ·  "))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
                             }
                             Spacer()
-                            Text(Money.format(line.total)).font(.body.weight(.semibold)).monospacedDigit()
+                            if interactive {
+                                LinkText(text: Money.format(line.total), font: .body.weight(.semibold), color: .primary,
+                                         help: "Open the charges behind this total") {
+                                    store.showCharges(TransactionFilter(ids: line.ids, title: line.title))
+                                }
+                                .monospacedDigit()
+                            } else {
+                                Text(Money.format(line.total)).font(.body.weight(.semibold)).monospacedDigit()
+                            }
                         }
                         if line.id != lines.last?.id { Divider().padding(.leading, 40) }
                     }

@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// Every place money went, with a box to find one by name: "barrys", "pastis".
-/// Click a place for everything ever spent there.
+/// Every payee money went to, with a box to find one by name: "barrys", "pastis".
+/// Click a payee for everything ever spent there.
 struct PlacesView: View {
     @Environment(BudgetStore.self) private var store
-    @FocusState private var searching: Bool
     /// False when rendered for a test snapshot.
     var scrolls = true
 
@@ -66,12 +65,22 @@ struct PlacesView: View {
         }
     }
 
+    private static func when(_ place: Place) -> String {
+        let f = Date.FormatStyle.dateTime.month(.abbreviated).year()
+        let (a, b) = (place.first.formatted(f), place.last.formatted(f))
+        return a == b ? "last in \(b)" : "\(a) to \(b)"
+    }
+
     private func rows(_ places: ArraySlice<Place>) -> some View {
         Card(padding: 8) {
             LazyVStack(spacing: 0) {
                 ForEach(Array(places.enumerated()), id: \.element.id) { index, p in
                     if index > 0 { Divider().padding(.leading, 56) }
-                    PlaceRow(place: p) { store.showPlace(p.name) }
+                    PayeeLine(name: p.name, category: p.category,
+                              detail: "\(p.category.displayName) · \(p.visits == 1 ? "once" : "\(p.visits) times") · \(Self.when(p))",
+                              amount: abs(p.total), iconSize: 36,
+                              amountFont: Theme.mono(14, .semibold), amountColor: p.total < 0 ? Theme.good : .primary,
+                              help: "Open \(p.name): every charge, by month") { store.showPlace(p.name) }
                 }
             }
         }
@@ -90,21 +99,9 @@ struct PlacesView: View {
                         .font(.title3).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 12) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Find a payee: Pastis, Barry's, Amazon…", text: $store.placeSearch)
-                            .textFieldStyle(.plain)
-                            .font(.title3)
-                            .focused($searching)
-                            .onSubmit { if let first = list.first { store.showPlace(first.name) } }
-                        if finding {
-                            Button { store.placeSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
-                                .buttonStyle(.plain).foregroundStyle(.tertiary)
-                        }
+                    SearchField(prompt: "Find a payee: Pastis, Barry's, Amazon…", text: $store.placeSearch, autofocus: true) {
+                        if let first = list.first { store.showPlace(first.name) }
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(Theme.sheet, in: .rect(cornerRadius: 12, style: .continuous))
-                    .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(searching ? Theme.accent.opacity(0.55) : Theme.hairline) }
                     Picker("When", selection: $store.placeSpan) {
                         ForEach(Span.allCases) { Text($0.rawValue).tag($0) }
                     }
@@ -152,41 +149,5 @@ struct PlacesView: View {
         }
         .navigationTitle("Payees")
         .navigationSubtitle(list.count == 1 ? "1 payee" : "\(list.count) payees")
-        .onAppear { searching = true }
-    }
-}
-
-private struct PlaceRow: View {
-    let place: PlacesView.Place
-    let open: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: open) {
-            HStack(spacing: 12) {
-                MerchantIcon(name: place.name, category: place.category, size: 36)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(place.name).font(.body.weight(.medium)).lineLimit(1)
-                    Text("\(place.category.displayName) · \(place.visits == 1 ? "once" : "\(place.visits) times") · \(when)")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer(minLength: 12)
-                Text(Money.format(abs(place.total)))
-                    .font(Theme.mono(14, .semibold))
-                    .foregroundStyle(place.total < 0 ? Theme.good : .primary)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(hovering ? Theme.accent : Color.secondary.opacity(0.4))
-            }
-            .padding(.horizontal, 10).padding(.vertical, 8)
-            .background(hovering ? Theme.accent.opacity(0.06) : .clear, in: .rect(cornerRadius: 9, style: .continuous))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-    }
-
-    private var when: String {
-        let f = Date.FormatStyle.dateTime.month(.abbreviated).year()
-        let (a, b) = (place.first.formatted(f), place.last.formatted(f))
-        return a == b ? "last in \(b)" : "\(a) to \(b)"
     }
 }

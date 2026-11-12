@@ -119,7 +119,7 @@ struct ShowView: View {
         }
         let subscriptions = store.subscriptions().count
         if subscriptions >= 3 { candidates.append("\(subscriptions) charges that repeat every month") }
-        for story in store.stories.prefix(6) { candidates.append("Found \(story.kind == .trip ? "a trip" : "an occasion"): \(story.name)") }
+        for story in store.stories.prefix(6) { candidates.append("Found \(story.kind == .trip ? "a trip" : "an event"): \(story.name)") }
         return candidates.first { !said.contains($0) }
     }
 
@@ -148,6 +148,7 @@ struct ShowView: View {
             HStack(spacing: 14) {
                 Button { withAnimation(.snappy) { card = max(0, index - 1) } } label: { Image(systemName: "chevron.left") }
                     .disabled(index == 0)
+                    .help("Previous card").accessibilityLabel("Previous card")
                     .keyboardShortcut(.leftArrow, modifiers: [])
                 HStack(spacing: 7) {
                     ForEach(list.indices, id: \.self) { i in
@@ -162,6 +163,8 @@ struct ShowView: View {
                     Image(systemName: index >= list.count - 1 ? "checkmark" : "chevron.right")
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [])
+                .help(index >= list.count - 1 ? "Done" : "Next card")
+                .accessibilityLabel(index >= list.count - 1 ? "Done" : "Next card")
             }
             .buttonStyle(.bordered)
             .buttonBorderShape(.circle)
@@ -355,9 +358,9 @@ struct PremiereCard: View {
         if found.isEmpty {
             SpotArt(name: "notrips", height: 200)
             headline("Still reading between the lines…")
-            line("I'm looking for trips and occasions in your spending. They'll be waiting on the Trips & Events page.")
+            line("I'm looking for trips and events in your spending. They'll be waiting on the Trips & Events page.")
         } else {
-            headline(found.count == 1 ? "I noticed a trip" : "I noticed \(found.count) trips and occasions")
+            headline(found.count == 1 ? "I noticed a trip or event" : "I noticed \(found.count) trips and events")
             VStack(spacing: 14) {
                 ForEach(found.prefix(4), id: \.story.id) { item in
                     HStack(spacing: 14) {
