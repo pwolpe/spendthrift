@@ -174,6 +174,8 @@ final class BudgetStore {
     /// A sort asked for while payees were being tidied waits for the tidy-up to end, then runs once.
     @ObservationIgnored var sortAfterTidy = false
     @ObservationIgnored var isLearningFacts = false
+    /// The card facts worked out away from the main thread, and the state of the library they are for.
+    @ObservationIgnored var cardFactsWarm: (revision: Int, cards: [CardEngine.Card])?
     /// True while new questions for the Ask pane are being written.
     var isWritingAskIdeas = false
     /// Goes up when a kept summary has been checked or rewritten, so the card showing it redraws.

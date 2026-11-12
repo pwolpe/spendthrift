@@ -134,13 +134,15 @@ enum CardEngine {
 
     /// "$300/YEAR" in a credit line: the statement saying how much a year of it is.
     static func printedAllowance(_ description: String) -> Double? {
-        guard let match = description.range(of: #"\$\s?[\d,]+(\.\d\d)?\s*/\s*(YEAR|YR)"#, options: [.regularExpression, .caseInsensitive]) else { return nil }
+        guard description.contains("$"), let match = description.range(of: #"\$\s?[\d,]+(\.\d\d)?\s*/\s*(YEAR|YR)"#, options: [.regularExpression, .caseInsensitive]) else { return nil }
         return Double(description[match].filter { $0.isNumber || $0 == "." })
     }
 
     /// A yearly fee for holding the card, and the other cardholder it names, if it names one.
     static func annualFee(_ description: String) -> (isFee: Bool, who: String?) {
-        guard let match = description.range(of: #"(ANNUAL (MEMBERSHIP )?FEE|MEMBERSHIP FEE)"#, options: [.regularExpression, .caseInsensitive]) else { return (false, nil) }
+        // (Nearly every line is not a fee: say so cheaply before the pattern is tried.)
+        guard description.range(of: " fee", options: .caseInsensitive) != nil,
+              let match = description.range(of: #"(ANNUAL (MEMBERSHIP )?FEE|MEMBERSHIP FEE)"#, options: [.regularExpression, .caseInsensitive]) else { return (false, nil) }
         let before = description[..<match.lowerBound].trimmingCharacters(in: .whitespaces)
         let first = before.split(separator: " ").first.map(String.init)
         return (true, first.map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() })
@@ -194,7 +196,7 @@ enum CardEngine {
 
     /// Everything about each card. `cards` are the accounts that are credit cards; `all` is every
     /// transaction (the other accounts are where a purchase on the wrong card would be).
-    static func cards(_ cards: [(id: UUID, name: String)], in all: [Transaction], asOf: Date) -> [Card] {
+    nonisolated static func cards(_ cards: [(id: UUID, name: String)], in all: [Transaction], asOf: Date) -> [Card] {
         let yearAgo = calendar.date(byAdding: .year, value: -1, to: asOf) ?? asOf
         let byAccount = Dictionary(grouping: all, by: \.accountID)
         var byPayee: [String: [Transaction]] = [:]

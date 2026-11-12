@@ -273,8 +273,8 @@ struct TransactionInspector: View {
                             .frame(maxWidth: .infinity)
                             .help("The line exactly as your statement prints it")
                         VStack(spacing: 6) {
-                            ReceiptLine(value: t.account, help: "Open every charge on \(t.account)",
-                                        action: { store.showCharges(TransactionFilter(accountID: t.accountID)) }) { Text("Paid with").font(.callout) }
+                            ReceiptLine(value: store.accountLabel(t.accountID), help: "Open \(store.accountLabel(t.accountID))",
+                                        action: { store.showAccount(t.accountID) }) { Text("Paid with").font(.callout) }
                             ReceiptLine(value: t.isUnknown ? "Not sorted" : t.category.displayName,
                                         help: "Open every charge filed under \(t.isUnknown ? "Not sorted" : t.category.displayName)",
                                         action: { store.showCharges(TransactionFilter(category: t.category)) }) { Text("Filed under").font(.callout) }

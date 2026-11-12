@@ -751,6 +751,23 @@ enum SelfTest {
                   abs(card.years.reduce(0) { $0 + $1.credits } - card.benefits.reduce(0) { $0 + $1.total }) < 0.01
                   && card.findings.allSatisfy { !$0.text.isEmpty } && card.share >= 0 && card.share <= 1.0001)
         }
+        if let card = store.cardFacts().first {
+            let before = store.location
+            store.showAccount(card.id)
+            let onCard = store.route.last == .card(card.id)
+            store.back()
+            check("cards: a card's name anywhere leads to its page, and Back returns", onCard && store.location == before && !store.accountLabel(card.id).isEmpty)
+            check("cards: its statements are listed newest first, each one its own",
+                  store.statements(of: card.id).allSatisfy { $0.accountID == card.id }
+                  && zip(store.statements(of: card.id), store.statements(of: card.id).dropFirst()).allSatisfy { ($0.lastDate ?? "") >= ($1.lastDate ?? "") })
+        }
+        if let bank = store.accounts.first(where: { !BudgetStore.isCard($0) && $0.apart == nil }) {
+            let before = store.location
+            store.showAccount(bank.id)
+            let onCharges: Bool = { if case .charges(let filter)? = store.route.last { return filter.accountID == bank.id } else { return false } }()
+            store.back()
+            check("cards: an account that is not a card leads to its charges instead", onCharges && store.location == before && store.accountLabel(bank.id) == bank.name)
+        }
         check("cards: the cards are the accounts named for a card issuer, and their shares of card spending make a whole",
               store.cardFacts().count <= store.accounts.filter(BudgetStore.isCard).count
               && (store.cardFacts().allSatisfy { $0.spent < 0.5 } || abs(store.cardFacts().reduce(0) { $0 + $1.share } - 1) < 0.001))

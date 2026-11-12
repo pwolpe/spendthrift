@@ -53,6 +53,8 @@ struct OverviewView: View {
         if !store.missingStatements.isEmpty, !store.isImporting { missingBanner }
         AfterFirstFrame { SinceCard() }
         TidyNotice()
+        // A card with something that will not wait (worked out after the page is up; only about the present).
+        if store.overviewAsOf == nil, store.hasCards { AfterFirstFrame { CardNotice() } }
         if store.months.count > 1 { scopePicker }
         if let data = flowData {
             // The judgment that matters most comes first: did living stay within income?

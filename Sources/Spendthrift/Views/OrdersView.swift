@@ -601,8 +601,11 @@ private struct ChargeLine: View {
         if let charge = store.transactions(withIDs: [id]).first {
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Charged \(Money.format(charge.amount)) to \(charge.account) on \(charge.date.formatted(.dateTime.month(.abbreviated).day().year()))")
-                        .font(.callout)
+                    HStack(spacing: 4) {
+                        Text("Charged \(Money.format(charge.amount)) to").font(.callout)
+                        LinkText(text: store.accountLabel(charge.accountID), font: .callout, color: .primary, help: "Open \(store.accountLabel(charge.accountID))") { store.showAccount(charge.accountID) }
+                        Text("on \(charge.date.formatted(.dateTime.month(.abbreviated).day().year()))").font(.callout)
+                    }
                     Text(charge.description).font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 HStack(spacing: 8) {

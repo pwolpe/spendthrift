@@ -81,7 +81,7 @@ struct StatementsView: View {
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
                     ForEach(accounts) { a in
-                        AccountTile(name: a.name, files: files(of: .account(a.id)),
+                        AccountTile(name: store.accountLabel(a.id), files: files(of: .account(a.id)),
                                     alsoCovered: Set((a.statementMonths ?? []).compactMap { Month(key: $0) }),
                                     missing: store.missingStatements.first { $0.accountID == a.id }?.months ?? []) { open(.account(a.id)) }
                     }
@@ -108,7 +108,9 @@ struct StatementsView: View {
         let shown = search.isEmpty ? mine : mine.filter {
             $0.name.localizedCaseInsensitiveContains(search) || $0.period.localizedCaseInsensitiveContains(search) || $0.monthTitle.localizedCaseInsensitiveContains(search)
         }
-        let name: String = { if case .account(let id) = choice { return store.accounts.first { $0.id == id }?.name ?? "Account" } else { return "Other files" } }()
+        let name: String = { if case .account(let id) = choice { return store.accountLabel(id) } else { return "Other files" } }()
+        // A card's statements carry the card itself, and the way to its page.
+        let card: Account? = { if case .account(let id) = choice { return store.accounts.first { $0.id == id && BudgetStore.isCard($0) } } else { return nil } }()
         let index = mine.firstIndex { $0.id == selected }
         func go(_ offset: Int) {
             guard let index, mine.indices.contains(index + offset) else { return }
@@ -124,6 +126,11 @@ struct StatementsView: View {
                     }
                     .buttonStyle(.borderless)
                     .keyboardShortcut(.cancelAction)
+                    if let card {
+                        Button { store.showAccount(card.id) } label: { CardFace(id: card.id, name: card.name, width: 150) }
+                            .buttonStyle(.plain).help("What these statements add up to: this card's fees, credits and spending")
+                            .padding(.vertical, 4)
+                    }
                     Text(name).font(.system(size: 19, weight: .bold, design: .serif)).lineLimit(2)
                     Text(mine.count == 1 ? "1 statement" : "\(mine.count) statements")
                         .font(Theme.mono(10, .semibold)).tracking(1).foregroundStyle(.secondary).textCase(.uppercase)

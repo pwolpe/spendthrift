@@ -149,10 +149,29 @@ struct PlaceView: View {
     /// A few things worth knowing about this payee, each a sentence built from sums.
     @ViewBuilder private func facts(_ all: [Transaction]) -> some View {
         let lines = store.cached("facts|\(name)") { PayeeFacts.lines(for: all, among: store.transactions, asOf: store.transactions.last?.date ?? .now) }
-        if !lines.isEmpty {
+        // What it is paid with, over the last year (or ever, if nothing lately): each a way to that card or account.
+        let paid = store.cached("paid-with|\(name)") { () -> [PaidWith] in
+            let cutoff = (store.transactions.last?.date ?? .now).addingTimeInterval(-365 * 86_400)
+            let bought = all.filter { $0.amount > 0 }, recent = bought.filter { $0.date > cutoff }
+            let pool = recent.count >= 3 ? recent : bought
+            let total = pool.reduce(0) { $0 + $1.amount }
+            guard pool.count >= 3, total > 0 else { return [] }
+            return Dictionary(grouping: pool, by: \.accountID).map { PaidWith(id: $0.key, share: $0.value.reduce(0) { $0 + $1.amount } / total) }
+                .filter { $0.share >= 0.05 }.sorted { ($0.share, $0.id.uuidString) > ($1.share, $1.id.uuidString) }
+        }
+        if !lines.isEmpty || !paid.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(lines, id: \.self) { line in
                     Label(line, systemImage: "sparkle").font(.callout).foregroundStyle(.secondary)
+                }
+                if !paid.isEmpty {
+                    HStack(spacing: 6) {
+                        Label("Paid with", systemImage: "creditcard").font(.callout).foregroundStyle(.secondary)
+                        ForEach(Array(paid.prefix(3).enumerated()), id: \.element.id) { index, with in
+                            if index > 0 { Text("·").foregroundStyle(.tertiary) }
+                            LinkText(text: "\(store.accountLabel(with.id)) \(Int((with.share * 100).rounded()))%", help: "Open \(store.accountLabel(with.id))") { store.showAccount(with.id) }
+                        }
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -284,8 +303,8 @@ struct PlaceView: View {
                             .monospacedDigit()
                             .frame(width: 110, alignment: .leading)
                         VStack(alignment: .leading, spacing: 1) {
-                            LinkText(text: t.account, help: "Open every charge on \(t.account)") {
-                                store.showCharges(TransactionFilter(accountID: t.accountID))
+                            LinkText(text: store.accountLabel(t.accountID), help: "Open \(store.accountLabel(t.accountID))") {
+                                store.showAccount(t.accountID)
                             }
                             if let trip = store.story(containing: t.id) {
                                 Button { store.showCharges(TransactionFilter(storyID: trip.id)) } label: {
@@ -436,6 +455,12 @@ struct MaybeScroll<Content: View>: View {
     var body: some View {
         if scrolls { ScrollView { content } } else { content }
     }
+}
+
+/// An account a payee is paid with, and its part of what the payee was paid.
+struct PaidWith: Identifiable, Hashable {
+    let id: UUID
+    let share: Double
 }
 
 /// The small button at the end of a charge's row: open the original statement at this line.

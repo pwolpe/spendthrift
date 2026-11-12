@@ -14,7 +14,8 @@ extension BudgetStore {
 
     /// What the statements say about each card. Worked out once and kept until the library changes.
     func cardFacts() -> [CardEngine.Card] {
-        cached("card-facts") {
+        if let warm = cardFactsWarm, warm.revision == revision { return warm.cards }
+        return cached("card-facts") {
             guard let asOf = transactions.last?.date else { return [] }
             return CardEngine.cards(accounts.filter(Self.isCard).map { (id: $0.id, name: $0.name) }, in: transactions, asOf: asOf)
         }
@@ -83,6 +84,43 @@ extension BudgetStore {
         savedOnly()
     }
 
+    /// What to call an account wherever it is named: a card by its own name, anything else as it is.
+    func accountLabel(_ id: UUID) -> String {
+        guard let account = accounts.first(where: { $0.id == id }) else { return "Account" }
+        return Self.isCard(account) ? cardTitle(id) : account.name
+    }
+
+    /// The page for an account: a card's own page, or every charge on anything else.
+    func showAccount(_ id: UUID) {
+        if let account = accounts.first(where: { $0.id == id }), Self.isCard(account), cardFacts().contains(where: { $0.id == id }) { showCard(id) }
+        else { showCharges(TransactionFilter(accountID: id)) }
+    }
+
+    /// The statements of one account, newest first.
+    func statements(of account: UUID) -> [SourceFile] {
+        sourceFiles.filter { $0.accountID == account }.sorted { ($0.lastDate ?? "") > ($1.lastDate ?? "") }
+    }
+
+    /// Works the card facts out on another thread, so the Overview can mention a card without the
+    /// main thread paying for it. The Cards pages then find them ready.
+    func warmCardFacts() async {
+        guard cardFactsWarm?.revision != revision, let asOf = transactions.last?.date else { return }
+        let at = revision, all = transactions, cards = accounts.filter(Self.isCard).map { (id: $0.id, name: $0.name) }
+        let made = await Task.detached(priority: .utility) { CardEngine.cards(cards, in: all, asOf: asOf) }.value
+        guard at == revision else { return }
+        cardFactsWarm = (at, made)
+        readsChecked += 1
+    }
+
+    /// The one card thing most worth a look right now, for the Overview: a credit not yet come with
+    /// the stretch running out, a purchase that went on the wrong card, a fee about to come round.
+    /// Nil until the facts have been worked out in the background: it never makes the main thread do it.
+    func cardNudge() -> (card: CardEngine.Card, finding: CardEngine.Finding)? {
+        guard let warm = cardFactsWarm, warm.revision == revision else { return nil }
+        return warm.cards.flatMap { card in card.findings.filter { [.waiting, .wrongCard, .feeDue].contains($0.kind) }.map { (card: card, finding: $0) } }
+            .max { ($0.finding.weight, $1.card.name) < ($1.finding.weight, $0.card.name) }
+    }
+
     func showCard(_ id: UUID) {
         navigate { if route.last != .card(id) { route.append(.card(id)) } }
     }
@@ -94,18 +132,20 @@ extension BudgetStore {
 /// what the statements call it (a "Platinum" credit makes it silver, "Gold" gold); otherwise from
 /// its name, so each card keeps its own look. Pointed at, it tilts and catches the light.
 struct CardFace: View {
-    let card: CardEngine.Card
+    /// The card's account, and the account's own name ("Chase ••1234").
+    let id: UUID
+    let name: String
     var width: CGFloat = 250
     @State private var pointed = false
     private var store: BudgetStore { .shared }
 
-    private var issuer: String { card.name.components(separatedBy: "••").first?.trimmingCharacters(in: .whitespaces) ?? card.name }
-    private var digits: String { card.name.components(separatedBy: "••").dropFirst().first.map { String($0.prefix(4)) } ?? "" }
+    private var issuer: String { name.components(separatedBy: "••").first?.trimmingCharacters(in: .whitespaces) ?? name }
+    private var digits: String { name.components(separatedBy: "••").dropFirst().first.map { String($0.prefix(4)) } ?? "" }
 
     var body: some View {
         let _ = store.readsChecked
-        let product = store.cardProduct(card.id)
-        let look = product?.look ?? CardCatalog.look(forUnknown: card.name, issuer: BudgetStore.issuer(in: card.name))
+        let product = store.cardProduct(id)
+        let look = product?.look ?? CardCatalog.look(forUnknown: name, issuer: BudgetStore.issuer(in: name))
         let ink: Color = look.darkInk ? Color(red: 0.16, green: 0.17, blue: 0.2) : .white
         let height = width / 1.586, shape = RoundedRectangle(cornerRadius: width * 0.055, style: .continuous)
         // A framed card (the charge-card look) carries its issuer across the top, centred; the others, their own name top left.
@@ -257,7 +297,7 @@ struct CardsView: View {
         Button { store.showCard(card.id) } label: {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top) {
-                    CardFace(card: card, width: 190)
+                    CardFace(id: card.id, name: card.name, width: 190)
                     Spacer(minLength: 8)
                     VerdictStamp(card: card).padding(.top, 6)
                 }
@@ -339,6 +379,7 @@ struct CardPage: View {
                     if !card.benefits.isEmpty { credits(card) }
                     costs(card)
                     carries(card)
+                    papers(card)
                     Text("Read from this card's statements and nothing else. Points, lounges and anything that never appears on a statement are not counted; a credit is known only once it has landed here.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
@@ -354,7 +395,7 @@ struct CardPage: View {
 
     private func head(_ card: CardEngine.Card) -> some View {
         HStack(alignment: .center, spacing: 26) {
-            CardFace(card: card, width: 280)
+            CardFace(id: card.id, name: card.name, width: 280)
             VStack(alignment: .leading, spacing: 10) {
                 let _ = store.readsChecked
                 Text(store.cardTitle(card.id)).font(.system(size: 28, weight: .bold, design: .serif))
@@ -453,6 +494,36 @@ struct CardPage: View {
                     ReceiptLine(value: Money.format(card.interest), valueColor: Theme.spent, help: "See these charges",
                                 action: { store.showCharges(TransactionFilter(ids: card.interestIDs, title: "Interest and other charges on \(card.name)")) }) {
                         Text("Interest and other charges, last 12 months").font(.callout)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Its statements
+
+    /// The paper behind all of this: the last year of statements as a row of sheets, each one a
+    /// click from the original, with a gap where a month is missing.
+    @ViewBuilder private func papers(_ card: CardEngine.Card) -> some View {
+        let all = store.statements(of: card.id)
+        if let newest = all.first {
+            let latest = Month(isoDay: newest.lastDate ?? "") ?? Month(date: card.last)
+            let months = (0..<12).reversed().map { latest.adding(-$0) }
+            let missing = Set(store.missingStatements.first { $0.accountID == card.id }?.months ?? [])
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline) {
+                        SectionHeader(title: "Where this comes from", subtitle: "\(all.count) \(all.count == 1 ? "statement" : "statements"), exactly as the bank sent them")
+                        Spacer()
+                        Button("All Its Statements") { store.browse(newest) }.buttonStyle(.borderless).font(.callout)
+                            .help("Browse every statement of this card")
+                    }
+                    HStack(alignment: .bottom, spacing: 8) {
+                        ForEach(months) { month in
+                            let sheet = all.first { ($0.lastDate.flatMap { Month(isoDay: $0) }) == month } ?? all.first { $0.monthsCovered.contains(month) }
+                            Sheet(month: month, source: sheet, missing: sheet == nil && missing.contains(month))
+                        }
+                        Spacer(minLength: 0)
                     }
                 }
             }
@@ -569,9 +640,13 @@ private struct BenefitRow: View {
                 }
                 Spacer(minLength: 0)
             }
-            Text(benefit.uses.first(where: { $0.id == pointed }).map(about)
-                 ?? ((benefit.uses.count > 1 ? "\(span). " : "") + (benefit.shops.first.map { "For \($0)." } ?? "")))
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            HStack(spacing: 4) {
+                Text(benefit.uses.first(where: { $0.id == pointed }).map(about) ?? (benefit.uses.count > 1 ? "\(span)." : " "))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if pointed == nil, let shop = benefit.shops.first {
+                    LinkText(text: "For \(shop)", font: .caption, help: "Open \(shop): every charge, on every card") { store.showPlace(shop) }
+                }
+            }
         }
     }
 }
@@ -598,5 +673,97 @@ private struct Pip: View {
         }
         .frame(width: 18, height: 18)
         .contentShape(Circle())
+    }
+}
+
+/// One month's statement as a small sheet of paper with a folded corner. Click it for the original.
+private struct Sheet: View {
+    let month: Month
+    let source: SourceFile?
+    let missing: Bool
+    @State private var pointed = false
+    private var store: BudgetStore { .shared }
+    /// The printed lines on the sheet: a heading and four rows.
+    private static let rules: [CGFloat] = [16, 22, 28, 18, 24]
+    /// "Nov", and the year with it each January.
+    private var label: String { String(month.name.prefix(3)) + (month.month == 1 ? " ’" + String(month.year % 100) : "") }
+
+    var body: some View {
+        let page = UnevenRoundedRectangle(topLeadingRadius: 3, bottomLeadingRadius: 3, bottomTrailingRadius: 3, topTrailingRadius: 10, style: .continuous)
+        Button { if let source { store.browse(source) } else if missing { store.go(to: .accounts) } } label: {
+            VStack(spacing: 5) {
+                ZStack {
+                    if source != nil {
+                        page.fill(Color(red: 0.99, green: 0.98, blue: 0.95))
+                        // A few printed lines.
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(Self.rules.enumerated()), id: \.offset) { i, wide in
+                                Capsule().fill(Color.black.opacity(i == 0 ? 0.3 : 0.13)).frame(width: wide, height: 2)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(.leading, 7).padding(.top, 11)
+                        if source?.check == "verified" {
+                            Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).foregroundStyle(Theme.good)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(4)
+                        }
+                        page.strokeBorder(Color.black.opacity(0.12))
+                    } else {
+                        page.strokeBorder(missing ? Theme.caution : Color.primary.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                        if missing { Image(systemName: "questionmark").font(.caption.weight(.bold)).foregroundStyle(Theme.caution) }
+                    }
+                }
+                .frame(width: 44, height: 56)
+                .shadow(color: .black.opacity(source != nil ? (pointed ? 0.25 : 0.12) : 0), radius: pointed ? 6 : 2, y: pointed ? 4 : 1)
+                .offset(y: pointed && source != nil ? -4 : 0)
+                .rotationEffect(.degrees(pointed && source != nil ? -2 : 0))
+                Text(label).font(.caption2).foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(source == nil && !missing)
+        .onHover { inside in withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) { pointed = inside } }
+        .help(source.map { "Open the \($0.monthTitle) statement" + ($0.check == "verified" ? ": its lines add up to the totals it prints" : "") }
+              ?? (missing ? "The \(month.title) statement seems to be missing. Open Setup to see what to add." : "No statement ending in \(month.title)"))
+        .accessibilityLabel(source.map { "\($0.monthTitle) statement" } ?? "No \(month.title) statement")
+    }
+}
+
+/// One line on the Overview when a card has something that will not wait: a credit not yet come as
+/// its stretch runs out, a fee about to come round.
+struct CardNotice: View {
+    private var store: BudgetStore { .shared }
+
+    var body: some View {
+        let _ = store.readsChecked
+        // A stack, so the working-out below has something to hang on while there is nothing to show.
+        VStack(spacing: 0) { notice }
+            .task(id: store.revision) {
+                try? await Task.sleep(for: .seconds(1.2))
+                guard !Task.isCancelled else { return }
+                await store.warmCardFacts()
+            }
+    }
+
+    @ViewBuilder private var notice: some View {
+        if let nudge = store.cardNudge() {
+            Button { store.go(to: .cards) { store.route = [.card(nudge.card.id)] } } label: {
+                HStack(spacing: 12) {
+                    CardFace(id: nudge.card.id, name: nudge.card.name, width: 54).allowsHitTesting(false)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(store.cardTitle(nudge.card.id)).font(.callout.weight(.semibold))
+                        Text(nudge.finding.text).font(.callout).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(Theme.caution.opacity(0.08), in: .rect(cornerRadius: 12, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Open this card")
+            .transition(.opacity)
+        }
     }
 }
