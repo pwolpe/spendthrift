@@ -130,7 +130,7 @@ extension BudgetStore {
         switch location.route.last {
         case .place(let name)?: return name
         case .charges(let filter)?: return filter.title ?? filter.category?.displayName ?? "Charges"
-        case .card(let id)?: return accounts.first { $0.id == id }?.name ?? "Card"
+        case .card(let id)?: return cardTitle(id)
         case nil: break
         }
         if let detail = location.detail { return detail.title }
@@ -143,7 +143,7 @@ extension BudgetStore {
         switch route.last {
         case .place(let name)?: return "the page for one payee, \(name)"
         case .charges(let filter)?: return "a list of charges" + (filter.title.map { ": \($0)" } ?? "")
-        case .card(let id)?: return "the page for one credit card, \(accounts.first { $0.id == id }?.name ?? "a card"): its yearly fees, the statement credits it has paid, and what was bought on it"
+        case .card(let id)?: return "the page for one credit card, \(cardTitle(id)): its yearly fees, the statement credits it has paid, and what was bought on it"
         case nil: break
         }
         switch selection ?? .overview {

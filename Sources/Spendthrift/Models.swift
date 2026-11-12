@@ -308,6 +308,13 @@ struct Account: Codable, Identifiable, Hashable {
     /// trust): what to call it ("Mom"). Its statements are kept and it can be followed on its own
     /// page, but nothing in it counts toward the person's own spending, income or investing.
     var apart: String?
+    /// For a credit card: which card it is ("Chase Sapphire Reserve"), worked out from its statements
+    /// or chosen by the person. "" = looked, could not tell.
+    var product: String?
+    /// True when the person chose it: never changed by the app again.
+    var productByHand: Bool?
+    /// How many statements this account had when the app last looked, so it looks again only when more arrive.
+    var productLooked: Int?
 
     init(name: String, signature: String) { self.name = name; self.signature = signature }
 
@@ -321,6 +328,9 @@ struct Account: Codable, Identifiable, Hashable {
         statementMonths = try? c.decodeIfPresent(Set<String>.self, forKey: .statementMonths)
         formerSignatures = try? c.decodeIfPresent([String].self, forKey: .formerSignatures)
         apart = try? c.decodeIfPresent(String.self, forKey: .apart)
+        product = try? c.decodeIfPresent(String.self, forKey: .product)
+        productByHand = try? c.decodeIfPresent(Bool.self, forKey: .productByHand)
+        productLooked = try? c.decodeIfPresent(Int.self, forKey: .productLooked)
     }
 }
 

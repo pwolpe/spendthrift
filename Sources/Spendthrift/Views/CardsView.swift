@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import PDFKit
 
 extension BudgetStore {
     /// An account that is a credit card: named for a card issuer, and not a checking or savings account.
@@ -19,6 +20,65 @@ extension BudgetStore {
         }
     }
 
+    /// The card as it is in the catalogue, when the app or the person has said which it is.
+    func cardProduct(_ id: UUID) -> CardCatalog.Product? {
+        CardCatalog.product(titled: accounts.first { $0.id == id }?.product)
+    }
+
+    /// What to call a card: "Chase Sapphire Reserve ••4090" once it is known, else the account's own name.
+    func cardTitle(_ id: UUID) -> String {
+        guard let account = accounts.first(where: { $0.id == id }) else { return "Card" }
+        guard let product = account.product, !product.isEmpty else { return account.name }
+        let digits = account.name.components(separatedBy: "••").dropFirst().first.map { " ••" + $0 } ?? ""
+        return product + digits
+    }
+
+    /// The person says which card this is (nil: none of the ones on offer).
+    func setCardProduct(_ title: String?, for id: UUID) {
+        guard let index = library.accounts.firstIndex(where: { $0.id == id }) else { return }
+        library.accounts[index].product = title ?? ""
+        library.accounts[index].productByHand = true
+        readsChecked += 1
+        savedOnly()
+    }
+
+    /// Works out which card each card account is, from its own statements: the name they print, the
+    /// yearly fees charged, the names of its credits. Read once per account, again only when new
+    /// statements arrive, and never over a choice the person made. Nothing leaves the Mac.
+    func learnCardProducts() async {
+        let sources = library.sources ?? []
+        var asked: [(index: Int, issuer: String, files: [URL], fees: [Double], words: String, count: Int)] = []
+        for (index, account) in library.accounts.enumerated() where Self.isCard(account) && account.productByHand != true {
+            let mine = sources.filter { $0.accountID == account.id }
+            guard !mine.isEmpty, account.productLooked != mine.count, account.product?.isEmpty != false || account.productLooked == nil,
+                  let issuer = Self.issuer(in: account.name) else { continue }
+            let pdfs = mine.filter(\.isPDF).sorted { ($0.lastDate ?? "") > ($1.lastDate ?? "") }.prefix(2).map { paths.statementFile($0) }
+            var fees: [Double] = [], words: Set<String> = []
+            for entry in library.entries where entry.accountID == account.id {
+                if entry.amount > 0, CardEngine.annualFee(entry.description).isFee { fees.append(entry.amount) }
+                if entry.amount < 0, let credit = CardEngine.benefitName(entry.description) { words.insert(credit) }
+            }
+            asked.append((index, issuer, Array(pdfs), fees, words.joined(separator: " "), mine.count))
+        }
+        guard !asked.isEmpty else { return }
+        let jobs = asked.map { (files: $0.files, issuer: $0.issuer, fees: $0.fees, words: $0.words) }
+        let found: [(title: String?, read: Bool)] = await Task.detached(priority: .utility) {
+            jobs.map { job in
+                // The first two pages of the newest statements are where a card names itself.
+                let text = job.files.compactMap { PDFDocument(url: $0) }.filter { !$0.isLocked }
+                    .flatMap { doc in (0..<min(2, doc.pageCount)).compactMap { doc.page(at: $0)?.string } }.joined(separator: "\n")
+                return (CardCatalog.find(issuer: job.issuer, statementText: text, fees: job.fees, lineWords: job.words)?.title, !text.isEmpty || job.files.isEmpty)
+            }
+        }.value
+        for (ask, answer) in zip(asked, found) where library.accounts.indices.contains(ask.index) && library.accounts[ask.index].productByHand != true {
+            library.accounts[ask.index].product = answer.title ?? ""
+            // A statement that could not be opened is not a look: try again next time.
+            if answer.title != nil || answer.read { library.accounts[ask.index].productLooked = ask.count }
+        }
+        readsChecked += 1
+        savedOnly()
+    }
+
     func showCard(_ id: UUID) {
         navigate { if route.last != .card(id) { route.append(.card(id)) } }
     }
@@ -33,35 +93,38 @@ struct CardFace: View {
     let card: CardEngine.Card
     var width: CGFloat = 250
     @State private var pointed = false
+    private var store: BudgetStore { .shared }
 
     private var issuer: String { card.name.components(separatedBy: "••").first?.trimmingCharacters(in: .whitespaces) ?? card.name }
     private var digits: String { card.name.components(separatedBy: "••").dropFirst().first.map { String($0.prefix(4)) } ?? "" }
 
-    /// Two colours for the face, and whether dark ink reads on them.
-    private var metal: (top: Color, bottom: Color, darkInk: Bool) {
-        let words = card.benefits.map { $0.name.lowercased() }.joined(separator: " ")
-        if words.contains("platinum") { return (Color(red: 0.86, green: 0.87, blue: 0.89), Color(red: 0.58, green: 0.61, blue: 0.66), true) }
-        if words.contains("gold") { return (Color(red: 0.93, green: 0.80, blue: 0.47), Color(red: 0.70, green: 0.54, blue: 0.20), true) }
-        // A steady colour from the name: the same card is always the same card.
-        let seed = card.name.unicodeScalars.reduce(UInt32(7)) { ($0 &* 31) &+ $1.value }
-        let hue = Double(seed % 360) / 360
-        return (Color(hue: hue, saturation: 0.55, brightness: 0.52), Color(hue: (hue + 0.06).truncatingRemainder(dividingBy: 1), saturation: 0.7, brightness: 0.26), false)
-    }
-
     var body: some View {
-        let metal = metal, ink: Color = metal.darkInk ? Color(red: 0.16, green: 0.17, blue: 0.2) : .white
+        let _ = store.readsChecked
+        let product = store.cardProduct(card.id)
+        let look = product?.look ?? CardCatalog.look(forUnknown: card.name, issuer: BudgetStore.issuer(in: card.name))
+        let ink: Color = look.darkInk ? Color(red: 0.16, green: 0.17, blue: 0.2) : .white
         let height = width / 1.586, shape = RoundedRectangle(cornerRadius: width * 0.055, style: .continuous)
+        // A framed card (the charge-card look) carries its issuer across the top, centred; the others, their own name top left.
+        let framed = look.pattern == .frame
         ZStack(alignment: .topLeading) {
-            shape.fill(LinearGradient(colors: [metal.top, metal.bottom], startPoint: .topLeading, endPoint: .bottomTrailing))
+            shape.fill(LinearGradient(colors: [look.top, look.bottom], startPoint: .topLeading, endPoint: .bottomTrailing))
+            CardPattern(look: look).clipShape(shape)
             // The light that slides across when the card is tilted.
             shape.fill(LinearGradient(colors: [.white.opacity(0), .white.opacity(0.35), .white.opacity(0)], startPoint: .topLeading, endPoint: .bottomTrailing))
                 .mask { Rectangle().frame(width: width * 0.35).rotationEffect(.degrees(20)).offset(x: pointed ? width * 0.75 : -width * 0.75) }
                 .clipShape(shape)
             VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top) {
-                    Text(issuer).font(.system(size: width * 0.068, weight: .bold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.6)
-                    Spacer(minLength: 4)
-                    Image(systemName: "wave.3.right").font(.system(size: width * 0.06, weight: .semibold)).opacity(0.7)
+                if framed {
+                    Text(issuer.uppercased()).font(.system(size: width * 0.05, weight: .semibold)).tracking(width * 0.012)
+                        .lineLimit(1).minimumScaleFactor(0.6).frame(maxWidth: .infinity)
+                } else {
+                    HStack(alignment: .top) {
+                        Text(product.map { $0.face.isEmpty ? "" : $0.face } ?? issuer)
+                            .font(.system(size: width * (product == nil ? 0.068 : 0.05), weight: product == nil ? .bold : .semibold, design: product == nil ? .rounded : .default))
+                            .tracking(product == nil ? 0 : width * 0.01).lineLimit(1).minimumScaleFactor(0.6)
+                        Spacer(minLength: 4)
+                        Image(systemName: "wave.3.right").font(.system(size: width * 0.06, weight: .semibold)).opacity(0.7)
+                    }
                 }
                 Spacer(minLength: 0)
                 // The chip.
@@ -70,12 +133,20 @@ struct CardFace: View {
                     .frame(width: width * 0.13, height: width * 0.1)
                     .overlay { VStack(spacing: width * 0.022) { ForEach(0..<3, id: \.self) { _ in Rectangle().fill(.black.opacity(0.18)).frame(height: 0.7) } }.padding(.horizontal, 3) }
                 Spacer(minLength: 0)
-                Text(digits.isEmpty ? "••••  ••••  ••••" : "••••  ••••  ••••  \(digits)")
-                    .font(.system(size: width * 0.064, weight: .medium, design: .monospaced)).tracking(0.5).lineLimit(1).minimumScaleFactor(0.6)
-                    .shadow(color: .black.opacity(metal.darkInk ? 0 : 0.35), radius: 0.5, y: 0.5)
+                HStack(alignment: .lastTextBaseline) {
+                    Text(digits.isEmpty ? "••••" : "••••  \(digits)")
+                        .font(.system(size: width * 0.064, weight: .medium, design: .monospaced)).tracking(0.5).lineLimit(1).minimumScaleFactor(0.6)
+                        .shadow(color: .black.opacity(look.darkInk ? 0 : 0.35), radius: 0.5, y: 0.5)
+                    Spacer(minLength: 4)
+                    // The issuer in the corner once the card's own name has taken the top; the card's name there on a framed one.
+                    if let product {
+                        Text(framed ? product.face : issuer.uppercased()).font(.system(size: width * 0.04, weight: .bold)).tracking(width * 0.006)
+                            .lineLimit(1).minimumScaleFactor(0.5).opacity(0.85)
+                    }
+                }
             }
             .foregroundStyle(ink)
-            .padding(width * 0.07)
+            .padding(width * (framed ? 0.095 : 0.07))
         }
         .frame(width: width, height: height)
         .overlay { shape.strokeBorder(.white.opacity(0.25), lineWidth: 0.75) }
@@ -124,6 +195,7 @@ struct CardsView: View {
 
     var body: some View {
         let cards = store.cardFacts()
+        let _ = store.readsChecked
         MaybeScroll(scrolls: scrolls) {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -181,6 +253,7 @@ struct CardsView: View {
                     Spacer(minLength: 8)
                     VerdictStamp(card: card).padding(.top, 6)
                 }
+                Text(store.cardTitle(card.id)).font(.headline).lineLimit(1)
                 HStack(alignment: .top, spacing: 22) {
                     Figure(title: "Fees", amount: card.feesPaid)
                     Figure(title: "Credits back", amount: card.creditsBack, color: card.creditsBack > 0.5 ? Theme.good : .primary)
@@ -198,7 +271,7 @@ struct CardsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Open \(card.name)")
+        .help("Open \(store.cardTitle(card.id))")
     }
 }
 
@@ -230,7 +303,7 @@ private struct FindingRow: View {
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Image(systemName: symbol.name).foregroundStyle(symbol.color).frame(width: 22)
-                (Text(namesCard ? "\(card.name).  " : "").fontWeight(.semibold) + Text(finding.text))
+                (Text(namesCard ? "\(store.cardTitle(card.id)).  " : "").fontWeight(.semibold) + Text(finding.text))
                     .font(.callout).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 6)
                 if namesCard || !finding.charges.isEmpty { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary) }
@@ -275,7 +348,21 @@ struct CardPage: View {
         HStack(alignment: .center, spacing: 26) {
             CardFace(card: card, width: 280)
             VStack(alignment: .leading, spacing: 10) {
-                Text(card.name).font(.system(size: 28, weight: .bold, design: .serif))
+                let _ = store.readsChecked
+                Text(store.cardTitle(card.id)).font(.system(size: 28, weight: .bold, design: .serif))
+                    .lineLimit(2).minimumScaleFactor(0.7)
+                HStack(spacing: 10) {
+                    Text(whichCardNote(card)).font(.callout).foregroundStyle(.secondary)
+                    Menu("Not this card?") {
+                        ForEach(CardCatalog.products.filter { $0.issuer == BudgetStore.issuer(in: card.name) }) { product in
+                            Button(product.title) { store.setCardProduct(product.title, for: card.id) }
+                        }
+                        Divider()
+                        Button("None of these") { store.setCardProduct(nil, for: card.id) }
+                    }
+                    .menuStyle(.borderlessButton).fixedSize().font(.callout)
+                    .help("Choose which card this is; the app will not change it again")
+                }
                 Text("On file from \(card.first.formatted(.dateTime.month(.wide).year())) to \(card.last.formatted(.dateTime.month(.wide).year()))")
                     .font(.callout).foregroundStyle(.secondary)
                 HStack(alignment: .top, spacing: 26) {
@@ -288,6 +375,14 @@ struct CardPage: View {
             }
             Spacer(minLength: 0)
         }
+    }
+
+    /// How the app came to call the card what it does.
+    private func whichCardNote(_ card: CardEngine.Card) -> String {
+        guard let account = store.accounts.first(where: { $0.id == card.id }) else { return "" }
+        if account.productByHand == true { return account.product?.isEmpty == false ? "You said which card this is." : "" }
+        if account.product?.isEmpty == false { return "Named from its own statements." }
+        return "Its statements do not say which card this is."
     }
 
     private func knowing(_ card: CardEngine.Card) -> some View {

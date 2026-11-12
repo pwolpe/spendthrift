@@ -361,7 +361,11 @@ enum DebugHooks {
                     EditableName(text: .constant("Pastis"), font: .system(size: 19, weight: .bold, design: .serif), centered: true, commit: {}).frame(maxWidth: .infinity)
                 }.padding(24)
             }
+            await store.learnCardProducts()
             let cards = store.cardFacts()
+            for account in store.accounts where BudgetStore.isCard(account) {
+                print("CARDNAME \(account.name.components(separatedBy: "••").first ?? "")-> \(account.product ?? "(not looked)")")
+            }
             if !cards.isEmpty {
                 await snap("47-cards", outDir) { CardsView(scrolls: false) }
                 for (n, card) in cards.filter({ !$0.benefits.isEmpty }).prefix(3).enumerated() { await snap("47-card-\(n + 1)", outDir) { CardPage(id: card.id, scrolls: false) } }

@@ -168,6 +168,12 @@ struct ContentView: View {
             store.recapIfNewMonth()
             await store.catchUp()
         }
+        // Which card each card is, read from its own statements (nothing is sent anywhere).
+        .task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await store.learnCardProducts()
+        }
         // Long after the opening: a fresh picture for the Ask pane, seen the next time the app opens.
         .task {
             try? await Task.sleep(for: .seconds(20))

@@ -578,6 +578,14 @@ enum SelfTest {
             check("cards: a yearly fee is told from other lines, and names the other cardholder when the line does",
                   CardEngine.annualFee("ANNUAL MEMBERSHIP FEE").isFee && CardEngine.annualFee("ANNUAL MEMBERSHIP FEE").who == nil
                   && CardEngine.annualFee("JANE Q ROE ANNUAL MEMBERSHIP FEE").who == "Jane" && !CardEngine.annualFee("LATE FEE").isFee)
+            check("cards: a card is named by what its statement prints, or by a fee only one of the issuer's cards charges; never on a guess",
+                  CardCatalog.find(issuer: "Citi", statementText: "Your Double Cash Card statement", fees: [], lineWords: "")?.title == "Citi Double Cash"
+                  && CardCatalog.find(issuer: "Chase", statementText: "we reserve the right. Ultimate Rewards summary", fees: [550, 795], lineWords: "Travel Credit")?.title == "Chase Sapphire Reserve"
+                  && CardCatalog.find(issuer: "Chase", statementText: "we reserve the right", fees: [], lineWords: "") == nil
+                  && CardCatalog.find(issuer: "Capital One", statementText: "Venture X Rewards", fees: [395], lineWords: "")?.title == "Capital One Venture X"
+                  && CardCatalog.find(issuer: "Chase", statementText: "double cash", fees: [], lineWords: "") == nil)
+            check("cards: every card in the catalogue has an issuer the app knows, and its own name",
+                  CardCatalog.products.allSatisfy { product in BudgetStore.issuers.contains { $0.name == product.issuer } } && Set(CardCatalog.products.map(\.title)).count == CardCatalog.products.count)
             let card = UUID(), other = UUID()
             func line(_ day: String, _ amount: Double, _ text: String, payee: String, on account: UUID, category: Category = .shopping) -> Transaction {
                 let date = DateParsing.isoDay(day)!
