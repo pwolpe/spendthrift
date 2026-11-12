@@ -170,6 +170,7 @@ enum DebugHooks {
         if let wanted = env["SPENDTHRIFT_TRIPPIC"] {
             if let story = store.stories.first(where: { $0.name.localizedCaseInsensitiveContains(wanted) }) {
                 await TripPictures.shared.ensure(story, store: store)
+                if let why = TripPictures.shared.failed[story.fingerprint] { print("TRIPPIC failed: \(why)") }
                 print("TRIPPIC \(story.name): \(TripPictures.shared.kept[story.fingerprint].map { "\($0.file) | \($0.merchant) \($0.amount) | \($0.caption)" } ?? "nothing drawn")")
             } else { print("TRIPPIC no trip named \(wanted)") }
             NSApp.terminate(nil); return

@@ -484,7 +484,8 @@ final class TripPictures {
 
     private(set) var kept: [String: Kept] = [:]
     private(set) var drawing: Set<String> = []
-    @ObservationIgnored private var failed: Set<String> = []
+    /// Trips whose picture could not be drawn this sitting, and at which step: said on the page, with a way to try again.
+    private(set) var failed: [String: String] = [:]
     @ObservationIgnored private var images: [String: NSImage] = [:]
 
     private let folder: URL = {
@@ -508,10 +509,17 @@ final class TripPictures {
 
     func isDrawing(_ story: Story) -> Bool { drawing.contains(story.fingerprint) }
 
+    /// Starts the drawing on its own: it takes half a minute, and leaving the page must not stop it
+    /// (a drawing stopped halfway used to count as a failure, and the picture never came).
+    func begin(_ story: Story, store: BudgetStore, again: Bool = false) {
+        if again { failed[story.fingerprint] = nil }
+        Task { await ensure(story, store: store) }
+    }
+
     /// Draws this trip's picture if it has none. Safe to call every time the trip is opened.
     func ensure(_ story: Story, store: BudgetStore) async {
         let key = story.fingerprint
-        guard CloudAI.isEnabled, kept[key] == nil, !drawing.contains(key), !failed.contains(key), let tony = DailyPicture.photo else { return }
+        guard CloudAI.isEnabled, kept[key] == nil, !drawing.contains(key), failed[key] == nil, let tony = DailyPicture.photo else { return }
         // The charge to put on the receipt: the biggest at a place with a name.
         let dull = ["withdrawal", "atm", "fee", "payment", "transfer", "unknown", "airlines", "airways"]
         let charges = store.transactions(in: story).filter { t in t.amount >= 5 && !t.isTransfer && !dull.contains { t.merchant.lowercased().contains($0) } }
@@ -530,7 +538,7 @@ final class TripPictures {
         async let planned = CloudImage.scene(merchant: pick.merchant, category: pick.category.displayName, amount: pick.amount,
                                              cast: cast.map(\.name), trip: story.name, tripPlace: story.place)
         let model = await chosen
-        guard let scene = await planned else { failed.insert(key); return }
+        guard let scene = await planned else { failed[key] = "the scene could not be thought up"; return }
         let style = CloudImage.styles.randomElement()!
         let receipt = CloudImage.Receipt(merchant: pick.merchant, what: scene.what, total: Money.format(pick.amount))
         var best: Data?, bestMarks = Int.min
@@ -541,9 +549,9 @@ final class TripPictures {
             if marks > bestMarks { best = candidate; bestMarks = marks }
             if bestMarks >= 4 { break }
         }
-        guard let best, let image = NSImage(data: best) else { failed.insert(key); return }
+        guard let best, let image = NSImage(data: best) else { failed[key] = "the picture did not come back"; return }
         let file = "trip-\(Int(Date.now.timeIntervalSince1970)).png"
-        guard (try? best.write(to: folder.appendingPathComponent(file))) != nil else { return }
+        guard (try? best.write(to: folder.appendingPathComponent(file))) != nil else { failed[key] = "the picture could not be saved"; return }
         images[key] = image
         withAnimation(.easeInOut(duration: 0.4)) {
             kept[key] = Kept(file: file, caption: scene.caption, merchant: pick.merchant, amount: pick.amount, date: DateParsing.iso.string(from: pick.date))
@@ -579,6 +587,17 @@ struct TripPictureCard: View {
                     .font(.callout).foregroundStyle(.secondary)
                 }
                 .transition(.opacity)
+            } else if let why = pictures.failed[story.fingerprint] {
+                HStack(spacing: 10) {
+                    Image(systemName: "paintbrush").foregroundStyle(.secondary)
+                    Text("No picture this time: \(why).").font(.callout).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button("Try Again") { pictures.begin(story, store: .shared, again: true) }.controlSize(.small)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.sheet, in: .rect(cornerRadius: 11, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.hairline) }
             } else if pictures.isDrawing(story) {
                 HStack(spacing: 10) {
                     ProgressView().controlSize(.small)
@@ -590,6 +609,6 @@ struct TripPictureCard: View {
                 .overlay { RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.hairline) }
             }
         }
-        .task(id: story.fingerprint) { await pictures.ensure(story, store: .shared) }
+        .task(id: story.fingerprint) { pictures.begin(story, store: .shared) }
     }
 }
