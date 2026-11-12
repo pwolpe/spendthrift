@@ -49,7 +49,7 @@ struct OrderShelf: View {
     let things: [OrderHabits.Bought]
     let about: String
     @State private var pointed: Int?
-    @State private var width: CGFloat = 880
+    @State private var width: CGFloat = 480
     private var pictures: ProductImages { .shared }
     private var store: BudgetStore { .shared }
 
@@ -86,22 +86,29 @@ struct OrderShelf: View {
             let top = pictured.first?.cents ?? 1
             VStack(alignment: .leading, spacing: 10) {
                 Text("WHAT ARRIVED").font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(Self.ink.opacity(0.55))
-                // Each shelf is as tall as the tallest thing on it. (The width is measured behind the
-                // shelves, so their height can follow from what is on them.)
-                VStack(alignment: .leading, spacing: 18) {
-                    ForEach(Array(shelves(pictured, width: width, top: top).enumerated()), id: \.offset) { _, row in
-                        VStack(spacing: 0) {
-                            HStack(alignment: .bottom, spacing: Self.gap) {
-                                ForEach(row) { thing in item(thing, size: size(thing, top: top)) }
-                                Spacer(minLength: 0)
+                // The shelves are laid over a blank of the right height, so they can never push the page
+                // wider than the window: the blank takes the width it is given, that width is measured,
+                // and the shelves are filled to fit it. (Measuring the shelves themselves let a row that
+                // was too wide hold the whole window open, cutting off the sidebar and the Ask pane.)
+                let rows = shelves(pictured, width: width, top: top)
+                let height = rows.reduce(CGFloat(0)) { $0 + ($1.map { size($0, top: top) }.max() ?? 0) + 26 + 10 } + CGFloat(max(rows.count - 1, 0)) * 18
+                Color.clear
+                    .frame(maxWidth: .infinity).frame(height: height)
+                    .background { GeometryReader { geo in Color.clear.onAppear { width = geo.size.width - 20 }.onChange(of: geo.size.width) { width = geo.size.width - 20 } } }
+                    .overlay(alignment: .topLeading) {
+                        VStack(alignment: .leading, spacing: 18) {
+                            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                                VStack(spacing: 0) {
+                                    HStack(alignment: .bottom, spacing: Self.gap) {
+                                        ForEach(row) { thing in item(thing, size: size(thing, top: top)) }
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.horizontal, 10).padding(.top, 26)
+                                    plank
+                                }
                             }
-                            .padding(.horizontal, 10).padding(.top, 26)
-                            plank
                         }
                     }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background { GeometryReader { geo in Color.clear.onAppear { width = geo.size.width - 20 }.onChange(of: geo.size.width) { width = geo.size.width - 20 } } }
                 Group {
                     if let thing = pictured.first(where: { $0.id == pointed }) {
                         Text("\(thing.name) · \(thing.date.formatted(.dateTime.month(.abbreviated).day().year()))").foregroundStyle(Self.ink)
@@ -110,6 +117,7 @@ struct OrderShelf: View {
                     }
                 }
                 .font(.callout).lineLimit(1).padding(.top, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(18)
             .background(Self.wall, in: .rect(cornerRadius: 16, style: .continuous))
