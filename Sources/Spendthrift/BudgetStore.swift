@@ -172,6 +172,8 @@ final class BudgetStore {
     /// True while payees are being compared for tidying.
     var isTidying = false
     @ObservationIgnored var isLearningFacts = false
+    /// True once "since you last looked" has been put away for this sitting.
+    var sinceDismissed = false
     @ObservationIgnored var isGuessing = false
     var isFindingDiscoveries = false
     /// Calendar years being read right now.
@@ -205,7 +207,7 @@ final class BudgetStore {
         }
         refreshDownloads()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { BudgetStore.shared.saveNow(); BudgetStore.shared.saveOrdersNow(); CloudSpend.shared.saveNow() }
+            MainActor.assumeIsolated { BudgetStore.shared.saveNow(); BudgetStore.shared.saveOrdersNow(); CloudSpend.shared.saveNow(); BudgetStore.noteSeen() }
         }
         Task { await sortRemaining() }
         Task { await notePeriodsIfNeeded() }

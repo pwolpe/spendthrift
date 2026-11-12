@@ -662,6 +662,16 @@ enum SelfTest {
             check("a monthly bill is not called part of every trip (\(bill.merchant))", store.stories(touching: charges).count * 2 <= max(1, charges.count))
         }
 
+        // "Since you last looked" counts exactly the charges of statements added after that moment.
+        if let newest = (store.library.sources ?? []).map(\.added).max() {
+            check("nothing has arrived since the newest statement", store.arrived(since: newest) == nil)
+            if let all = store.arrived(since: .distantPast) {
+                let fromStatements = Set(store.library.entries.filter { $0.sourceID != nil }.map(\.id))
+                check("everything from a statement has arrived since the beginning", Set(all.charges).isSubset(of: fromStatements) && all.statements == (store.library.sources ?? []).count
+                      && abs(all.spent - store.transactions(withIDs: all.charges).filter { $0.countsAsSpending && $0.amount > 0 }.reduce(0) { $0 + $1.amount }) < 0.01)
+            }
+        }
+
         // What pages keep between redraws must equal what they would work out afresh.
         for f in [TransactionFilter(category: .travel), TransactionFilter(month: store.months.last), TransactionFilter(needsCheck: true)] {
             let fresh = store.transactions.filter { (f.category == nil || $0.category == f.category!) && (f.month == nil || $0.month == f.month!) && (!f.needsCheck || $0.needsCheck) }.map(\.id)

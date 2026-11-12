@@ -449,6 +449,10 @@ enum DebugHooks {
         // The page as it opens (the last twelve months), then one month and that month's pages.
         store.overviewShowsYear = true
         await snap("04-overview", outDir) { OverviewView(scrolls: false) }
+        // The year's Spending page (where to trim, ways to save) before switching to one month.
+        store.overviewDetail = .spending
+        await snap("04-overview-spending-year", outDir) { OverviewView(scrolls: false) }
+        store.overviewDetail = nil
         store.overviewShowsYear = false
         await snap("04-overview-month", outDir) { OverviewView(scrolls: false) }
         for detail in [BudgetStore.OverviewDetail.spending, .income, .investing, .flow, .recurring, .budgets] {

@@ -51,6 +51,7 @@ struct OverviewView: View {
         DownloadsBanner()
         if !store.reviewItems.isEmpty, !store.isSuggesting { reviewBanner }
         if !store.missingStatements.isEmpty, !store.isImporting { missingBanner }
+        AfterFirstFrame { SinceCard() }
         TidyNotice()
         if store.months.count > 1 { scopePicker }
         if let data = flowData {
