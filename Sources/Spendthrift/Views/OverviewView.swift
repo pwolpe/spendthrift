@@ -56,14 +56,24 @@ struct OverviewView: View {
         if store.months.count > 1 { scopePicker }
         if let data = flowData {
             // The judgment that matters most comes first: did living stay within income?
-            if !DebugHooks.off("hero") { FlowHero(data: data) { store.stepInto(.flow) } }
+            if !DebugHooks.off("hero") {
+                if store.overviewShowsYear, let period = currentPeriod {
+                    // The verdict, said in the model's words when it has written some (it is asked once the page is up).
+                    let given = store.overviewFacts(data, period: period)
+                    FlowHero(data: data, written: store.keptRead("overview-\(period.id)", basis: given.basis)) { store.stepInto(.flow) }
+                        .task(id: given.basis) {
+                            try? await Task.sleep(for: .seconds(1.5))
+                            guard !Task.isCancelled else { return }
+                            _ = await store.read("overview-\(period.id)", basis: given.basis, facts: given.facts)
+                        }
+                } else {
+                    FlowHero(data: data) { store.stepInto(.flow) }
+                }
+            }
             // Why it differs from usual. A month is cheap to explain; the year waits for the first frame.
             if !store.overviewShowsYear, let m = currentMonth, let why = store.changes(in: m) { ChangeCard(explanation: why) }
             if store.overviewShowsYear, let period = currentPeriod {
-                AfterFirstFrame {
-                    shortVersion(data, period: period)
-                    yearChanges(period)
-                }
+                AfterFirstFrame { yearChanges(period) }
             }
             let shownMonth = store.overviewShowsYear ? nil : currentMonth
             let figures = store.cached("figures|\(data.title)|\(shownMonth?.key ?? "")") { Figures(store: store, data: data, month: shownMonth) }
@@ -103,11 +113,6 @@ struct OverviewView: View {
         } else {
             EmptyState(title: "Nothing here yet", message: "Drop a statement into this window and it all gets added up.", art: "welcome")
         }
-    }
-
-    private func shortVersion(_ data: CashFlowData, period: ReportPeriod) -> some View {
-        let given = store.overviewFacts(data, period: period)
-        return ShortVersion(key: "overview-\(period.id)", basis: given.basis, facts: given.facts)
     }
 
     @ViewBuilder

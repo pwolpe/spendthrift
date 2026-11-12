@@ -7,6 +7,8 @@ import SwiftUI
 /// Investing never counts against the verdict. Within a hundredth of income either way is called even.
 struct FlowHero: View {
     let data: CashFlowData
+    /// A few sentences written about these figures, shown in place of the plain sum when present.
+    var written: String?
     var action: (() -> Void)?
     @State private var hovered = false
 
@@ -47,9 +49,11 @@ struct FlowHero: View {
                         Text(headline(verdict))
                             .font(.system(size: 26, weight: .bold, design: .serif))
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(sentence(verdict))
+                        // The read a model wrote from these same figures, when there is one; else the sum in plain words.
+                        Text(written ?? sentence(verdict))
                             .font(.body).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                            .contentTransition(.opacity)
                     }
                     Spacer(minLength: 0)
                     switch verdict {

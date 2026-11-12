@@ -68,39 +68,3 @@ extension BudgetStore {
         return text
     }
 }
-
-/// The sentences, shown when there are some. Takes no room and shows nothing while there are none.
-struct ShortVersion: View {
-    @Environment(BudgetStore.self) private var store
-    let key: String
-    /// Changes whenever the figures do.
-    let basis: String
-    let facts: [String]
-    @State private var text: String?
-
-    var body: some View {
-        Group {
-            if let text = text ?? store.keptRead(key, basis: basis) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "sparkles").foregroundStyle(Theme.accent).padding(.top, 3)
-                    Text(text).font(.system(size: 16, design: .serif)).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.sheet, in: .rect(cornerRadius: 14, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline) }
-                .transition(.opacity)
-            }
-        }
-        .task(id: key + basis) {
-            text = nil
-            guard store.keptRead(key, basis: basis) == nil else { return }
-            // Not while the page is still arriving: this is a nicety, and it costs a request.
-            try? await Task.sleep(for: .seconds(1.5))
-            guard !Task.isCancelled else { return }
-            let written = await store.read(key, basis: basis, facts: facts)
-            withAnimation(.easeOut(duration: 0.3)) { text = written }
-        }
-    }
-}
