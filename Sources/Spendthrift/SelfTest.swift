@@ -668,14 +668,18 @@ enum SelfTest {
         // Tidying acts, records what it did, and puts it back exactly on Undo.
         do {
             let byName = TidyEngine.spellings(of: store.transactions, byHand: [])
-            if let (payee, list) = byName.first(where: { $0.value.count > 1 }), let main = list.first, let odd = list.last {
+            // The same payee every run (a dictionary's order is not), and one whose odd spelling has a name of its own.
+            let candidate = byName.sorted { $0.key < $1.key }.first { name, list in
+                list.count > 1 && list.last.map { KeywordExtractor.displayName(for: $0.sample).caseInsensitiveCompare(name) != .orderedSame } == true
+            }
+            if let (payee, list) = candidate, let main = list.first, let odd = list.last {
                 let before = store.transactions.filter { $0.merchant == payee }.map(\.id)
                 let tidiedBefore = store.tidyChanges.count
                 let done = await store.applyTidy([(TidyEngine.Pair(kind: .separate, a: main, b: odd), 0.01)])
                 let after = store.transactions.filter { $0.merchant == payee }.count
                 check("tidy: a sure split moves only the odd spelling, and says so", done.count == 1 && done[0].charges == odd.count && after == before.count - odd.count
                       && store.tidyChanges.count == tidiedBefore + 1 && store.newTidyChanges.contains { $0.pairID == done[0].pairID })
-                if let change = store.tidyChanges.first(where: { $0.pairID == done.first?.pairID }) { store.undo(change) }
+                if let change = store.library.tidy?.changes.last(where: { $0.pairID == done.first?.pairID }) { store.undo(change) }
                 let restored = store.transactions.filter { $0.merchant == payee }.map(\.id)
                 if restored != before || store.tidyChanges.count != tidiedBefore { print("SELFTEST NOTE tidy counts \(tidiedBefore) -> \(store.tidyChanges.count), raw \(store.library.tidy?.changes.count ?? -1), done \(done.count), judged-declined \(store.library.tidy?.judged.values.filter { $0 == -1 }.count ?? -1)") }
                 if restored != before { print("SELFTEST NOTE tidy undo: \(payee) had \(before.count), has \(restored.count); same set \(Set(restored) == Set(before)); changes left \(store.tidyChanges.count); odd \(odd.text) x\(odd.count), main \(main.text)") }

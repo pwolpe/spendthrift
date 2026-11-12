@@ -161,14 +161,21 @@ extension BudgetStore {
             library.merchants[key] = info
         }
         var moved: [String: String] = [:]
+        // What each emptied payee record was, in case it is cleared away before an Undo needs it back.
+        var before: [String: TidyChange.Before] = [:]
         for i in indices {
-            moved[library.entries[i].id.uuidString] = library.entries[i].merchantKey
+            let old = library.entries[i].merchantKey
+            moved[library.entries[i].id.uuidString] = old
+            if before[old] == nil, let info = library.merchants[old] {
+                before[old] = .init(name: info.name, category: info.category?.rawValue, source: info.source.rawValue, confirmed: info.confirmed,
+                                    domain: info.domain, sample: info.sample)
+            }
             library.entries[i].merchantKey = key
             library.entries[i].override = nil
         }
         library.spellings = (library.spellings ?? [:]).merging([spelling.text: key]) { _, new in new }
         return TidyChange(kind: .separate, day: DateParsing.iso.string(from: .now), from: payee, other: library.merchants[key]?.name ?? name,
-                          charges: indices.count, pairID: pairID, otherKey: key, moved: moved, spelling: spelling.text)
+                          charges: indices.count, pairID: pairID, otherKey: key, renamed: before, moved: moved, spelling: spelling.text)
     }
 
     /// Puts things back exactly as they were, and remembers never to do that one again.
@@ -184,7 +191,21 @@ extension BudgetStore {
                 library.merchants[key]?.domain = before.domain
             }
         case .separate:
+            // A payee record left with no charges may have been cleared away since: make it again as it was.
+            for (key, before) in change.renamed ?? [:] where library.merchants[key] == nil {
+                var info = MerchantInfo(name: before.name, category: before.category.map { Category($0) },
+                                        source: MerchantInfo.Source(rawValue: before.source) ?? .cloud, confirmed: before.confirmed, sample: before.sample ?? before.name)
+                info.domain = before.domain
+                library.merchants[key] = info
+            }
             let back = change.moved ?? [:]
+            // (Changes made before the record above was kept: the payee they came from is the best account of what they were.)
+            let like = library.merchants.values.first { $0.name == change.from }
+            for key in Set(back.values) where library.merchants[key] == nil {
+                var info = MerchantInfo(name: change.from, category: like?.category, source: .cloud, confirmed: false, sample: change.spelling ?? change.from)
+                info.domain = like?.domain
+                library.merchants[key] = info
+            }
             var emptied: Set<String> = []
             for i in library.entries.indices {
                 if let old = back[library.entries[i].id.uuidString] {

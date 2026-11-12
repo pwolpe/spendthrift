@@ -236,6 +236,8 @@ struct TidyChange: Codable, Identifiable, Hashable {
         var source: String
         var confirmed: Bool
         var domain: String?
+        /// A statement line it was known by, so the payee can be made again if it was cleared away meanwhile.
+        var sample: String?
     }
 }
 
