@@ -127,6 +127,22 @@ enum SelfTest {
                 && MailSearch.url(amount: 1234.56, date: DateParsing.isoDay("2026-03-10")!, provider: .gmail)?.absoluteString.hasPrefix("https://mail.google.com/mail/u/0/#search/") == true
         }())
 
+        // What is said about a payee is true of its charges, and nothing is said about a payee barely seen.
+        do {
+            let acct = UUID()
+            func charge(_ day: String, _ amount: Double, _ payee: String) -> Transaction {
+                Transaction(id: UUID(), date: DateParsing.isoDay(day)!, month: Month(isoDay: day)!, description: payee.uppercased(), amount: amount, merchant: payee,
+                            merchantKey: payee, category: .dining, account: "Card", accountID: acct, source: .known, needsCheck: false, isOverride: false)
+            }
+            let now = DateParsing.isoDay("2026-11-01")!
+            let cafe = (1...10).map { charge("2026-\(String(format: "%02d", $0))-05", 40, "Cafe") } + (1...10).map { charge("2025-\(String(format: "%02d", $0))-05", 10, "Cafe") }
+            let others = ["A", "B", "C", "D"].flatMap { name in (1...3).map { charge("2026-0\($0)-10", 5, name) } }
+            let said = PayeeFacts.lines(for: cafe, among: cafe + others, asOf: now)
+            check("payee facts: rank, growth and a dearer visit are noticed", said.contains { $0.hasPrefix("Your largest Dining payee") && $0.contains("$400") }
+                  && said.contains { $0.contains("up from $100") } && said.contains { $0.contains("$40.00 now") && $0.contains("$10.00") })
+            check("payee facts: nothing is said about a payee seen twice", PayeeFacts.lines(for: Array(cafe.prefix(2)), among: cafe, asOf: now).isEmpty)
+        }
+
         // Orders against card charges.
         func item(_ order: String, _ cents: Int, _ date: String, gift: Bool = false) -> OrderItem {
             var item = OrderItem(orderID: order, shop: .store, date: date, shipment: date + "T10:00", name: "Thing from \(order)", cents: cents, quantity: 1)

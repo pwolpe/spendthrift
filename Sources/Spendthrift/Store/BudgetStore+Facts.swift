@@ -23,6 +23,19 @@ extension BudgetStore {
         return Self.usuallyOptional(t.category)
     }
 
+    /// Whether spending at a payee counts as chosen: what the person said, else what the model judged,
+    /// else what its category usually is.
+    func isOptional(payee keys: Set<String>, category: Category) -> Bool {
+        let judged = keys.compactMap { library.merchants[$0]?.optional }
+        return judged.isEmpty ? Self.usuallyOptional(category) : judged.reduce(0, +) / Double(judged.count) >= 0.5
+    }
+
+    /// The person's own word on whether a payee is a need or a choice. It is final: 0 or 1, never asked again.
+    func setOptional(_ optional: Bool, payee keys: Set<String>) {
+        for key in keys where library.merchants[key] != nil { library.merchants[key]?.optional = optional ? 1 : 0 }
+        withAnimation(.snappy) { changed() }
+    }
+
     static let optionalQuestion = Decisions.Question.yesNo(
         "Is money spent at this payee a lifestyle choice rather than a necessity?",
         yes: "Chosen for enjoyment or convenience and could be cut without hardship: restaurants, bars, takeaway, travel, hotels, entertainment, hobbies, gifts, clothes and things bought for pleasure, streaming and other subscriptions, wine and spirits, rides taken for comfort.",

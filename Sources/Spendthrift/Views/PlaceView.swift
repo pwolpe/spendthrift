@@ -27,6 +27,7 @@ struct PlaceView: View {
                     orderLink(all)
                     noteField
                     tiles(all)
+                    facts(all)
                     trips(all)
                     if Set(all.map(\.month)).count > 1 { monthly(all) }
                     spellings(all)
@@ -74,6 +75,17 @@ struct PlaceView: View {
                 HStack(spacing: 10) {
                     CategoryPill(category: first.isUnknown ? nil : first.category) { category in
                         for key in keys { store.setCategory(category, forPlace: key) }
+                    }
+                    // Need or choice, as judged; one click says otherwise, and that is then final.
+                    if first.countsAsSpending {
+                        let chosen = store.isOptional(payee: keys, category: first.category)
+                        Menu(chosen ? "A Choice" : "A Need") {
+                            Button("A choice: could be trimmed") { store.setOptional(true, payee: keys) }
+                            Button("A need: keeps the household running") { store.setOptional(false, payee: keys) }
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                        .help("Whether spending here counts as chosen (it then shows under Where to trim) or needed. Change it if the app has it wrong.")
                     }
                     let others = similar()
                     if !others.isEmpty {
@@ -132,6 +144,20 @@ struct PlaceView: View {
             let theirs = words(other)
             return theirs.first == lead || !Set(theirs).intersection(mine).isEmpty && (other.localizedCaseInsensitiveContains(name) || name.localizedCaseInsensitiveContains(other))
         }.sorted().prefix(10).map { $0 }
+    }
+
+    /// A few things worth knowing about this payee, each a sentence built from sums.
+    @ViewBuilder private func facts(_ all: [Transaction]) -> some View {
+        let lines = store.cached("facts|\(name)") { PayeeFacts.lines(for: all, among: store.transactions, asOf: store.transactions.last?.date ?? .now) }
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(lines, id: \.self) { line in
+                    Label(line, systemImage: "sparkle").font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+        }
     }
 
     /// The trips and events this payee was part of, each a way into that trip.
