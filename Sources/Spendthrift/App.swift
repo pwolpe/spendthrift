@@ -59,20 +59,22 @@ struct GoMenu: Commands {
 
     var body: some Commands {
         CommandMenu("Go") {
+            // In the sidebar's order. (The number keys are as they have always been.)
             Button("Overview") { store.selection = .overview }.keyboardShortcut("1")
             Button("Money In and Out") { store.stepInto(.flow) }.keyboardShortcut("2")
-            Button("Trips & Events") { store.selection = .stories }.keyboardShortcut("3")
-            Button("Transactions") { store.selection = .transactions }.keyboardShortcut("4")
             Button("Find a Payee…") { store.selection = .places }.keyboardShortcut("f")
             if Boot.shared.ready, store.hasCards {
                 Button("Cards") { store.selection = .cards }
             }
+            Button("Trips & Events") { store.selection = .stories }.keyboardShortcut("3")
             if Boot.shared.ready, !store.orderRows.isEmpty {
                 Button("Amazon") { store.selection = .orders }.keyboardShortcut("8")
             }
             if Boot.shared.ready, store.accounts.contains(where: { $0.apart != nil }) {
                 Button("Kept Apart") { store.selection = .apart }
             }
+            Divider()
+            Button("Transactions") { store.selection = .transactions }.keyboardShortcut("4")
             Button("Statements") { store.selection = .statements }.keyboardShortcut("9")
             Divider()
             Button("Ask a Question") { store.showsAsk.toggle() }.keyboardShortcut("k")

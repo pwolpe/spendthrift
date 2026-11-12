@@ -211,12 +211,13 @@ struct SidebarView: View {
         List {
             Section {
                 SidebarRow(item: .overview, title: "Overview", symbol: "chart.pie.fill", current: current)
-                SidebarRow(item: .stories, title: "Trips & Events", symbol: "airplane.departure", current: current, count: store.stories.count, quiet: true)
                 SidebarRow(item: .places, title: "Payees", symbol: "storefront.fill", current: current)
                 // Only there once a credit card's statements are.
                 if store.hasCards || store.selection == .cards {
                     SidebarRow(item: .cards, title: "Cards", symbol: "creditcard.fill", current: current)
                 }
+                // Below what is asked about every day: it has something new only after a journey.
+                SidebarRow(item: .stories, title: "Trips & Events", symbol: "airplane.departure", current: current, count: store.stories.count, quiet: true)
                 // Only there once an order history has been added: a closer look, never a requirement.
                 if !store.orderRows.isEmpty || store.selection == .orders {
                     SidebarRow(item: .orders, title: "Amazon", symbol: "shippingbox.fill", current: current)
@@ -225,6 +226,9 @@ struct SidebarView: View {
                 if store.accounts.contains(where: { $0.apart != nil }) || store.selection == .apart {
                     SidebarRow(item: .apart, title: "Kept Apart", symbol: "tray.full.fill", current: current)
                 }
+            }
+            // What everything above was worked out from: the place to check something, not to learn something.
+            Section("The Record") {
                 SidebarRow(item: .transactions, title: "Transactions", symbol: "list.bullet.rectangle.portrait.fill", current: current)
                 SidebarRow(item: .statements, title: "Statements", symbol: "doc.text.magnifyingglass", current: current, count: store.sourceFiles.count, quiet: true)
             }
