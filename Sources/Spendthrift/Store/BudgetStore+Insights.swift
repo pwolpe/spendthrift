@@ -97,6 +97,32 @@ extension BudgetStore {
     }
 
     /// Bills and subscriptions: what repeats, as of the latest charge. Kept until the library changes.
+    /// What repeated as things stood on a past day: only the charges up to then are read, and
+    /// "still coming" is judged from that day. Nil is the present.
+    func recurring(asOf day: Date?) -> [RecurringEngine.Recurring] {
+        guard let day else { return recurring() }
+        return cached("recurring|\(Int(day.timeIntervalSinceReferenceDate))") {
+            RecurringEngine.find(in: transactions.filter { $0.date <= day }, asOf: day)
+        }
+    }
+
+    /// The last day of the stretch the Overview is showing, when that stretch is in the past: a year
+    /// before this one, or a month before the latest. Nil when the Overview shows the present.
+    /// Pages about "now" (bills, what is due) read this so they describe the stretch on screen.
+    var overviewAsOf: Date? {
+        guard let latest = transactions.last?.date else { return nil }
+        let calendar = Calendar.current
+        func endOfMonth(_ month: Month) -> Date? {
+            calendar.date(from: DateComponents(year: month.year, month: month.month + 1, day: 1)).map { $0.addingTimeInterval(-1) }
+        }
+        if overviewShowsYear {
+            guard case .year(let year)? = overviewPeriod, year < calendar.component(.year, from: latest) else { return nil }
+            return endOfMonth(Month(year: year, month: 12))
+        }
+        guard let month = overviewMonth, month < Month(date: latest) else { return nil }
+        return endOfMonth(month)
+    }
+
     func recurring() -> [RecurringEngine.Recurring] {
         if let kept = recurringCache { return kept }
         let found = transactions.last.map { RecurringEngine.find(in: transactions, asOf: $0.date) } ?? []

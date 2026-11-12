@@ -114,7 +114,8 @@ struct OverviewView: View {
                     }
                 }
             }
-            AfterFirstFrame { SavingsStrip() }
+            // Ways to save are about today's habits: they have no place on a year that is over.
+            if store.overviewAsOf == nil { AfterFirstFrame { SavingsStrip() } }
             if !store.overviewShowsYear, let m = currentMonth, !DebugHooks.off("stories") { storiesThisMonth(m) }
         } else {
             EmptyState(title: "Nothing here yet", message: "Drop a statement into this window and it all gets added up.", art: "welcome")
@@ -325,10 +326,13 @@ struct OverviewView: View {
     /// What repeats, what it costs a year, and what is due next; the header opens the whole page.
     @ViewBuilder
     private var recurringCard: some View {
-        let active = store.recurring().filter(\.isActive)
+        // A past year or month shows the bills of that time, not today's.
+        let asOf = store.overviewAsOf
+        let active = store.recurring(asOf: asOf).filter(\.isActive)
         if !active.isEmpty {
             let total = active.reduce(0) { $0 + $1.yearly }
-            let due = active.filter { $0.next != nil }.sorted { ($0.next ?? .distantFuture) < ($1.next ?? .distantFuture) }.prefix(4)
+            // Now: what is due next. Then: what cost the most.
+            let due = asOf == nil ? active.filter { $0.next != nil }.sorted { ($0.next ?? .distantFuture) < ($1.next ?? .distantFuture) }.prefix(4) : active.prefix(4)
             Card {
                 VStack(alignment: .leading, spacing: 12) {
                     Button { store.stepInto(.recurring) } label: {
@@ -342,7 +346,8 @@ struct OverviewView: View {
                             Text("\(Money.format(total, cents: false)) a year")
                                 .font(.system(size: 32, weight: .bold, design: .rounded)).monospacedDigit()
                                 .lineLimit(1).minimumScaleFactor(0.55)
-                            Text("\(active.count) \(active.count == 1 ? "thing that repeats" : "things that repeat")")
+                            Text(asOf.map { "\(active.count) \(active.count == 1 ? "thing" : "things") repeating at the end of \($0.formatted(.dateTime.month(.wide).year()))" }
+                                 ?? "\(active.count) \(active.count == 1 ? "thing that repeats" : "things that repeat")")
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                         .contentShape(Rectangle())
@@ -351,7 +356,8 @@ struct OverviewView: View {
                     Divider()
                     ForEach(Array(due), id: \.id) { item in
                         PayeeLine(name: item.merchant, category: item.category,
-                                  detail: "Due " + (item.next?.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) ?? ""),
+                                  detail: asOf == nil ? "Due " + (item.next?.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) ?? "")
+                                                      : item.cadence.every.prefix(1).uppercased() + item.cadence.every.dropFirst(),
                                   amount: item.amount) { store.showPlace(item.merchant) }
                     }
                 }

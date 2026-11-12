@@ -115,13 +115,20 @@ struct OrdersView: View {
                 } else if store.orderOnly != nil {
                     listing(list)
                 } else {
+                    if plain, let memory = OrderHabits.onThisDay(store.bought(), today: Date()) { OnThisDayCard(memory: memory) }
                     if plain { shortVersion(list) }
                     total(list)
+                    if !finding {
+                        OrderShelf(things: store.cached("shelf|\(store.orderScope)|\(store.orderWho ?? "-")|\(store.orderKind ?? "-")") {
+                            OrderHabits.shelf(list.map(BudgetStore.bought), upTo: 48)
+                        }, about: "The biggest things from \(scopeTitle == "All Time" ? "all these years" : scopeTitle), largest first. Click one to open its box.")
+                    }
                     ring(everything)
                     trend(list)
                     if !finding { favourites(list) }
-                    if plain { tieOut() }
                     listing(list)
+                    // The bookkeeping comes last, under the things themselves.
+                    if plain { tieOut() }
                 }
             }
             .padding(28)
@@ -180,7 +187,8 @@ struct OrdersView: View {
 
     /// What was bought more than once, most often first.
     private static func repeats(_ list: [Row]) -> [(name: String, times: Int, cents: Int)] {
-        Dictionary(grouping: list, by: \.name).map { (name: $0.key, times: $0.value.count, cents: $0.value.reduce(0) { $0 + $1.net }) }
+        // (Downloads and memberships come under one name each in the shop's own records: they say nothing here.)
+        Dictionary(grouping: list.filter { $0.item.shop != .digital }, by: \.name).map { (name: $0.key, times: $0.value.count, cents: $0.value.reduce(0) { $0 + $1.net }) }
             .filter { $0.times >= 3 }
             .sorted { ($0.times, $0.cents, $1.name) > ($1.times, $1.cents, $0.name) }
     }
@@ -402,8 +410,13 @@ struct OrdersView: View {
     @ViewBuilder private func favourites(_ list: [Row]) -> some View {
         let again = Self.repeats(list).prefix(6)
         let biggest = list.sorted { $0.net > $1.net }.prefix(6)
+        // A stretch that reaches the present gets the clock (what is due next); an older one, the plain count.
+        let current = store.orderKind == nil && (store.orderCoverage.through.map { inStretch(Month(date: $0)) } ?? false)
+        let habits = current ? store.orderHabits(by: store.orderWho) : []
         HStack(alignment: .top, spacing: 18) {
-            if !again.isEmpty {
+            if !habits.isEmpty {
+                RestockCard(habits: habits, through: store.orderCoverage.through ?? Date())
+            } else if !again.isEmpty {
                 Card(padding: 16) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("BOUGHT AGAIN AND AGAIN").font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
@@ -645,7 +658,7 @@ private struct OrderRowView: View {
                                 .font(.body.weight(.medium)).lineLimit(1)
                             Text(([order.date.formatted(.dateTime.month(.abbreviated).day().year()), order.who, count == 1 ? "1 item" : "\(count) items",
                                    order.refunded > 0 ? "\(Money.format(Double(order.refunded) / 100)) refunded" : nil,
-                                   order.charges.isEmpty ? "no card charge on file" : nil] as [String?]).compactMap { $0 }.joined(separator: " · "))
+                                   order.charges.isEmpty ? BudgetStore.shared.unpaidNote(for: order.date) : nil] as [String?]).compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 12)

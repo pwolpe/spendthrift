@@ -256,6 +256,17 @@ enum DebugHooks {
             store.saveNow()
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_ASKIDEAS=1: print the findings and the questions proposed from them (twice: the second set must differ), then quit.
+        if env["SPENDTHRIFT_ASKIDEAS"] != nil {
+            for _ in 0..<50 where store.orderRows.isEmpty { try? await Task.sleep(for: .milliseconds(100)) }
+            for fact in store.askIdeaFacts() { print("IDEAS FACT \(fact)") }
+            await store.refreshAskIdeas()
+            for idea in store.keptAskIdeas ?? [] { print("IDEAS FIRST \(idea)") }
+            await store.refreshAskIdeas(different: true)
+            for idea in store.keptAskIdeas ?? [] { print("IDEAS OTHER \(idea)") }
+            store.saveNow()
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_TIDY=1: compare payees, act where the model is sure, print every pair and what was done, then quit.
         if env["SPENDTHRIFT_TIDY"] != nil {
             for _ in 0..<100 where store.isSuggesting || store.isTidying { try? await Task.sleep(for: .milliseconds(200)) }

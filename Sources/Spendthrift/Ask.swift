@@ -259,7 +259,10 @@ struct AskView: View {
     @State private var turns: [ChatAnalyst.Turn] = []
     @FocusState private var focused: Bool
 
+    /// Questions proposed from what the app has found lately; until some are written, a few that suit anyone.
     private var examples: [String] {
+        let _ = store.readsChecked
+        if CloudAI.isEnabled, let ideas = store.keptAskIdeas { return ideas }
         guard CloudAI.isEnabled, let latest = store.months.last else {
             return ["How much did I spend on dining last month?", "What are my subscriptions?", "Top payees this year",
                     "What did I buy at Amazon?", "Average monthly grocery spending"]
@@ -364,8 +367,19 @@ struct AskView: View {
                 .fixedSize(horizontal: false, vertical: true)
             // Things to try, as one sheet with a line each.
             VStack(alignment: .leading, spacing: 0) {
-                Text("TRY ONE").font(Theme.mono(9.5, .semibold)).tracking(1.2).foregroundStyle(.secondary)
-                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
+                HStack(spacing: 6) {
+                    Text("TRY ONE").font(Theme.mono(9.5, .semibold)).tracking(1.2).foregroundStyle(.secondary)
+                    Spacer()
+                    if CloudAI.isEnabled {
+                        if store.isWritingAskIdeas {
+                            ThinkingDots()
+                        } else {
+                            Button("Others", systemImage: "sparkles") { Task { await store.refreshAskIdeas(different: true) } }
+                                .buttonStyle(.borderless).font(.caption).help("Think of different questions")
+                        }
+                    }
+                }
+                .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
                 ForEach(Array(examples.enumerated()), id: \.element) { index, example in
                     if index > 0 { Divider().padding(.leading, 14) }
                     Button { question = example; ask() } label: {
@@ -382,6 +396,9 @@ struct AskView: View {
             }
             .background(Theme.sheet, in: .rect(cornerRadius: 14, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline) }
+            .animation(.easeOut(duration: 0.25), value: examples)
+            // New questions when what the app has found has changed (and once a week regardless).
+            .task(id: store.revision) { await store.refreshAskIdeas() }
         }
     }
 

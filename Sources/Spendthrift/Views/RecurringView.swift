@@ -24,18 +24,23 @@ struct RecurringView: View {
     }
 
     var body: some View {
-        let all = store.recurring()
+        // Reached from a past year or month on the Overview, this is the page as it stood then.
+        let asOf = store.overviewAsOf
+        let then = asOf.map(monthYear)
+        let all = store.recurring(asOf: asOf)
         let active = all.filter(\.isActive)
         let total = active.reduce(0) { $0 + $1.yearly }
-        let latest = store.transactions.last?.date ?? .now
+        let latest = asOf ?? store.transactions.last?.date ?? .now
         let cutoff = Calendar.current.date(byAdding: .month, value: -18, to: latest) ?? latest
         let ended = all.filter { !$0.isActive && $0.last >= cutoff }
         let worth = active.filter { $0.creep > 0 || $0.isForgotten }
             .sorted { ($0.extraPerYear + ($0.isForgotten ? $0.yearly : 0)) > ($1.extraPerYear + ($1.isForgotten ? $1.yearly : 0)) }
 
         VStack(alignment: .leading, spacing: 20) {
-            BigFigure(title: "Bills & subscriptions, a year", amount: total,
-                      subtitle: "\(active.count) \(active.count == 1 ? "thing that repeats" : "things that repeat") · about \(Money.format(total / 12, cents: false)) a month")
+            BigFigure(title: then.map { "Bills & subscriptions, a year, as of \($0)" } ?? "Bills & subscriptions, a year", amount: total,
+                      subtitle: (then == nil ? "\(active.count) \(active.count == 1 ? "thing that repeats" : "things that repeat")"
+                                             : "\(active.count) \(active.count == 1 ? "thing" : "things") repeating then")
+                                + " · about \(Money.format(total / 12, cents: false)) a month")
             if active.isEmpty {
                 EmptyState(title: "Nothing repeats yet", message: "A bill or subscription shows up here once it has been charged three times, or twice a year apart.", art: "welcome")
             }
@@ -59,7 +64,7 @@ struct RecurringView: View {
                                           subtitle: "\(group.count) \(group.count == 1 ? "payee" : "payees") · \(Money.format(group.reduce(0) { $0 + $1.yearly }, cents: false)) a year")
                             ForEach(Array(group.enumerated()), id: \.element.id) { index, item in
                                 if index > 0 { Divider() }
-                                row(item, detail: "\(Money.format(item.amount)) \(cadence.every)" + (item.next.map { " · next due \(dayMonth($0))" } ?? ""),
+                                row(item, detail: "\(Money.format(item.amount)) \(cadence.every)" + (asOf == nil ? item.next.map { " · next due \(dayMonth($0))" } ?? "" : ""),
                                     right: Money.format(item.yearly, cents: false), caption: "a year")
                             }
                         }
@@ -78,7 +83,7 @@ struct RecurringView: View {
                         }
                         .padding(.top, 12)
                     } label: {
-                        SectionHeader(title: "Ended", subtitle: "\(ended.count) \(ended.count == 1 ? "has" : "have") stopped charging in the last 18 months")
+                        SectionHeader(title: "Ended", subtitle: "\(ended.count) \(ended.count == 1 ? "has" : "have") stopped charging in \(then == nil ? "the last 18 months" : "the 18 months before")")
                     }
                 }
             }

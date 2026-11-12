@@ -557,6 +557,38 @@ enum SelfTest {
         let m = OrderMatcher.match([c2, c1], to: twin)
         check("orders: equal charges take their own orders, nearest first", m[c1.id.uuidString]?.items == [0] && m[c2.id.uuidString]?.items == [1])
         let refund = OrderMatcher.Charge(id: UUID(), date: "2026-03-02", cents: -1999, shop: .store), other = OrderMatcher.Charge(id: UUID(), date: "2026-03-02", cents: 1999, shop: .groceries)
+        check("ask: suggested questions are read from a list, and one with a figure or no question mark is dropped",
+              BudgetStore.askIdeas(in: "Here you go:\n[\"Why did dining jump in March?\", \"Did I really spend $400 on coffee?\", \"Tell me about rent\", \"why did dining jump in march?\", \"What is my longest-running subscription?\"]")
+                == ["Why did dining jump in March?", "What is my longest-running subscription?"] && BudgetStore.askIdeas(in: "no list here").isEmpty)
+        // What an order history says beyond its totals.
+        do {
+            func day(_ text: String) -> Date { DateParsing.parse(text, format: "yyyy-MM-dd")! }
+            var n = 0
+            func got(_ name: String, _ date: String, _ cents: Int, asin: String? = "B000000001", digital: Bool = false) -> OrderHabits.Bought {
+                n += 1
+                return OrderHabits.Bought(id: n, name: name, kind: "Pantry & Snacks", asin: asin, orderID: "O\(n)", date: day(date), cents: cents, digital: digital)
+            }
+            let coffee = ["2026-01-05", "2026-02-09", "2026-03-16", "2026-04-20", "2026-05-25"].enumerated().map { got("Coffee beans", $1, $0 == 0 ? 1900 : $0 == 4 ? 2700 : 2200) }
+            let old = ["2019-01-05", "2019-02-09", "2019-03-16"].map { got("Printer ink", $0, 3000, asin: "B000000002") }
+            let books = ["2026-03-01", "2026-04-01", "2026-05-01"].map { got("Kindle+", $0, 999, asin: nil, digital: true) }
+            let habits = OrderHabits.habits(coffee + old + books, through: day("2026-06-01"))
+            check("orders: a thing bought at a steady rhythm is on the restock clock, with its next date",
+                  habits.map(\.name) == ["Coffee beans"] && habits.first?.everyDays == 35 && habits.first?.due == day("2026-06-29") && habits.first?.times == 5)
+            check("orders: a year of a habit is what it has cost lately at its rhythm", habits.first?.yearlyCents == Int((Double((1900 + 2200 * 3 + 2700) / 5) * 365 / 35).rounded()))
+            check("orders: the same product's first and latest price are set side by side", habits.first?.price?.was == 1900 && habits.first?.price?.now == 2700)
+            check("orders: a habit given up long ago and a download are not on the clock", !habits.contains { $0.name == "Printer ink" || $0.name == "Kindle+" })
+            check("orders: a rhythm is said in days, weeks or months", OrderHabits.rhythm(10) == "every 10 days" && OrderHabits.rhythm(35) == "about every 5 weeks" && OrderHabits.rhythm(92) == "about every 3 months")
+            let camera = got("Camera", "2012-07-14", 70600, asin: "B000000003"), lamp = got("Lamp", "2020-07-12", 90000, asin: "B000000004")
+            let memory = OrderHabits.onThisDay([camera, lamp] + coffee, today: day("2026-07-14"))
+            check("orders: on this day finds the thing bought on the very day before a dearer one that week", memory?.thing.name == "Camera" && memory?.yearsAgo == 14 && memory?.exact == true)
+            check("orders: on this day reaches a few days either side, and never into this year",
+                  OrderHabits.onThisDay([camera, lamp] + coffee, today: day("2026-07-11"))?.thing.name == "Lamp" && OrderHabits.onThisDay(coffee, today: day("2026-03-16")) == nil)
+            check("orders: on this day prefers a notable thing that week to a trifle on the day",
+                  OrderHabits.onThisDay([got("Dusters", "2024-07-14", 1600, asin: "B000000005"), lamp], today: day("2026-07-14"))?.thing.name == "Lamp")
+            check("orders: years ago is said in words", OrderHabits.yearsAgo(14) == "Fourteen years ago" && OrderHabits.yearsAgo(1) == "A year ago")
+            let shelf = OrderHabits.shelf([camera, lamp] + coffee + books, upTo: 10)
+            check("orders: the shelf holds each product once, dearest first, and nothing without a picture to find", shelf.map(\.name) == ["Lamp", "Camera", "Coffee beans"])
+        }
         check("orders: refunds and other shops never match", OrderMatcher.match([refund, other], to: [item("A", 1999, "2026-03-01")]).isEmpty)
         var g = item("G", 4000, "2026-03-01"); g.shop = .groceries; g.listedCents = 4400
         let gid = UUID()
@@ -656,7 +688,30 @@ enum SelfTest {
 
     private static func books(_ store: BudgetStore) {
         let near = { (a: Double, b: Double) in abs(a - b) < 0.01 }
+        check("ask: the findings questions are written from are there, and say nothing when nothing has changed",
+              store.askIdeaFacts().count >= 3 && store.askIdeaFacts() == store.askIdeaFacts())
+        check("orders: with card charges on file, an order with none is explained by its date",
+              store.orderChargeList.isEmpty || (store.orderChargeSpan != nil && store.unpaidNote(for: .distantFuture) == "not on a statement yet" && store.unpaidNote(for: .distantPast) == "before your statements begin"))
         let repeating = store.recurring()
+        // A past year shows the bills of that time: nothing that began later, nothing judged by today.
+        if let first = store.transactions.first?.date, let last = store.transactions.last?.date,
+           let middle = Optional(first.addingTimeInterval(last.timeIntervalSince(first) / 2)) {
+            let then = store.recurring(asOf: middle)
+            check("bills: seen from a past day, nothing that repeats began after it or is judged by later charges",
+                  then.allSatisfy { $0.first <= middle && $0.last <= middle && ($0.next == nil || $0.isActive) })
+            let was = store.overviewShowsYear, period = store.overviewPeriod
+            let years = Set(store.transactions.map { Calendar.current.component(.year, from: $0.date) }).sorted()
+            if years.count > 1, let early = years.first {
+                store.overviewShowsYear = true; store.overviewPeriod = .year(early)
+                let end = store.overviewAsOf
+                check("bills: a past year on the Overview is read as of its last day",
+                      end.map { Calendar.current.component(.year, from: $0) == early && Calendar.current.component(.month, from: $0) == 12 } == true
+                      && store.recurring(asOf: end).allSatisfy { $0.last <= end! })
+                store.overviewPeriod = .last12
+                check("bills: the last twelve months are the present", store.overviewAsOf == nil)
+            }
+            store.overviewShowsYear = was; store.overviewPeriod = period
+        }
         let billIDs = Set(store.transactions.map(\.id))
         check("every bill and subscription is made of charges that exist", repeating.allSatisfy { $0.chargeIDs.allSatisfy(billIDs.contains) && $0.chargeIDs.count >= 2 })
         check("the Bills & Subscriptions card is the sum of its active rows", near(repeating.filter(\.isActive).reduce(0) { $0 + $1.yearly },

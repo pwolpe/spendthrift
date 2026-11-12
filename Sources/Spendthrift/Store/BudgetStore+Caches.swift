@@ -71,6 +71,7 @@ extension BudgetStore {
     private var cache: DerivedCache { .shared }
 
     /// The value kept under `key` until the library next changes.
+    /// Not for a value that may be nil: a missing entry reads back as a kept nil. Keep an empty list instead.
     func cached<T>(_ key: String, make: () -> T) -> T { cache.value(key, for: self, make: make) }
 
     // MARK: Transactions page
