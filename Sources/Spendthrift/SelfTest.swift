@@ -821,6 +821,8 @@ enum SelfTest {
         check("cards: the cards are the accounts named for a card issuer, and their shares of card spending make a whole",
               store.cardFacts().count <= store.accounts.filter(BudgetStore.isCard).count
               && (store.cardFacts().allSatisfy { $0.spent < 0.5 } || abs(store.cardFacts().reduce(0) { $0 + $1.share } - 1) < 0.001))
+        check("orders: once there are orders, the Amazon page has been opened on a year, not on all of time at once",
+              store.orderRows.isEmpty || store.orderScopeDefaulted)
         let repeating = store.recurring()
         // A past year shows the bills of that time: nothing that began later, nothing judged by today.
         if let first = store.transactions.first?.date, let last = store.transactions.last?.date,

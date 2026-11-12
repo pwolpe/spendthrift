@@ -155,6 +155,8 @@ final class BudgetStore {
     var orderSearch = ""
     /// The stretch of order history on screen, whose orders, and (after a click on the ring) which category.
     var orderScope = OrderScope.all
+    /// True once the Amazon page has been opened on its latest year (done once, when the orders are first laid out).
+    @ObservationIgnored var orderScopeDefaulted = false
     var orderWho: String?
     /// The kind of thing clicked on the ring ("Baby & Kids"), when the page is narrowed to one.
     var orderKind: String?

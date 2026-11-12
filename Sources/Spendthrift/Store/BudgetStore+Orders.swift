@@ -84,6 +84,12 @@ extension BudgetStore {
                             haystack: [name, item.name, kind, category.rawValue, item.who ?? ""].map(squeeze).joined(separator: " "),
                             charge: charge[i])
         }
+        // The page opens on the latest year with orders: what was bought lately, not thirty years at once.
+        // (All Time is one click away, and anything the person chooses after this is left alone.)
+        if !orderScopeDefaulted, let latest = orderRows.map(\.month.year).max() {
+            orderScopeDefaulted = true
+            if case .all = orderScope { orderScope = .year(latest) }
+        }
         orderPeople = Array(Set(orders.items.compactMap(\.who))).sorted()
         var coverage = OrderCoverage()
         let last = orders.items.map(\.date).max()
