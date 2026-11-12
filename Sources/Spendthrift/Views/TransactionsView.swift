@@ -318,6 +318,25 @@ struct TransactionInspector: View {
                     }
                 }
 
+                // The way on from one charge to everything about who was paid.
+                Button { store.showPlace(t.merchant) } label: {
+                    HStack(spacing: 10) {
+                        MerchantIcon(name: t.merchant, category: t.category, size: 28)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(t.merchant).font(.body.weight(.semibold)).lineLimit(1)
+                            Text(place.count == 1 ? "The only charge here. See the payee" : "All \(place.count) charges, \(Money.format(place.reduce(0) { $0 + $1.amount }, cents: false)) in all")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right").font(.callout.weight(.semibold)).foregroundStyle(.tint)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(Theme.accent.opacity(0.08), in: .rect(cornerRadius: 12, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open \(t.merchant): every charge, by year, with notes and links (or double-click the row)")
+
                 if let gap = store.orderGap(for: t) {
                     Label(gap, systemImage: "shippingbox")
                         .font(.caption)
@@ -395,7 +414,6 @@ struct TransactionInspector: View {
                 if place.count > 1 {
                     group("All visits to \(t.merchant)") {
                         PlaceHistory(transactions: place)
-                        Button("Everything at \(t.merchant)") { store.showPlace(t.merchant) }
                     }
                 }
             }

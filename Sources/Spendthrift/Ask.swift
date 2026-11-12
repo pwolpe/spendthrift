@@ -235,7 +235,9 @@ struct AskView: View {
     @Environment(BudgetStore.self) private var store
     @State private var question = ""
     @State private var answers: [Answer] = []
-    @State private var thinking = false
+    /// The question being answered, shown while its answer is worked out.
+    @State private var pending: String?
+    private var thinking: Bool { pending != nil }
     @State private var turns: [ChatAnalyst.Turn] = []
     @FocusState private var focused: Bool
 
@@ -274,19 +276,21 @@ struct AskView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        if answers.isEmpty { intro }
+                        if answers.isEmpty, pending == nil { intro }
                         ForEach(answers) { answer in
                             AnswerBubble(answer: answer).id(answer.id)
                                 // The slip feeds out from the top, whole: readable at once, no waiting on lines.
                                 .transition(.asymmetric(insertion: .scale(scale: 1, anchor: .top).combined(with: .move(edge: .top)).combined(with: .opacity),
                                                         removal: .opacity))
                         }
-                        if thinking {
-                            HStack(spacing: 10) {
-                                ProgressView().controlSize(.small)
-                                Text("Adding it up…").font(Theme.mono(12)).foregroundStyle(.secondary)
+                        // The question shows the moment it is sent, with dots under it until the answer is ready.
+                        if let pending {
+                            VStack(alignment: .leading, spacing: 10) {
+                                QuestionNote(text: pending)
+                                ThinkingDots()
                             }
                             .id("thinking")
+                            .transition(.opacity)
                         }
                     }
                     .padding(18)
@@ -295,8 +299,8 @@ struct AskView: View {
                 .onChange(of: answers.count) {
                     withAnimation { proxy.scrollTo(answers.last?.id, anchor: .bottom) }
                 }
-                .onChange(of: thinking) {
-                    if thinking { withAnimation { proxy.scrollTo("thinking", anchor: .bottom) } }
+                .onChange(of: pending) {
+                    if pending != nil { withAnimation { proxy.scrollTo("thinking", anchor: .bottom) } }
                 }
             }
 
@@ -366,17 +370,17 @@ struct AskView: View {
         let q = question.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty, !thinking else { return }
         question = ""
-        thinking = true
+        withAnimation(.snappy(duration: 0.2)) { pending = q }
         Task {
             // With the cloud model this is a conversation; otherwise one question at a time, on the Mac.
             if let (answer, turn) = await ChatAnalyst.answer(q, history: turns, store: store) {
                 turns.append(turn)
-                withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) { answers.append(answer); thinking = false }
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) { answers.append(answer); pending = nil }
                 return
             }
             let query = await QueryParser.parse(q, months: store.months)
             let answer = AnswerEngine.answer(q, query: query, store: store)
-            withAnimation(.snappy) { answers.append(answer); thinking = false }
+            withAnimation(.snappy) { answers.append(answer); pending = nil }
         }
     }
 }
@@ -487,20 +491,50 @@ enum Drill {
 }
 
 /// One exchange: the question as it was asked, then the answer printed on a slip of receipt paper.
+/// What was asked, in the person's own words, set to the right like a note in the margin.
+struct QuestionNote: View {
+    let text: String
+
+    var body: some View {
+        HStack {
+            Spacer(minLength: 40)
+            Text(text)
+                .padding(.horizontal, 13).padding(.vertical, 8)
+                .background(Theme.accent.opacity(0.10), in: .rect(cornerRadius: 13, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Theme.accent.opacity(0.18)) }
+                .textSelection(.enabled)
+        }
+    }
+}
+
+/// Three dots taking turns: an answer is on its way.
+struct ThinkingDots: View {
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.05)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 5) {
+                ForEach(0..<3, id: \.self) { i in
+                    let wave = (sin(t * 5 - Double(i) * 0.9) + 1) / 2
+                    Circle().fill(Color.secondary).frame(width: 7, height: 7)
+                        .opacity(0.3 + 0.7 * wave)
+                        .offset(y: -3 * wave)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .background(Theme.sheet, in: .rect(cornerRadius: 13, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Theme.hairline) }
+        }
+        .accessibilityLabel("Thinking")
+    }
+}
+
 struct AnswerBubble: View {
     let answer: Answer
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // The question: quiet, in the person's own words, set to the right like a note in the margin.
-            HStack {
-                Spacer(minLength: 40)
-                Text(answer.question)
-                    .padding(.horizontal, 13).padding(.vertical, 8)
-                    .background(Theme.accent.opacity(0.10), in: .rect(cornerRadius: 13, style: .continuous))
-                    .overlay { RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Theme.accent.opacity(0.18)) }
-                    .textSelection(.enabled)
-            }
+            QuestionNote(text: answer.question)
             ReceiptPaper(padding: 16) {
                 VStack(alignment: .leading, spacing: 12) {
                     // Any place named in the answer is a link to everything spent there.
