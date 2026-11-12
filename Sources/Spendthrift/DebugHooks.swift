@@ -253,9 +253,9 @@ enum DebugHooks {
                 if let latest = store.orderRows.last {
                     store.orderScope = .year(latest.month.year)
                     await snap("45-orders-year", outDir) { OrdersView(scrolls: false) }
-                    store.orderScope = .month(latest.month.adding(-1)); store.orderList = .items; store.orderWho = store.orderPeople.last
+                    store.orderScope = .month(latest.month.adding(-1)); store.orderWho = store.orderPeople.last
                     await snap("45-orders-month", outDir) { OrdersView(scrolls: false) }
-                    store.orderScope = .all; store.orderList = .orders; store.orderWho = nil
+                    store.orderScope = .all; store.orderWho = nil
                 }
                 store.orderSearch = "coffee"
                 await snap("46-orders-search", outDir) { OrdersView(scrolls: false) }

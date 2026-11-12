@@ -20,9 +20,6 @@ struct PlaceView: View {
         let all = charges
         MaybeScroll(scrolls: scrolls) {
             VStack(alignment: .leading, spacing: 20) {
-                Button { store.placeFocus = nil } label: { Label("Back", systemImage: "chevron.left") }
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut(.cancelAction)
                 if let first = all.first {
                     header(all, first)
                     orderLink(all)
@@ -56,7 +53,7 @@ struct PlaceView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Open Amazon") { store.placeFocus = nil; store.orderOnly = nil; store.selection = .orders }
+                Button("Open Amazon") { store.go(to: .orders) { store.orderOnly = nil } }
             }
             .padding(12)
             .background(Theme.accent.opacity(0.07), in: .rect(cornerRadius: 12, style: .continuous))
@@ -117,7 +114,7 @@ struct PlaceView: View {
         let new = draft.trimmingCharacters(in: .whitespaces)
         guard !new.isEmpty, new != name else { return }
         for key in keys { store.renamePlace(key, to: new) }
-        store.placeFocus = new
+        store.placeRenamed(to: new)
     }
 
     /// Other places whose names look like this one: likely the same business under another spelling.
@@ -209,8 +206,7 @@ struct PlaceView: View {
                     SectionHeader(title: all.count == 1 ? "The charge" : "All \(all.count) charges")
                     Spacer()
                     Button("Open in Transactions") {
-                        store.transactionFilter = TransactionFilter(merchant: name)
-                        store.selection = .transactions
+                        store.go(to: .transactions) { store.transactionFilter = TransactionFilter(merchant: name) }
                     }
                 }
                 .padding(.bottom, 8)
@@ -264,9 +260,6 @@ struct ChargesView: View {
             .sorted { abs($0.total) > abs($1.total) }
         MaybeScroll(scrolls: scrolls) {
             VStack(alignment: .leading, spacing: 20) {
-                Button { store.chargesFocus = nil } label: { Label("Back", systemImage: "chevron.left") }
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut(.cancelAction)
                 HStack(alignment: .lastTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(title).font(.system(size: 30, weight: .bold, design: .serif))
@@ -328,8 +321,7 @@ struct ChargesView: View {
                             }
                             if all.count > 400 {
                                 Button("See All \(all.count) in Transactions") {
-                                    store.transactionFilter = filter
-                                    store.selection = .transactions
+                                    store.go(to: .transactions) { store.transactionFilter = filter }
                                 }
                                 .padding(.top, 10)
                             }

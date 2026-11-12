@@ -14,11 +14,17 @@ struct ContentView: View {
                 Group {
                     if store.accounts.isEmpty {
                         WelcomeView(isDropTargeted: isDropTargeted)
-                    } else if let place = store.placeFocus {
-                        PlaceView(name: place)
-                    } else if let filter = store.chargesFocus {
-                        ChargesView(filter: filter)
+                    } else if let page = store.route.last {
+                        VStack(spacing: 0) {
+                            BackBar()
+                            switch page {
+                            case .place(let name): PlaceView(name: name)
+                            case .charges(let filter): ChargesView(filter: filter)
+                            }
+                        }
                     } else {
+                        VStack(spacing: 0) {
+                        BackBar()
                         switch store.selection ?? .overview {
                         case .overview: OverviewView()
                         case .stories: StoriesView()
@@ -29,6 +35,7 @@ struct ContentView: View {
                         case .statements: StatementsView()
                         case .review: ReviewView()
                         case .categories, .accounts: SetupView()
+                        }
                         }
                     }
                 }

@@ -32,7 +32,7 @@ struct SpendthriftApp: App {
             }
             CommandMenu("Go") {
                 Button("Overview") { BudgetStore.shared.selection = .overview }.keyboardShortcut("1")
-                Button("Money In and Out") { BudgetStore.shared.selection = .overview; BudgetStore.shared.overviewDetail = .flow }.keyboardShortcut("2")
+                Button("Money In and Out") { BudgetStore.shared.stepInto(.flow) }.keyboardShortcut("2")
                 Button("Trips & Events") { BudgetStore.shared.selection = .stories }.keyboardShortcut("3")
                 Button("Transactions") { BudgetStore.shared.selection = .transactions }.keyboardShortcut("4")
                 Button("Find a Payee…") { BudgetStore.shared.selection = .places }.keyboardShortcut("f")

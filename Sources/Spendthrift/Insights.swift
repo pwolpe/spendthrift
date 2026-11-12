@@ -162,6 +162,11 @@ enum InsightEngine {
 
 struct Award: Identifiable, Hashable {
     var id: String { title }
+    /// The leaders (biggest category, biggest payee) are what the ring and the list of top payees
+    /// already show; the rest are found nowhere else.
+    var isLeader = false
+    /// Whether the winner is a payee (otherwise it is the category).
+    var isPayee = false
     let title: String
     let winner: String
     let value: String
@@ -185,11 +190,13 @@ enum AwardEngine {
         if let lead = byCategory.first {
             awards.append(Award(title: "Biggest category", winner: lead.cat.displayName,
                                 value: Money.format(lead.total, cents: false), category: lead.cat, symbol: "star.fill"))
+            awards[awards.count - 1].isLeader = true
         }
         if byCategory.count > 1 {
             let support = byCategory[1]
             awards.append(Award(title: "Runner-up", winner: support.cat.displayName,
                                 value: Money.format(support.total, cents: false), category: support.cat, symbol: "star.leadinghalf.filled"))
+            awards[awards.count - 1].isLeader = true
         }
 
         // Places
@@ -200,6 +207,7 @@ enum AwardEngine {
         if let venue = places.max(by: { $0.total < $1.total }), venue.total > 0 {
             awards.append(Award(title: "Biggest single payee", winner: venue.name, value: Money.format(venue.total, cents: false),
                                 category: venue.cat, symbol: "building.2.fill"))
+            awards[awards.count - 1].isLeader = true
             usedWinners.insert(venue.name)
         }
         if let regular = places.filter({ $0.count >= 3 && !usedWinners.contains($0.name) }).max(by: { $0.count < $1.count }) {
@@ -246,7 +254,8 @@ enum AwardEngine {
             awards.append(Award(title: "Longest running", winner: sub.merchant, value: "\(months) months running",
                                 category: sub.category, symbol: "medal.fill"))
         }
-        return awards
+        let payees = Set(thisMonth.map(\.merchant))
+        return awards.map { award in var a = award; a.isPayee = payees.contains(award.winner) && award.category?.displayName != award.winner; return a }
     }
 }
 
@@ -313,6 +322,8 @@ struct CeremonyCard: View {
     var body: some View {
         let insights = store.insights(for: month)
         let awards = AwardEngine.awards(for: month, in: store.transactions)
+        // Only what the page doesn't already show: the ring and Top payees cover the leaders.
+        let printed = awards.filter { !$0.isLeader }
         Card {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .top, spacing: 24) {
@@ -338,19 +349,26 @@ struct CeremonyCard: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    if !awards.isEmpty {
+                    if !printed.isEmpty {
                         ReceiptPaper(padding: 16) {
                             VStack(alignment: .leading, spacing: 9) {
                                 Text(month.title.uppercased()).font(Theme.mono(11, .bold)).tracking(1.5)
                                     .frame(maxWidth: .infinity)
                                 ReceiptRule()
-                                ForEach(awards) { award in
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(award.title.uppercased()).font(Theme.mono(9.5, .semibold)).tracking(0.8).foregroundStyle(.secondary)
-                                        ReceiptLine(value: award.value) {
-                                            Text(award.winner).font(.callout.weight(.medium)).lineLimit(1)
+                                ForEach(printed) { award in
+                                    Button {
+                                        if award.isPayee { store.showPlace(award.winner) }
+                                        else if let category = award.category { store.showCharges(TransactionFilter(category: category, month: month)) }
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(award.title.uppercased()).font(Theme.mono(9.5, .semibold)).tracking(0.8).foregroundStyle(.secondary)
+                                            ReceiptLine(value: award.value) {
+                                                Text(award.winner).font(.callout.weight(.medium)).lineLimit(1)
+                                            }
                                         }
+                                        .contentShape(Rectangle())
                                     }
+                                    .buttonStyle(.plain)
                                 }
                                 ReceiptRule()
                                 ReceiptLine(value: Money.format(store.totalSpent(in: month), cents: false), bold: true) {

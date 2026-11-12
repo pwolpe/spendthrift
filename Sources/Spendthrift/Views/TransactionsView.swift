@@ -3,7 +3,6 @@ import Charts
 
 struct TransactionsView: View {
     @Environment(BudgetStore.self) private var store
-    @State private var search = ""
     @State private var selection = Set<Transaction.ID>()
     @State private var sortOrder = [KeyPathComparator(\Transaction.date, order: .reverse)]
     @State private var showInspector = true
@@ -21,12 +20,12 @@ struct TransactionsView: View {
             list = list.filter { ids.contains($0.id) }
         }
         if f.needsCheck { list = list.filter(\.needsCheck) }
-        if !search.isEmpty {
+        if !store.transactionSearch.isEmpty {
             list = list.filter {
-                $0.merchant.localizedCaseInsensitiveContains(search)
-                    || $0.description.localizedCaseInsensitiveContains(search)
-                    || $0.category.displayName.localizedCaseInsensitiveContains(search)
-                    || ($0.note?.localizedCaseInsensitiveContains(search) ?? false)
+                $0.merchant.localizedCaseInsensitiveContains(store.transactionSearch)
+                    || $0.description.localizedCaseInsensitiveContains(store.transactionSearch)
+                    || $0.category.displayName.localizedCaseInsensitiveContains(store.transactionSearch)
+                    || ($0.note?.localizedCaseInsensitiveContains(store.transactionSearch) ?? false)
             }
         }
         return list.sorted(using: sortOrder)
@@ -44,7 +43,7 @@ struct TransactionsView: View {
             Divider()
             if rows.isEmpty {
                 TonySays(title: "Nothing matches", message: "Try a different search, or clear the filters above.", art: "nothing") {
-                    Button("Show Everything") { store.transactionFilter = TransactionFilter(); search = "" }
+                    Button("Show Everything") { store.transactionFilter = TransactionFilter(); store.transactionSearch = "" }
                 }
                 .frame(maxHeight: .infinity)
             } else {
@@ -57,7 +56,7 @@ struct TransactionsView: View {
             if !selection.isEmpty, store.showsAsk { withAnimation(.snappy(duration: 0.25)) { store.showsAsk = false } }
             if !selection.isEmpty { showInspector = true }
         }
-        .searchable(text: $search, prompt: "Search payees or categories")
+        .searchable(text: Bindable(store).transactionSearch, prompt: "Search payees or categories")
         .navigationTitle("Transactions")
         .navigationSubtitle(rows.count == 1 ? "1 transaction" : "\(rows.count) transactions")
         // One pane on the right at a time: while the question pane is open, the details pane stays

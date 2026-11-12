@@ -39,10 +39,6 @@ struct OverviewView: View {
         return currentMonth.map { CashFlowData(store: store, month: $0) }
     }
 
-    private func open(_ detail: BudgetStore.OverviewDetail?) {
-        withAnimation(.snappy(duration: 0.28)) { store.overviewDetail = detail }
-    }
-
     // MARK: The summary: one answer, then a few cards to step into
 
     @ViewBuilder
@@ -56,23 +52,23 @@ struct OverviewView: View {
         if store.months.count > 1 { scopePicker }
         if let data = flowData {
             // The judgment that matters most comes first: did living stay within income?
-            FlowHero(data: data) { open(.flow) }
+            FlowHero(data: data) { store.stepInto(.flow) }
             let figures = Figures(store: store, data: data, month: store.overviewShowsYear ? nil : currentMonth)
             HStack(alignment: .top, spacing: 16) {
                 SummaryCard(title: "Spending", symbol: "creditcard.fill", color: Theme.spent,
                             figure: Money.format(data.spending, cents: false), note: figures.spendingNote, noteColor: figures.spendingNoteColor,
-                            action: { open(.spending) }) {
+                            action: { store.stepInto(.spending) }) {
                     if figures.categories.isEmpty { Text("No spending in this stretch.").font(.caption).foregroundStyle(.secondary) }
                     else { MiniRing(slices: figures.categories) }
                 }
                 SummaryCard(title: "Income", symbol: Category.income.symbol, color: Category.income.color,
                             figure: Money.format(data.totalIncome, cents: false), note: figures.incomeNote,
-                            action: { open(.income) }) {
+                            action: { store.stepInto(.income) }) {
                     MiniBars(values: figures.income, labels: figures.labels, lit: figures.lit, color: Category.income.color)
                 }
                 SummaryCard(title: "Investing", symbol: "arrow.up.forward.circle.fill", color: Theme.goldDeep,
                             figure: Money.format(data.built, cents: false), note: figures.investingNote,
-                            action: { open(.investing) }) {
+                            action: { store.stepInto(.investing) }) {
                     MiniBars(values: figures.invested, labels: figures.labels, lit: figures.lit, color: Theme.goldDeep)
                 }
             }
@@ -157,19 +153,7 @@ struct OverviewView: View {
 
     @ViewBuilder
     private func detailPage(_ detail: BudgetStore.OverviewDetail) -> some View {
-        HStack(spacing: 12) {
-            Button { open(nil) } label: {
-                HStack(spacing: 5) { Image(systemName: "chevron.left").font(.callout.weight(.semibold)); Text("Overview").font(.headline) }
-                    .foregroundStyle(.tint)
-                    .padding(.horizontal, 14).frame(height: 34)
-                    .background(Color.primary.opacity(0.07), in: Capsule())
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
-            .help("Back to the Overview (Esc)")
-            if store.months.count > 1 { scopePicker }
-        }
+        if store.months.count > 1 { scopePicker }
         if let data = flowData {
             switch detail {
             case .flow: CashFlowContent(data: data, interactive: true)
@@ -312,7 +296,7 @@ struct OverviewView: View {
                 HStack {
                     SectionHeader(title: stories.count == 1 ? "This month's story" : "This month's stories")
                     Spacer()
-                    Button("All Trips & Events") { store.selection = .stories }.buttonStyle(.borderless)
+                    Button("All Trips & Events") { store.go(to: .stories) }.buttonStyle(.borderless)
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 14, alignment: .top)], alignment: .leading, spacing: 14) {
                     ForEach(stories) { StoryCard(story: $0, compact: true) }
@@ -325,7 +309,7 @@ struct OverviewView: View {
     private var missingBanner: some View {
         let missing = store.missingStatements
         let count = missing.reduce(0) { $0 + $1.months.count }
-        return Button { store.selection = .accounts } label: {
+        return Button { store.go(to: .accounts) } label: {
             HStack(spacing: 12) {
                 Image(systemName: "calendar.badge.exclamationmark").font(.title3).foregroundStyle(Theme.caution)
                 VStack(alignment: .leading, spacing: 1) {
@@ -366,7 +350,7 @@ struct OverviewView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Double-Check") { store.selection = .review }
+                Button("Double-Check") { store.go(to: .review) }
                     .controlSize(.large)
             }
         }

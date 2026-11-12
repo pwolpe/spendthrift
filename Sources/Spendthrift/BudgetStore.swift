@@ -27,7 +27,15 @@ final class BudgetStore {
     @ObservationIgnored private var dateCache: [String: Date] = [:]
 
     // UI state
-    var selection: SidebarItem? = .overview { didSet { if placeFocus != nil { placeFocus = nil }; if chargesFocus != nil { chargesFocus = nil }; if overviewDetail != nil { overviewDetail = nil } } }
+    /// The sidebar section. Set directly, it is a fresh start; links inside pages use `navigate`.
+    var selection: SidebarItem? = .overview {
+        didSet { if !isNavigating { route = []; overviewDetail = nil; history = [] } }
+    }
+    /// Pages opened over the section, the last one in front.
+    var route: [Route] = []
+    /// Where Back leads, most recent last.
+    var history: [Location] = []
+    @ObservationIgnored var isNavigating = false
     /// The month and the year the Overview is showing (nil: the latest). Kept here, not in the page,
     /// so stepping into a charge or a payee and back returns to the same stretch.
     var overviewMonth: Month?
@@ -35,11 +43,6 @@ final class BudgetStore {
     /// Which of the Overview's cards has been stepped into, if any. Nil is the summary itself.
     var overviewDetail: OverviewDetail?
     enum OverviewDetail: String { case flow, spending, income, investing }
-    /// Non-nil while a plain list of charges is open (one month of dining, one trip…): where a click
-    /// in an answer lands. A place opened from it sits on top, and Back returns here.
-    var chargesFocus: TransactionFilter?
-    /// Non-nil while one place's page is open over whatever page was showing.
-    var placeFocus: String?
     /// What is typed in the box on the Places page, and the stretch of time it looks at (kept while a place is open).
     var placeSearch = ""
     var placeSpan = PlacesView.Span.all
@@ -86,6 +89,8 @@ final class BudgetStore {
         playRecap(of: previous)
     }
     var transactionFilter = TransactionFilter()
+    /// What is typed in the box on the Transactions page (kept while a payee opened from it is on screen).
+    var transactionSearch = ""
     /// The Overview looks at one month or at a whole year; the same page either way.
     var overviewShowsYear = ProcessInfo.processInfo.environment["SPENDTHRIFT_YEAR"] != nil
     var pendingImports: [PendingImport] = []
@@ -154,7 +159,6 @@ final class BudgetStore {
     var orderWho: String?
     /// The kind of thing clicked on the ring ("Baby & Kids"), when the page is narrowed to one.
     var orderKind: String?
-    var orderList = OrderList.orders
     /// One order on show by itself (arrived at from a charge), until the person clears it.
     var orderOnly: String?
 
@@ -169,7 +173,6 @@ final class BudgetStore {
     private(set) var orderChargeList: [OrderCharge] = []
 
     enum OrderScope: Hashable { case all, year(Int), month(Month) }
-    enum OrderList: String, CaseIterable, Identifiable { case orders = "Orders", items = "Items"; var id: String { rawValue } }
 
     struct OrderRow: Identifiable {
         let id: Int
@@ -247,51 +250,6 @@ final class BudgetStore {
 
     /// Charges on accounts kept apart: not the person's own, so not part of this tie-out either.
     private var apartEntryIDs: Set<UUID> { Set(setApart.map(\.id)) }
-
-    /// The page in front of the person, in a sentence, for the question pane to read a question by.
-    var screenContext: String? {
-        guard !accounts.isEmpty else { return nil }
-        if let place = placeFocus { return "the page for one payee, \(place)" }
-        if let filter = chargesFocus { return "a list of charges" + (filter.title.map { ": \($0)" } ?? "") }
-        switch selection ?? .overview {
-        case .orders:
-            var parts = ["the Amazon page (the order history: items ordered from Amazon, Whole Foods and Kindle)"]
-            switch orderScope {
-            case .all: parts.append("showing all time")
-            case .year(let year): parts.append("showing the year \(year)")
-            case .month(let month): parts.append("showing \(month.title)")
-            }
-            if let who = orderWho { parts.append("only \(who)'s orders") }
-            if let kind = orderKind { parts.append("only the kind \(kind)") }
-            if !orderSearch.trimmingCharacters(in: .whitespaces).isEmpty { parts.append("searched for “\(orderSearch)”") }
-            return parts.joined(separator: ", ")
-        case .overview:
-            switch overviewDetail {
-            case .spending: return "their everyday spending, by category and month"
-            case .income: return "their income, by who paid it"
-            case .investing: return "the investment side: what was invested and what came back"
-            case .flow: return "all their money in and out (income, spending, taxes, investing)"
-            case nil: return "the Overview: what came in and what it did, with spending, income and investing"
-            }
-        case .stories: return "the Trips & Events page"
-        case .places: return "the list of payees"
-        case .transactions: return "the list of all transactions"
-        case .statements: return "their statements"
-        case .apart: return "the page of accounts kept apart from their own money"
-        case .review, .categories, .accounts: return nil
-        }
-    }
-
-    /// Goes to the Amazon page showing just the order behind one charge.
-    func showOrder(of charge: Transaction.ID) {
-        guard let order = orders.items(for: charge).first?.orderID else { return }
-        withAnimation(.snappy(duration: 0.25)) {
-            placeFocus = nil; chargesFocus = nil
-            orderScope = .all; orderWho = nil; orderKind = nil; orderSearch = ""; orderList = .orders
-            orderOnly = order
-            selection = .orders
-        }
-    }
 
     /// A few sentences about one stretch of orders, written by the model from totals the app worked out.
     /// Written once for a given set of facts and kept; nil while it is being written or when the model is off.
@@ -1675,11 +1633,6 @@ final class BudgetStore {
         }
     }
 
-    /// Opens one simple page listing the charges that match.
-    func showCharges(_ filter: TransactionFilter) {
-        withAnimation(.snappy(duration: 0.25)) { placeFocus = nil; chargesFocus = filter }
-    }
-
     func transactions(matching f: TransactionFilter) -> [Transaction] {
         var list = transactions
         if let c = f.category { list = list.filter { $0.category == c } }
@@ -1711,20 +1664,6 @@ final class BudgetStore {
             if best == nil || t.amount > best!.charge.amount { best = (thisYear - year, t) }
         }
         return best
-    }
-
-    /// Everything that counted as spending in one month: what a bar on a chart stands for.
-    func showSpending(in month: Month) {
-        showCharges(TransactionFilter(ids: Set(spending(in: month).map(\.id)), title: "Spending in \(month.title)"))
-    }
-
-    /// The same, for a payee known by its key.
-    func showPlace(key: String) {
-        if let name = place(key)?.name { showPlace(name) }
-    }
-
-    func showPlace(_ name: String) {
-        withAnimation(.snappy(duration: 0.25)) { placeFocus = name }
     }
 
     /// Two names for one business: everything filed under `other` becomes part of `name` from now on.
@@ -2386,13 +2325,6 @@ final class BudgetStore {
         originalPeek = OriginalPeek(entryID: id)
     }
 
-    /// Opens the Statements page on one file (and, optionally, one charge in it).
-    func browse(_ source: SourceFile, charge: UUID? = nil) {
-        originalPeek = nil
-        statementFocus = StatementFocus(sourceID: source.id, entryID: charge)
-        selection = .statements
-    }
-
     private func showImportToast(added: Int, accounts names: [String], verified: Int = 0, mismatches: [String] = [], scanned: Int = 0,
                                  automatic: Bool = false) {
         let where_ = names.joined(separator: ", ")
@@ -2667,16 +2599,6 @@ final class BudgetStore {
 
     func insights(for month: Month) -> [Insight] {
         InsightEngine.insights(for: month, in: transactions).filter { !library.dismissedInsights.contains($0.id) }
-    }
-
-    /// Opens what an insight is about: its charges, its payee, or its category for the month.
-    func show(_ insight: Insight) {
-        switch insight.target {
-        case .place(let name)?: showPlace(name)
-        case .charges(let ids, let title)?: showCharges(TransactionFilter(ids: ids, title: title))
-        case .category(let category, let month)?: showCharges(TransactionFilter(category: category, month: month))
-        case nil: break
-        }
     }
 
     func dismissInsight(_ insight: Insight) {

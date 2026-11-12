@@ -26,7 +26,7 @@ struct ReviewView: View {
                     TonySays(title: "Sorting…", message: "We're working through the new payees. This only takes a moment.", art: "sorting")
                 } else {
                     TonySays(title: "All caught up", message: "Every payee has a category. New guesses show up here whenever you add a statement.", art: "caughtup") {
-                        Button("Back to Overview") { store.selection = .overview }
+                        Button("Back to Overview") { store.go(to: .overview) }
                     }
                 }
             } else {

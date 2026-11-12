@@ -180,7 +180,6 @@ struct CashFlowContent: View {
                     .foregroundStyle(.secondary)
             }
             FlowHero(data: data)
-            PurposeCard(data: data)
             HStack(alignment: .top, spacing: 22) {
                 StatementCard(data: data, open: interactive ? open : nil)
                 // (Which card statements are here lives in Setup, with the rest of what's missing.)

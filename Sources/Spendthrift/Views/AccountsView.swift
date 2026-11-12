@@ -58,7 +58,7 @@ private struct AccountCard: View {
                         .help("Click to rename")
                     Menu {
                         Button("Show Transactions", systemImage: "list.bullet") {
-                            if account.apart != nil { store.selection = .apart } else { store.showCharges(TransactionFilter(accountID: account.id)) }
+                            if account.apart != nil { store.go(to: .apart) } else { store.showCharges(TransactionFilter(accountID: account.id)) }
                         }
                         if account.apart != nil {
                             Button("Count in My Totals Again", systemImage: "tray.and.arrow.down") { store.keepApart(account.id, as: nil) }

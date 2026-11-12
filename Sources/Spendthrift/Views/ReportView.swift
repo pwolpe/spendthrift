@@ -200,20 +200,10 @@ struct ReportContent: View {
                 Text("No spending in this period.").foregroundStyle(.secondary)
             } else {
                 MonthlyChartCard(data: data)
-                if interactive {
-                    switch data.period {
-                    case .year(let year): NoticedCard(scope: .year(year))
-                    case .last12: NoticedCard(scope: .last12)
-                    }
-                }
                 CategoryTableCard(data: data, open: interactive ? open : nil)
                 HStack(alignment: .top, spacing: 22) {
                     PlacesCard(places: data.places)
                     BiggestCard(transactions: data.biggest)
-                }
-                HStack(alignment: .top, spacing: 22) {
-                    RecurringCard(subscriptions: data.subscriptions)
-                    MoneyInCard(data: data)
                 }
                 TaxTimeCard(months: Set(data.months))
             }
@@ -226,8 +216,8 @@ struct ReportContent: View {
     }
 
     private func open(_ category: Category) {
-        store.transactionFilter = TransactionFilter(category: category, month: data.months.count == 1 ? data.months.first : nil)
-        store.selection = category == .unsorted ? .review : .transactions
+        if category == .unsorted { store.go(to: .review); return }
+        store.go(to: .transactions) { store.transactionFilter = TransactionFilter(category: category, month: data.months.count == 1 ? data.months.first : nil) }
     }
 
     private var hero: some View {
@@ -540,15 +530,8 @@ private struct BiggestCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(title: "Biggest Purchases")
                 ForEach(Array(transactions.enumerated()), id: \.element.id) { i, t in
-                    HStack(spacing: 12) {
-                        MerchantIcon(name: t.merchant, category: t.category, size: 28)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(t.merchant).font(.body.weight(.medium)).lineLimit(1)
-                            Text(t.date.formatted(.dateTime.month(.wide).day()))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Text(Money.format(t.amount)).monospacedDigit()
+                    PayeeLine(name: t.merchant, category: t.category, detail: t.date.formatted(.dateTime.month(.wide).day()), amount: t.amount) {
+                        BudgetStore.shared.showCharges(TransactionFilter(ids: [t.id], title: t.merchant))
                     }
                     if i < transactions.count - 1 { Divider().padding(.leading, 40) }
                 }
@@ -559,103 +542,6 @@ private struct BiggestCard: View {
 }
 
 // MARK: - Recurring & money in
-
-private struct RecurringCard: View {
-    let subscriptions: [Subscription]
-
-    var body: some View {
-        let monthly = subscriptions.reduce(0) { $0 + $1.monthlyAmount }
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    SectionHeader(title: "Every Month, Like Clockwork", subtitle: "Charges that repeat each month")
-                    Spacer()
-                }
-                if subscriptions.isEmpty {
-                    Text("No repeating charges found yet. These show up after two months of statements.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(subscriptions) { s in
-                        HStack(spacing: 12) {
-                            MerchantIcon(name: s.merchant, category: s.category, size: 28)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(s.merchant).font(.body.weight(.medium)).lineLimit(1)
-                                Text("Last charged \(s.lastCharge.formatted(.dateTime.month(.abbreviated).day()))")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 1) {
-                                Text("\(Money.format(s.monthlyAmount))/mo").monospacedDigit()
-                                Text("\(Money.format(s.monthlyAmount * 12, cents: false))/yr")
-                                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    Divider()
-                    HStack {
-                        Text("Together").font(.headline)
-                        Spacer()
-                        Text("\(Money.format(monthly))/mo · \(Money.format(monthly * 12, cents: false))/yr")
-                            .font(.headline)
-                            .monospacedDigit()
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct MoneyInCard: View {
-    let data: ReportData
-
-    var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Money In & Accounts")
-                if data.incomeSources.isEmpty {
-                    Text("No income found. Add a checking account statement to see paychecks and deposits.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(data.incomeSources) { source in
-                        row(symbol: "arrow.down.circle.fill", tint: .green, title: source.name,
-                            value: "+" + Money.format(source.total, cents: false), valueColor: .green)
-                    }
-                }
-                if data.transfers > 0 {
-                    row(symbol: "arrow.left.arrow.right.circle.fill", tint: .gray, title: "Payments & transfers",
-                        value: Money.format(data.transfers, cents: false), valueColor: .secondary,
-                        detail: "Moved between accounts, not counted as spending")
-                }
-                if !data.accounts.isEmpty {
-                    Divider().padding(.vertical, 2)
-                    Text("SPENDING BY ACCOUNT").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    ForEach(data.accounts) { a in
-                        row(symbol: "creditcard.fill", tint: .accentColor, title: a.name,
-                            value: Money.format(a.spent, cents: false), valueColor: .primary,
-                            detail: "\(a.count) transactions")
-                    }
-                }
-            }
-        }
-    }
-
-    private func row(symbol: String, tint: Color, title: String, value: String, valueColor: Color, detail: String? = nil) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 22))
-                .foregroundStyle(tint)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.body.weight(.medium)).lineLimit(1)
-                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
-            }
-            Spacer()
-            Text(value).monospacedDigit().foregroundStyle(valueColor)
-        }
-    }
-}
 
 enum Gold {
     static let gradient = LinearGradient(colors: [Color(red: 0.98, green: 0.82, blue: 0.36), Color(red: 0.78, green: 0.56, blue: 0.13)],

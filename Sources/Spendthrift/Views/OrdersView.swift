@@ -145,11 +145,8 @@ struct OrdersView: View {
                     listing(list)
                 } else {
                     if plain { shortVersion(list) }
-                    // Side by side when there is room for both to be read in full; one under the other when not.
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .top, spacing: 18) { summary(list, finding: finding); ring(everything) }
-                        VStack(alignment: .leading, spacing: 18) { summary(list, finding: finding); ring(everything) }
-                    }
+                    total(list)
+                    ring(everything)
                     trend(list)
                     if !finding { favourites(list) }
                     if plain { tieOut() }
@@ -273,30 +270,15 @@ struct OrdersView: View {
 
     // MARK: What it came to
 
-    private func summary(_ list: [Row], finding: Bool) -> some View {
+    /// What it came to, in a line: the ring beside it says where it went.
+    private func total(_ list: [Row]) -> some View {
         let ordered = list.reduce(0) { $0 + $1.item.cents }, net = list.reduce(0) { $0 + $1.net }
         let orders = Set(list.map(\.item.orderID)).count
-        var title = ["What was ordered", scopeTitle]
-        if let who = store.orderWho { title.append(who) }
-        if let kind = store.orderKind { title.append(kind) }
-        if finding { title.append("“\(store.orderSearch.trimmingCharacters(in: .whitespaces))”") }
-        return ReceiptPaper(padding: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title.joined(separator: " · ").uppercased()).font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
-                ReceiptRule()
-                ReceiptLine(value: Self.money(ordered)) { Text("\(orders.formatted()) \(orders == 1 ? "order" : "orders"), \(list.count.formatted()) \(list.count == 1 ? "item" : "items")") }
-                if ordered != net {
-                    ReceiptLine(value: "−" + Self.money(ordered - net), valueColor: Theme.good) { Text("Refunded") }
-                }
-                ReceiptRule()
-                ReceiptLine(value: Self.money(net), bold: true) { Text("TOTAL").font(Theme.mono(13, .bold)) }
-                if store.isReadingOrders {
-                    Label("Still reading what each item is. Names and categories fill in as it goes.", systemImage: "sparkles")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-        .frame(width: 320)
+        var about = ["\(orders.formatted()) \(orders == 1 ? "order" : "orders")", "\(list.count.formatted()) \(list.count == 1 ? "item" : "items")"]
+        if ordered != net { about.append("after \(Self.money(ordered - net)) refunded") }
+        if store.isReadingOrders { about.append("still reading what each item is") }
+        return BigFigure(title: ([scopeTitle] + [store.orderWho, store.orderKind].compactMap { $0 }).joined(separator: " · "),
+                         amount: Double(net) / 100, subtitle: about.joined(separator: " · "))
     }
 
     // MARK: Where it went
@@ -574,24 +556,17 @@ struct OrdersView: View {
     // MARK: The orders themselves
 
     @ViewBuilder private func listing(_ list: [Row]) -> some View {
-        @Bindable var store = store
         let limit = scrolls ? 250 : 12
-        if store.orderOnly == nil {
-            HStack {
-                Picker("Show", selection: $store.orderList) {
-                    ForEach(BudgetStore.OrderList.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden().fixedSize()
-                if let kind = store.orderKind {
-                    Button { withAnimation(.snappy(duration: 0.2)) { store.orderKind = nil } } label: {
-                        Label("Only \(kind)", systemImage: "xmark.circle.fill").font(.callout)
-                    }
-                    .buttonStyle(.bordered).help("Show everything again")
-                }
-                Spacer()
+        // Looking for a thing, or at one kind of thing: the items themselves. Otherwise, the orders they came in.
+        let byItem = store.orderOnly == nil && (store.orderKind != nil || !store.orderSearch.trimmingCharacters(in: .whitespaces).isEmpty)
+        if let kind = store.orderKind, store.orderOnly == nil {
+            Button { withAnimation(.snappy(duration: 0.2)) { store.orderKind = nil } } label: {
+                Label("Only \(kind)", systemImage: "xmark.circle.fill").font(.callout)
             }
+            .buttonStyle(.bordered).help("Show everything again")
         }
-        if store.orderList == .orders || store.orderOnly != nil {
+        if !byItem {
+
             let orders = Self.orders(list)
             Card(padding: 8) {
                 LazyVStack(spacing: 0) {
