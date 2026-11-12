@@ -77,10 +77,18 @@ struct OverviewView: View {
                     MiniBars(values: figures.invested, labels: figures.labels, lit: figures.lit, color: Theme.goldDeep)
                 }
             }
-            HStack(alignment: .top, spacing: 16) {
-                if !DebugHooks.off("noticed") { AfterFirstFrame { noticed } }
-                if !DebugHooks.off("coming") { recurringCard }
-                if !store.overviewShowsYear, let m = currentMonth { budgetCard(m) }
+            if !store.overviewShowsYear, let m = currentMonth {
+                // A month: what repeats beside what was planned, then anything noticed in it.
+                HStack(alignment: .top, spacing: 16) {
+                    if !DebugHooks.off("coming") { recurringCard }
+                    budgetCard(m)
+                }
+                if !DebugHooks.off("noticed") { noticed }
+            } else {
+                HStack(alignment: .top, spacing: 16) {
+                    if !DebugHooks.off("noticed") { AfterFirstFrame { noticed } }
+                    if !DebugHooks.off("coming") { recurringCard }
+                }
             }
             AfterFirstFrame { SavingsStrip() }
             if !store.overviewShowsYear, let m = currentMonth, !DebugHooks.off("stories") { storiesThisMonth(m) }

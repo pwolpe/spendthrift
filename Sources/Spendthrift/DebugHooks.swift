@@ -253,6 +253,7 @@ enum DebugHooks {
             for _ in 0..<100 where store.isSuggesting || store.isTidying { try? await Task.sleep(for: .milliseconds(200)) }
             await store.tidyIfNeeded()
             await store.learnFactsIfNeeded()
+            for _ in 0..<600 where store.isLearningFacts { try? await Task.sleep(for: .milliseconds(300)) }
             // Payees split off by the tidy-up get a proper name and category before quitting.
             for _ in 0..<10 where store.isSuggesting { try? await Task.sleep(for: .milliseconds(300)) }
             await store.sortRemaining()

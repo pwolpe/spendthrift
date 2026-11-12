@@ -11,18 +11,15 @@ extension BudgetStore {
         return made
     }
 
-    /// The same for the twelve months ending at the newest finished month (or one calendar year).
+    /// The same for the last twelve months (or one calendar year) against the twelve before.
     func changes(in period: ReportPeriod) -> ChangeEngine.Explanation? {
         let key = "period-\(period.id)"
         if let kept = changeCache[key] { return kept }
         var made: ChangeEngine.Explanation?
         switch period {
         case .last12:
-            if let last = transactions.last {
-                var end = Month(date: last.date)
-                if Calendar.current.component(.day, from: last.date) < 25 { end = end.adding(-1) }
-                made = ChangeEngine.explainYear(endingAt: end, in: transactions, stories: stories)
-            }
+            // The same twelve months the verdict above it is about, so the page never gives two totals for one stretch.
+            if let end = months.last { made = ChangeEngine.explainYear(endingAt: end, in: transactions, stories: stories) }
         case .year(let year):
             made = ChangeEngine.explainYear(endingAt: Month(year: year, month: 12), label: String(year), in: transactions, stories: stories)
         }

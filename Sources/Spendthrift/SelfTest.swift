@@ -613,6 +613,9 @@ enum SelfTest {
             let byPayee = TrimEngine.lines(stretch, byPayee: true, optional: store.isOptional)
             let byCategory = TrimEngine.lines(stretch, byPayee: false, optional: store.isOptional)
             check("every ranked line is worth something, by payee and by category", (byPayee + byCategory).allSatisfy { $0.total > 0 && (0...1).contains($0.optionalShare) })
+            if let change = store.changes(in: period) {
+                check("what changed is about the same total the verdict shows", abs(change.total - flow.spending) < 0.01)
+            }
             check("what was chosen is part of what was spent", flow.optionalSpending >= -0.01 && flow.optionalSpending <= flow.spending + 0.01)
             check("the ranking is largest first and every line is its charges", zip(byPayee, byPayee.dropFirst()).allSatisfy { $0.total >= $1.total }
                   && byPayee.prefix(20).allSatisfy { line in abs(store.transactions(withIDs: line.chargeIDs).reduce(0) { $0 + $1.amount } - line.total) < 0.01 })

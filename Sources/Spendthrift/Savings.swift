@@ -66,10 +66,15 @@ enum SavingsEngine {
 
         // Habits: a chosen payee visited at least once a month. One fewer visit a month is a small ask with a real total.
         let recurringNames = Set(recurring.map(\.merchant))
-        let habits = Dictionary(grouping: year.filter { $0.amount > 0 && optional($0) }, by: \.merchant)
-            .filter { $0.value.count >= 12 && !recurringNames.contains($0.key) && !taken.contains($0.key) }
-            .map { name, charges -> (name: String, total: Double, charges: [Transaction]) in (name, charges.reduce(0) { $0 + $1.amount }, charges) }
-            .sorted { $0.total > $1.total }
+        // (A flight or a hotel is a trip, not a habit, however often; and a habit is small each time.)
+        var byPlace: [String: [Transaction]] = [:]
+        for t in year where t.amount > 0 && t.category != .travel && optional(t) { byPlace[t.merchant, default: []].append(t) }
+        var habits: [(name: String, total: Double, charges: [Transaction])] = []
+        for (name, charges) in byPlace where charges.count >= 12 && !recurringNames.contains(name) && !taken.contains(name) {
+            let total = charges.reduce(0) { $0 + $1.amount }
+            if total / Double(charges.count) <= 150 { habits.append((name, total, charges)) }
+        }
+        habits.sort { ($0.total, $1.name) > ($1.total, $0.name) }
         for habit in habits.prefix(3) {
             let each = habit.total / Double(habit.charges.count)
             out.append(Idea(id: "habit|\(habit.name)|\(habit.charges.count)", kind: .habit, title: "\(habit.name), \(habit.charges.count) times",

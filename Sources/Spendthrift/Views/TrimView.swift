@@ -17,7 +17,8 @@ struct TrimCard: View {
     var body: some View {
         let all = TrimEngine.lines(transactions, byPayee: byPayee, optional: store.isOptional)
         let lines = chosenOnly ? all.filter { $0.optionalShare >= 0.5 } : all
-        let total = all.reduce(0) { $0 + $1.total }
+        // The stretch's own total, refunds and all, so it is the same figure the page gives above.
+        let total = transactions.filter(\.countsAsSpending).reduce(0) { $0 + $1.amount }
         let shown = lines.reduce(0) { $0 + $1.total }
         Card {
             VStack(alignment: .leading, spacing: 14) {
