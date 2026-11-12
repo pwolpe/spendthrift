@@ -38,11 +38,11 @@ struct StoriesView: View {
             }
             if stories.isEmpty {
                 if store.isFindingStories {
-                    TonySays(title: "Reading between the lines…", message: "I'm looking through your spending for trips and occasions. This takes a minute the first time.", art: "nothing")
+                    EmptyState(title: "Reading between the lines…", message: "I'm looking through your spending for trips and occasions. This takes a minute the first time.", art: "nothing")
                 } else if !CloudAI.isEnabled {
-                    TonySays(title: "This one needs Smarter AI", message: "With a key entered in Settings, I can spot trips and occasions in your spending and tell you what each one cost.", art: "notrips")
+                    EmptyState(title: "This one needs Smarter AI", message: "With a key entered in Settings, I can spot trips and occasions in your spending and tell you what each one cost.", art: "notrips")
                 } else {
-                    TonySays(title: "No trips yet", message: "When your statements show a trip or a big occasion, it will appear here with what it cost.", art: "notrips")
+                    EmptyState(title: "No trips yet", message: "When your statements show a trip or a big occasion, it will appear here with what it cost.", art: "notrips")
                 }
             } else {
                 // A year at a time, newest first: with several years of statements there can be dozens.

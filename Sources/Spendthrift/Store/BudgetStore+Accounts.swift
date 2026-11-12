@@ -78,7 +78,7 @@ extension BudgetStore {
         }
     }
 
-    /// New statements are simply added (Tony can undo). Only ones that need him, such as a locked
+    /// New statements are simply added (it can be undone). Only ones that need attention, such as a locked
     /// PDF, wait in the "New in your Downloads" banner.
     private func foundInDownloads(_ found: [URL]) {
         guard Self.addsDownloadsAutomatically else { downloadCandidates = Array(found.prefix(5)); return }
@@ -95,7 +95,7 @@ extension BudgetStore {
     }
 
     /// Watches the Downloads folder while the app is open, so a statement saved from the bank's
-    /// website shows up in the app a few seconds later without Tony doing anything.
+    /// website shows up in the app a few seconds later without anyone doing anything.
     func watchDownloads() {
         guard downloadsWatcher == nil, ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] == nil,
               let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }

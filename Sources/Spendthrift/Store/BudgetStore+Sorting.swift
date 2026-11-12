@@ -9,7 +9,7 @@ extension BudgetStore {
     // MARK: - Sorting with Apple Intelligence
 
     /// Places the instant rules couldn't sort go to the on-device model, a few at a time.
-    /// Results are applied automatically; Double-Check lets Tony glance over them later.
+    /// Results are applied automatically; Double-Check lets the person glance over them later.
     /// Ties every card payment that left a bank account to that card's statements.
     ///
     /// A payment is accounted for when the card's own statement shows it arriving (the same amount
@@ -165,7 +165,7 @@ extension BudgetStore {
                 .sorted { $0.1 > $1.1 }   // biggest first, so the totals settle quickly
                 .map(\.0)
             guard !waiting.isEmpty else { break }
-            // Tony's own choices teach the model his habits.
+            // The person's own choices teach the model their habits.
             let examples = library.merchants.values
                 .filter { $0.confirmed && $0.category != nil }
                 .map { MerchantRule(name: $0.name, category: $0.category!) }
@@ -182,7 +182,7 @@ extension BudgetStore {
         }
     }
 
-    /// The cloud model reviews every place that isn't Tony's own choice or a business the app knows
+    /// The cloud model reviews every place that isn't the person's own choice or a business the app knows
     /// for certain: unsorted places, on-device guesses, the bank's broad categories and word matches.
     /// What it's sure of is simply filed; only what it calls a guess goes to Double-Check.
     private func sortWithCloud() async {

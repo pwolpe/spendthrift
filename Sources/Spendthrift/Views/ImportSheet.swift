@@ -144,7 +144,7 @@ struct ImportSheet: View {
     }
 }
 
-/// For Paul: manual control over which column is which.
+/// For power users: manual control over which column is which.
 private struct ColumnPickers: View {
     let table: CSVTable
     @Binding var mapping: ColumnMapping?

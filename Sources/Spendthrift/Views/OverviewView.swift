@@ -79,7 +79,7 @@ struct OverviewView: View {
             }
             if !store.overviewShowsYear, let m = currentMonth, !DebugHooks.off("stories") { storiesThisMonth(m) }
         } else {
-            TonySays(title: "Nothing here yet", message: "Drop a statement into this window and it all gets added up.", art: "welcome")
+            EmptyState(title: "Nothing here yet", message: "Drop a statement into this window and it all gets added up.", art: "welcome")
         }
     }
 

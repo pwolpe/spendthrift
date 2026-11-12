@@ -31,7 +31,7 @@ struct PlaceView: View {
                     spellings(all)
                     list(all)
                 } else {
-                    TonySays(title: "Nothing here any more", message: "This payee was renamed or combined with another one.")
+                    EmptyState(title: "Nothing here any more", message: "This payee was renamed or combined with another one.")
                 }
             }
             .padding(28)
@@ -281,7 +281,7 @@ struct ChargesView: View {
                 // A trip or an occasion gets its own picture: them, there, holding a receipt from it.
                 if let id = filter.storyID, let story = store.stories.first(where: { $0.id == id }), scrolls { TripPictureCard(story: story) }
                 if all.isEmpty {
-                    TonySays(title: "Nothing here", message: "No charges match. Try another month or category.", art: "nothing")
+                    EmptyState(title: "Nothing here", message: "No charges match. Try another month or category.", art: "nothing")
                 } else {
                     if places.count > 1 {
                         Card {

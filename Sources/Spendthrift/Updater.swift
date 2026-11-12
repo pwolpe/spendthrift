@@ -4,10 +4,10 @@ import Security
 
 /// Free automatic updates, without an Apple Developer account.
 ///
-/// Paul publishes a zip of the app as a GitHub release. The app asks GitHub (at most once a day)
-/// whether a newer version exists; nothing about Tony or his money is sent. Before installing, the
-/// download must carry the same code signature as the running app (Paul's own certificate), so
-/// only builds made on Paul's Mac can ever replace it. Tony's data lives outside the app and is untouched.
+/// The maintainer publishes a zip of the app as a GitHub release. The app asks GitHub (at most once a day)
+/// whether a newer version exists; nothing about you or your money is sent. Before installing, the
+/// download must carry the same code signature as the running app (the maintainer's own certificate), so
+/// only builds made by the maintainer can ever replace it. Your data lives outside the app and is untouched.
 @MainActor @Observable
 final class Updater {
     static let shared = Updater()
@@ -109,7 +109,7 @@ final class Updater {
             return fail("To update, first drag Spendthrift into your Applications folder and open it from there.")
         }
         guard let requirement = Self.ownRequirement() else {
-            return fail("This copy of the app can't update itself. Ask Paul for a fresh copy.")
+            return fail("This copy of the app can't update itself. Download the latest version from the Releases page.")
         }
         let work = FileManager.default.temporaryDirectory.appendingPathComponent("SpendthriftUpdate-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: work) }
@@ -121,7 +121,7 @@ final class Updater {
             let zip = work.appendingPathComponent("update.zip")
             try FileManager.default.moveItem(at: downloaded, to: zip)
 
-            state = .installing(release, "Checking it's really from Paul…")
+            state = .installing(release, "Checking the update's signature…")
             let unpacked = work.appendingPathComponent("unpacked", isDirectory: true)
             guard await Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path]) == 0,
                   let newApp = (try? FileManager.default.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: nil))?
@@ -129,7 +129,7 @@ final class Updater {
             else { return fail("The download was damaged. Try again later.") }
             // The download must be signed by the same certificate as this app, and really be newer.
             guard Self.satisfies(newApp, requirement) else {
-                return fail("The download isn't signed by Paul, so I didn't install it. Nothing was changed.")
+                return fail("The download isn't signed by the same developer as this app, so I didn't install it. Nothing was changed.")
             }
             let newVersion = (NSDictionary(contentsOf: newApp.appendingPathComponent("Contents/Info.plist"))?["CFBundleShortVersionString"] as? String) ?? "0"
             guard Self.isNewer(newVersion, than: currentVersion) else { return fail("That download isn't newer than what you have.") }

@@ -47,7 +47,7 @@ enum PDFStatement {
     private static func table(fromText text: String, pages: [String], positional positionalText: String?, url: URL) async throws -> CSVTable {
 
         let knownIssuer = detectIssuer(text)
-        // Chase names its files "20260125-statements-4090-.pdf" after the account as it is today, even
+        // Chase names its files "20260125-statements-1234-.pdf" after the account as it is today, even
         // when an older statement inside still prints a replaced card's number. Trust the file name there.
         let fromFileName = url.lastPathComponent.range(of: #"statements-\d{4}-"#, options: .regularExpression)
             .map { String(url.lastPathComponent[$0].filter(\.isNumber)) }
@@ -85,7 +85,7 @@ enum PDFStatement {
         var cloudCheck: StatementCheck?
         if best.matched == 0, best.mismatched.isEmpty, summaryMatches(rows) { best.matched = 1 }
         // Unless our own reading already adds up to the statement's printed totals, let the powerful
-        // model read it too (when Tony's Mac has a key). It copes with layouts and scans the patterns
+        // model read it too (when this Mac has a key). It copes with layouts and scans the patterns
         // don't, and two independent readings that agree are as good as a printed total.
         let selfVerified = best.matched > 0 && best.mismatched.isEmpty
         // A month when nothing happened: the statement says so itself (it closes on the balance it

@@ -47,7 +47,7 @@ enum CheckReader {
         - confident: true if the payee is clearly readable and the category follows from the payee or memo; false if you are guessing
 
         A check to the US Treasury, the IRS or a state tax department is "Income Taxes". A check to an investment fund, \
-        a REIT or a brokerage is "Investing & Capital Calls". Rent, a contractor, a co-op or condo, furniture and repairs \
+        a REIT or a brokerage is "Investing & Capital Calls". Rent, a contractor, a housing association or condo, furniture and repairs \
         are Home. A check to a person with nothing to say what it was for is Other, with confident false.
         Never copy an account number, routing number or Social Security number into any field.
         Reply with JSON only: {"checks": [{"number": "", "amount": 0, "payee": "", "memo": "", "category": "", "confident": true}]}

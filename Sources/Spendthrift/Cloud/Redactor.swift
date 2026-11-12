@@ -32,7 +32,7 @@ enum Redactor {
     }
 
     /// The account holder's name as printed on a statement: it sits on the line above the street
-    /// address. Other text can share that line ("PAUL WOLPE  We accept operator relay calls"), so
+    /// address. Other text can share that line ("JANE DOE  We accept operator relay calls"), so
     /// only the leading capitalized words are taken.
     static func holderNames(in statement: String) -> Set<String> {
         let lines = statement.components(separatedBy: .newlines)
@@ -96,11 +96,11 @@ enum Redactor {
         var text = lines.joined(separator: "\n")
         for name in names.sorted(by: { $0.count > $1.count }) {
             text = text.replacingOccurrences(of: name, with: "[name]", options: .caseInsensitive)
-            // "WOLPE /WI-FI" style mentions of the surname alone.
+            // "DOE /WI-FI" style mentions of the surname alone.
             if let last = name.split(separator: " ").last, last.count >= 4 {
                 text = replace(text, "\\b" + NSRegularExpression.escapedPattern(for: String(last)) + "\\b", "[name]", options: .caseInsensitive)
             }
-            // "Paul Michael [name]", "PAUL M [name]": the first name with middle names or initials.
+            // "Jane Marie [name]", "JANE M [name]": the first name with middle names or initials.
             if let first = name.split(separator: " ").first, first.count >= 3 {
                 text = replace(text, "\\b" + NSRegularExpression.escapedPattern(for: String(first)) + #"(?:\s+[A-Za-z]+\.?){0,2}\s+\[name\]"#,
                                "[name]", options: .caseInsensitive)

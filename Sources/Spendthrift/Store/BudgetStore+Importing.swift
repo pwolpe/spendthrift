@@ -99,7 +99,7 @@ extension BudgetStore {
         return alert.runModal() == .alertFirstButtonReturn && !field.stringValue.isEmpty ? field.stringValue : nil
     }
 
-    /// Turns any failure into a sentence Tony can act on.
+    /// Turns any failure into a sentence the person can act on.
     static func explain(_ error: Error, file: URL) -> String {
         if let e = error as? LocalizedError, let text = e.errorDescription { return text }
         let ns = error as NSError
@@ -109,7 +109,7 @@ extension BudgetStore {
         return "This file couldn't be read (\(ns.localizedDescription))."
     }
 
-    /// - automatic: the app found these in Downloads by itself. Nothing may interrupt Tony then:
+    /// - automatic: the app found these in Downloads by itself. Nothing may interrupt the person then:
     ///   no password prompt, no column picker, no error sheet. Anything that needs him waits in the banner.
     func importFilesAsync(_ dropped: [URL], automatic: Bool = false) async {
         let (urls, fromFolder, orderFiles) = Self.expand(dropped)

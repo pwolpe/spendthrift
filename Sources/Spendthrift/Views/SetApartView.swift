@@ -35,7 +35,7 @@ struct SetApartView: View {
                         .font(.title3).foregroundStyle(.secondary)
                 }
                 if accounts.isEmpty {
-                    TonySays(title: "Nothing is kept apart",
+                    EmptyState(title: "Nothing is kept apart",
                              message: "To set an account aside (a parent's account, a trust), open Setup, click the ••• on the account and choose Keep Apart from My Totals.",
                              art: "nothing")
                 }

@@ -212,9 +212,9 @@ struct SectionHeader: View {
     }
 }
 
-// MARK: - Tony
+// MARK: - Pictures
 
-/// Tony's face in a circle.
+/// A face in a circle.
 struct TonyAvatar: View {
     var size: CGFloat = 32
 
@@ -301,12 +301,12 @@ struct TonyFigure: View {
         }
         .frame(height: height)
         .onAppear { art.prepare() }
-        .accessibilityLabel("Tony")
+        .accessibilityLabel("Illustration")
     }
 }
 
-/// Tony with something to say: used for every empty screen.
-/// A small illustration of Tony and Paul for one moment in the app (nothing to check, no trips yet…).
+/// A message with an illustration: used for every empty screen.
+/// A small illustration for one moment in the app (nothing to check, no trips yet…).
 /// The pictures ship with the app in Resources/Art.
 struct SpotArt: View {
     let name: String
@@ -396,7 +396,7 @@ struct EditableName: View {
     }
 }
 
-/// A small square scene of Tony and Paul, for the head of a page or a sheet: the playful stand-in
+/// A small square scene, for the head of a page or a sheet: the playful stand-in
 /// for what would otherwise be a plain portrait.
 struct Vignette: View {
     let name: String
@@ -418,11 +418,11 @@ struct Vignette: View {
     }
 }
 
-struct TonySays<Actions: View>: View {
+struct EmptyState<Actions: View>: View {
     let title: String
     let message: String
     var figureHeight: CGFloat = 190
-    /// The illustration for this moment; without one, Tony stands in.
+    /// The illustration for this moment; without one, the default figure stands in.
     var art: String? = nil
     @ViewBuilder var actions: Actions
 
@@ -442,7 +442,7 @@ struct TonySays<Actions: View>: View {
     }
 }
 
-extension TonySays where Actions == EmptyView {
+extension EmptyState where Actions == EmptyView {
     init(title: String, message: String, figureHeight: CGFloat = 190, art: String? = nil) {
         self.init(title: title, message: message, figureHeight: figureHeight, art: art) { EmptyView() }
     }
@@ -522,7 +522,7 @@ struct CategoryPill: View {
 
 // MARK: - Downloads
 
-/// "We found a statement in your Downloads" — so Tony never needs Finder.
+/// "We found a statement in your Downloads" — so nobody needs Finder.
 struct DownloadsBanner: View {
     @Environment(BudgetStore.self) private var store
 

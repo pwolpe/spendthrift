@@ -137,7 +137,7 @@ struct OrdersView: View {
                 }
 
                 if everything.isEmpty {
-                    TonySays(title: finding ? "Nothing ordered by that name" : "No orders in \(scopeTitle)",
+                    EmptyState(title: finding ? "Nothing ordered by that name" : "No orders in \(scopeTitle)",
                              message: finding ? "Nothing matches “\(store.orderSearch)” in \(scopeTitle.lowercased()). Try one word of what it was, or look in All Time."
                                               : "The order history on file has nothing here. Step to another stretch, or choose All Time.",
                              art: "nothing")

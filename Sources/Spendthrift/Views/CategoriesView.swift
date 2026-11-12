@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Every category with its all-time total, and the place to make, edit or delete Tony's own.
+/// Every category with its all-time total, and the place to make, edit or delete your own.
 struct CategoriesView: View {
     @Environment(BudgetStore.self) private var store
 

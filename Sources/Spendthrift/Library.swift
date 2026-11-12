@@ -1,6 +1,6 @@
 import Foundation
 
-/// Where everything lives. Tony never needs to see this folder.
+/// Where everything lives. Nobody needs to open this folder by hand.
 struct BudgetPaths {
     let root: URL
 
@@ -69,7 +69,7 @@ struct Library: Codable {
     /// The spending each calendar year's trips were worked out from, so only a year that changed is read again.
     var storyYears: [String: String]?
     var dismissedStories: Set<String>?
-    /// Charges Tony moved by hand: charge id to the trip it belongs to (a trip's fingerprint), or "" for none.
+    /// Charges the person moved by hand: charge id to the trip it belongs to (a trip's fingerprint), or "" for none.
     /// These win over whatever the model decides, now and every time it looks again.
     var storyChoices: [String: String]?
     /// Names the person gave trips and events. The model finds trips afresh whenever statements
@@ -246,7 +246,7 @@ enum MerchantResolver {
             return MerchantInfo(name: "Wire to " + recipient.capitalized, category: nil, source: .ai, sample: description)
         }
         let name = KeywordExtractor.displayName(for: description)
-        // Once Tony has his own categories, a generic word ("CLINIC" on a vet's name) is no longer
+        // Once the person has their own categories, a generic word ("CLINIC" on a vet's name) is no longer
         // good enough: let the AI weigh it against his categories.
         let generic = Category.custom.isEmpty ? KnownMerchants.match(description, generic: true) : nil
         if let bank = bankCategory.flatMap(BankCategory.map) {

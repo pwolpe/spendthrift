@@ -23,9 +23,9 @@ struct ReviewView: View {
         VStack(alignment: .leading, spacing: 20) {
             if store.reviewItems.isEmpty {
                 if store.isSuggesting {
-                    TonySays(title: "Sorting…", message: "We're working through the new payees. This only takes a moment.", art: "sorting")
+                    EmptyState(title: "Sorting…", message: "We're working through the new payees. This only takes a moment.", art: "sorting")
                 } else {
-                    TonySays(title: "All caught up", message: "Every payee has a category. New guesses show up here whenever you add a statement.", art: "caughtup") {
+                    EmptyState(title: "All caught up", message: "Every payee has a category. New guesses show up here whenever you add a statement.", art: "caughtup") {
                         Button("Back to Overview") { store.go(to: .overview) }
                     }
                 }

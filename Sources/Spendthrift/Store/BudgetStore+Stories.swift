@@ -9,7 +9,7 @@ extension BudgetStore {
     // MARK: - Trips and events
 
 
-    /// Trips and events, newest first, without the ones Tony said weren't.
+    /// Trips and events, newest first, without the ones the person said weren't.
     var stories: [Story] {
         let dismissed = library.dismissedStories ?? []
         var list = (library.stories ?? []).filter { !dismissed.contains($0.fingerprint) }
@@ -28,7 +28,7 @@ extension BudgetStore {
             list[index].start = min(list[index].start, given.start)
             list[index].end = max(list[index].end, given.end)
         }
-        // What Tony moved by hand wins over what the model worked out.
+        // What the person moved by hand wins over what the model worked out.
         let choices = library.storyChoices ?? [:]
         guard !choices.isEmpty else { return list }
         let moved = Set(choices.keys.compactMap { UUID(uuidString: $0) })

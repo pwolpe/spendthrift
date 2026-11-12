@@ -588,7 +588,7 @@ struct AnswerBubble: View {
         }
     }
 
-    /// Shows how the question was understood, so Tony can trust (or rephrase) it.
+    /// Shows how the question was understood, so the person can trust (or rephrase) it.
     private var interpretation: some View {
         let q = answer.query
         let parts = [q.category?.displayName, q.place?.capitalized,

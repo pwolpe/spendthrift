@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Categories
 
-/// A spending category: one of the built-in ones, or one Tony made himself.
+/// A spending category: one of the built-in ones, or one the person made themselves.
 /// `rawValue` is the name, and it's what gets saved.
 struct Category: Hashable, Identifiable, Codable {
     let rawValue: String
@@ -78,7 +78,7 @@ struct Category: Hashable, Identifiable, Codable {
         $0.lane == .everyday && $0 != .income && $0 != .unsorted && $0 != .uncoveredCards
     }
 
-    /// Which part of Tony's money a category belongs to. Only `everyday` shows up in spending totals.
+    /// Which part of the person's money a category belongs to. Only `everyday` shows up in spending totals.
     enum Lane: String { case everyday, investments, taxes, transfers }
     var lane: Lane {
         if self == .transfer { return .transfers }
@@ -92,7 +92,7 @@ struct Category: Hashable, Identifiable, Codable {
     var isBuiltIn: Bool { Self.look[self] != nil }
     var isSpending: Bool { lane == .everyday && self != .income }
 
-    /// Tony's own categories sit right after the built-in spending ones.
+    /// Their own categories sit right after the built-in spending ones.
     static var custom: [Category] { CustomCategories.all.map { Category($0.name) } }
     static var spendingCases: [Category] { builtInSpending + custom }
     /// Categories offered in pickers (everything except "Unknown").
@@ -103,7 +103,7 @@ struct Category: Hashable, Identifiable, Codable {
     var color: Color { Self.look[self]?.color ?? CustomCategories.find(rawValue)?.swiftUIColor ?? .gray }
 }
 
-/// A category Tony created: a name, an icon and a color.
+/// A category the person created: a name, an icon and a color.
 struct CustomCategory: Codable, Hashable, Identifiable {
     var id = UUID()
     var name: String
@@ -252,9 +252,9 @@ struct MerchantInfo: Codable, Hashable {
     var name: String
     var category: Category?
     var source: Source
-    /// True once Tony has confirmed or changed it. AI guesses start unconfirmed.
+    /// True once the person has confirmed or changed it. AI guesses start unconfirmed.
     var confirmed = false
-    /// An original bank description, shown so Tony can recognize the place.
+    /// An original bank description, shown so the person can recognize the place.
     var sample: String
     /// The business's website ("starbucks.com"), used to show its logo. Empty = looked for, none known.
     var domain: String?
@@ -335,7 +335,7 @@ struct Transaction: Identifiable, Hashable {
     let account: String
     let accountID: UUID
     let source: MerchantInfo.Source
-    /// An AI guess (or no guess) that Tony hasn't looked at yet.
+    /// An AI guess (or no guess) that the person hasn't looked at yet.
     let needsCheck: Bool
     /// This line has its own category, different from the rest of the place.
     let isOverride: Bool
@@ -407,7 +407,7 @@ struct ColumnMapping: Codable, Hashable {
     var typeColumn: Int?
 }
 
-/// A place Tony already sorted, given to the AI as an example of his habits.
+/// A place the person already sorted, given to the AI as an example of their habits.
 struct MerchantRule: Hashable {
     var name: String
     var category: Category
@@ -624,7 +624,7 @@ struct Story: Codable, Identifiable, Hashable {
     var summary: String
     var entryIDs: [UUID]
 
-    /// Stable across re-detection, so a story Tony dismissed stays dismissed.
+    /// Stable across re-detection, so a story the person dismissed stays dismissed.
     var fingerprint: String { "\(kind.rawValue)|\(name.lowercased())|\(start.prefix(7))" }
 
     init(kind: Kind, name: String, place: String?, start: String, end: String, summary: String, entryIDs: [UUID]) {

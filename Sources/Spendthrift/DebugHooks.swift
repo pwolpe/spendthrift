@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import PDFKit
 
-/// Test automation, active only when SPENDTHRIFT_SNAPSHOT is set (never for Tony).
+/// Test automation, active only when SPENDTHRIFT_SNAPSHOT is set (never for real users).
 ///   SPENDTHRIFT_HOME=<dir>      use a scratch data folder
 ///   SPENDTHRIFT_IMPORT=a:b:c    files to import
 ///   SPENDTHRIFT_SNAPSHOT=<dir>  save a PNG of each screen there, log results, then quit
@@ -279,7 +279,7 @@ enum DebugHooks {
             await snap("35-story", outDir, width: 700) { StoryView(scrolls: false) }
             await snap("44-editable", outDir, width: 560) {
                 VStack(alignment: .leading, spacing: 20) {
-                    EditableName(text: .constant("Wire Transfer to Staci Ruiz"), font: .system(size: 30, weight: .bold, design: .serif), commit: {})
+                    EditableName(text: .constant("Wire Transfer to Jane Roe"), font: .system(size: 30, weight: .bold, design: .serif), commit: {})
                     EditableName(text: .constant("Pastis"), font: .system(size: 19, weight: .bold, design: .serif), centered: true, commit: {}).frame(maxWidth: .infinity)
                 }.padding(24)
             }
@@ -388,7 +388,7 @@ enum DebugHooks {
         await snap("03-review", outDir) { ReviewView(scrolls: false) }
         let confirmedForThePicture = store.reviewItems.map(\.key)
         store.confirm(confirmedForThePicture)
-        try? await Task.sleep(for: .seconds(8))   // let Daily Tony and the recap finish
+        try? await Task.sleep(for: .seconds(8))   // let the daily picture and the recap finish
         await settle()
         await snap("04-overview", outDir) { OverviewView(scrolls: false) }
         for detail in [BudgetStore.OverviewDetail.spending, .income, .investing, .flow] {
@@ -532,7 +532,7 @@ enum DebugHooks {
         print("LOCATE DONE \(store.transactions.count) charges, \(store.sourceFiles.count) originals, \(String(format: "%.1f", Date.now.timeIntervalSince(started)))s")
     }
 
-    /// Exercises the things Tony does by clicking: changing categories, undoing an import, re-importing.
+    /// Exercises the things a person does by clicking: changing categories, undoing an import, re-importing.
     private static func settle() async {
         for _ in 0..<240 {
             try? await Task.sleep(for: .milliseconds(500))

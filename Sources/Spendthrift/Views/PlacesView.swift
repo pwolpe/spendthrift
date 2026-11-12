@@ -114,7 +114,7 @@ struct PlacesView: View {
                 }
 
                 if list.isEmpty {
-                    TonySays(title: "No payee by that name",
+                    EmptyState(title: "No payee by that name",
                              message: "Nothing matches “\(store.placeSearch)”\(store.placeSpan == .all ? "" : " in \(store.placeSpan.rawValue.lowercased())"). Try part of the name, or how it's spelled on your statement.",
                              art: "nothing")
                 } else {

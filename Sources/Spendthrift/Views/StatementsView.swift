@@ -27,7 +27,7 @@ struct StatementsView: View {
         let all = store.sourceFiles
         Group {
             if all.isEmpty {
-                TonySays(title: "No originals kept yet",
+                EmptyState(title: "No originals kept yet",
                          message: "From this version on, every statement you add is kept exactly as it came, so any charge can be shown in its original. Drop your statements in once more (a whole folder is fine) and they'll all appear here. Nothing will be added twice.",
                          art: "missing") {
                     Button("Add Statements…") { store.presentOpenPanel() }.buttonStyle(.borderedProminent).controlSize(.large)

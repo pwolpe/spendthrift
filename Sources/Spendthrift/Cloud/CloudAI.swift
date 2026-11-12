@@ -177,7 +177,7 @@ enum CloudKey {
     private static let dotFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".spendthrift-key")
 
     /// Why a file and not the keychain: macOS ties keychain access to the exact build of an app
-    /// unless it's signed with an Apple Developer ID. Every update would make Tony type his Mac
+    /// unless it's signed with an Apple Developer ID. Every update would make the person type their Mac
     /// password into a "wants to use your confidential information" dialog, and the app would
     /// freeze behind it. A file only his user account can read asks for nothing, ever. It always
     /// lives in the real data folder, never a test folder, and is not part of any backup the app makes.

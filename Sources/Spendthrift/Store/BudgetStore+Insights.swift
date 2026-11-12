@@ -6,9 +6,9 @@ import UniformTypeIdentifiers
 
 /// The daily picture, on-this-day memories and the month's insights.
 extension BudgetStore {
-    // MARK: - Daily Tony, insights
+    // MARK: - daily picture, insights
 
-    /// Recent purchases for Daily Tony: one per place, from the last two weeks of data.
+    /// Recent purchases for the daily picture: one per place, from the last two weeks of data.
     func recentHighlights() -> [DailyPicture.Highlight] {
         let spending = transactions.filter { $0.countsAsSpending && $0.amount >= 3 && $0.category != .unsorted }
         guard let latest = spending.last?.date else { return [] }

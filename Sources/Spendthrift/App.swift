@@ -63,7 +63,7 @@ struct SpendthriftApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    /// Files dropped on the Dock icon (or opened with Tally).
+    /// Files dropped on the Dock icon (or opened with Spendthrift).
     func application(_ application: NSApplication, open urls: [URL]) {
         Task { @MainActor in
             BudgetStore.shared.importFiles(urls)

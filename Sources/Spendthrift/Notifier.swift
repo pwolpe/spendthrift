@@ -1,7 +1,7 @@
 import AppKit
 import UserNotifications
 
-/// A quiet word from the app when something worth knowing happened while Tony was elsewhere:
+/// A quiet word from the app when something worth knowing happened while the person was elsewhere:
 /// a statement added itself, a subscription went up. Never shown while he's looking at the app.
 @MainActor
 enum Notifier {

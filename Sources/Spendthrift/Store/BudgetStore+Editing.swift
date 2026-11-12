@@ -41,7 +41,7 @@ extension BudgetStore {
         learnFromCorrection()
     }
 
-    /// Tony just taught the app something. A few seconds later (in case he's changing several),
+    /// The person just taught the app something. A few seconds later (in case they are changing several),
     /// the model takes another look at its remaining guesses with his choices as fresh examples.
     private func learnFromCorrection() {
         guard CloudAI.isEnabled else { return }
@@ -255,7 +255,7 @@ extension BudgetStore {
         showToast("“\(other)” is now part of \(name).", symbol: "checkmark.circle.fill")
     }
 
-    // MARK: - Tony's own categories
+    // MARK: - Your own categories
 
     var customCategories: [CustomCategory] { library.customCategories ?? [] }
 

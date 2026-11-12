@@ -28,7 +28,7 @@ enum AISchemas {
         return try? GenerationSchema(root: root, dependencies: [])
     }
 
-    /// Built fresh each time so Tony's own categories are included.
+    /// Built fresh each time so your own categories are included.
     static var spendingQuery: GenerationSchema? {
         let root = DynamicGenerationSchema(name: "Query", properties: [
             choice("metric", "What to compute", SpendingQuery.Metric.allCases.map(\.rawValue)),

@@ -111,7 +111,7 @@ final class BudgetStore {
     /// The Overview looks at one month or at a whole year; the same page either way.
     var overviewShowsYear = ProcessInfo.processInfo.environment["SPENDTHRIFT_YEAR"] != nil
     var pendingImports: [PendingImport] = []
-    /// Something Tony must be told at launch (e.g. data restored from a backup).
+    /// Something the person must be told at launch (e.g. data restored from a backup).
     var startupNotice: String?
     /// Non-nil while the "New Category" sheet is up.
     var categoryEditor: CategoryEditorRequest?
@@ -154,7 +154,7 @@ final class BudgetStore {
     /// One order on show by itself (arrived at from a charge), until the person clears it.
     var orderOnly: String?
     var orderChargeList: [OrderCharge] = []
-    /// The first names on the order histories that were added ("Paul", "Jessica").
+    /// The first names on the order histories that were added ("Ana", "Sam").
     var orderPeople: [String] = []
     /// True while the model is reading product listings.
     var isReadingOrders = false

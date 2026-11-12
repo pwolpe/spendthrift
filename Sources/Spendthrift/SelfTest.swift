@@ -21,6 +21,10 @@ enum SelfTest {
         // Who a line belongs to.
         check("a known name needs its whole name", KnownMerchants.match("PARAMOUNT+ 888-274-5343 CA", generic: false)?.name == "Paramount+"
               && KnownMerchants.match("PARAMOUNT HOTEL NEW YORK NY", generic: false) == nil)
+        check("money coming in from a holding is investment income, whoever pays it",
+              KnownMerchants.match("ACME REIT DIVIDEND PPD", amount: -120, generic: false)?.category == .investmentIncome
+              && KnownMerchants.match("FUND XYZ DISTRIBUTION", amount: -900, generic: false)?.category == .investmentIncome
+              && KnownMerchants.match("FUND XYZ DISTRIBUTION", amount: 900, generic: false)?.category != .investmentIncome)
         check("a mobile deposit is not a petrol station", KnownMerchants.match("MOBILE DEPOSIT REF 1234", generic: false)?.name != "Mobil")
         check("a spelling ignores what changes charge to charge",
               MerchantResolver.spelling("STARBUCKS STORE 04127  NEW YORK") == MerchantResolver.spelling("STARBUCKS STORE 99310 NEW YORK"))

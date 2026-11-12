@@ -9,8 +9,8 @@ CARTOON="$ROOT/Resources/tony-cartoon.png"   # made once by Image Playground, th
 
 mkdir -p "$BUILD"
 
-# Sign with Paul's own certificate when it's in the keychain. That gives every build the same
-# identity, so macOS keeps Tony's permissions across updates and the app can verify its updates.
+# Sign with the maintainer's own certificate when it's in the keychain. That gives every build the same
+# identity, so macOS keeps users' permissions across updates and the app can verify its updates.
 # Without it, fall back to a throwaway signature (the app runs, but can't update itself).
 SIGN_NAME="Spendthrift Signing"
 if security find-certificate -c "$SIGN_NAME" >/dev/null 2>&1; then SIGN="$SIGN_NAME"; else SIGN="-"; fi
@@ -26,16 +26,16 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Spendthrift"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
-# Version: the number in the VERSION file (what Tony sees in About), plus a build number from the clock.
+# Version: the number in the VERSION file (what users see in About), plus a build number from the clock.
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" -c "Set :CFBundleVersion $(date +%Y%m%d%H%M)" "$APP/Contents/Info.plist"
 codesign --force --sign "$SIGN" --timestamp=none "$APP"
 
-# 3. Cartoon Tony + icon (Image Playground runs on this Mac; falls back to the photo).
-echo "→ Drawing icon (cartoon Tony via Image Playground)"
+# 3. Cartoon + icon (Image Playground runs on this Mac; falls back to the photo).
+echo "→ Drawing icon (cartoon via Image Playground)"
 # Image Playground only runs in a foreground app, so launch the bundle normally.
 rm -f "$BUILD/icon-1024.png"
-# A finished icon in Resources wins (Paul, appalled at a receipt, drawn by an image model);
+# A finished icon in Resources wins (drawn by an image model);
 # otherwise the app draws its own.
 if [ -f "$ROOT/Resources/icon-1024.png" ]; then cp "$ROOT/Resources/icon-1024.png" "$BUILD/icon-1024.png"; fi
 [ -f "$BUILD/icon-1024.png" ] || open -W -n "$APP" --args --make-icon "$BUILD/icon-1024.png" --cartoon "$ROOT/Resources/tony-avatar.png" || true
@@ -50,7 +50,7 @@ if [ -f "$BUILD/icon-1024.png" ]; then
   iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 fi
 if [ -f "$CARTOON" ]; then cp "$CARTOON" "$APP/Contents/Resources/tony-cartoon.png"; fi
-# The banner pictures: a dozen starters, and Tony's photo, which every new drawing is made from.
+# The banner pictures: a dozen starters, and the main photo, which every new drawing is made from.
 cp "$ROOT/Resources/tony.jpg" "$APP/Contents/Resources/tony.jpg"
 if [ -f "$ROOT/Resources/paul.jpg" ]; then cp "$ROOT/Resources/paul.jpg" "$APP/Contents/Resources/paul.jpg"; fi
 cp "$ROOT/Resources/tony-avatar.png" "$APP/Contents/Resources/tony-avatar.png"

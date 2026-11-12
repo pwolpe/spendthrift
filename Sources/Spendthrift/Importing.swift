@@ -32,7 +32,7 @@ enum StatementReader {
         }
     }
 
-    /// What to tell Tony about a file type the app doesn't read.
+    /// What to tell the person about a file type the app doesn't read.
     static func adviceForUnsupported(_ url: URL) -> String {
         switch url.pathExtension.lowercased() {
         case "xls", "numbers", "xlsm":
@@ -77,7 +77,7 @@ enum StatementReader {
             // Only offer "pick the columns" for something that is actually a table with dates in it.
             let hasDates = (0..<table.columnCount).contains { DateParsing.guessFormat(for: table.values($0)) != nil }
             guard hasDates, table.columnCount >= 2 else { throw ReadError.notAStatement }
-            // Before asking Tony to pick columns, let the powerful model work them out.
+            // Before asking the person to pick columns, let the powerful model work them out.
             if CloudAI.isEnabled, let mapping = await CloudColumnMapper.mapping(for: table) {
                 let rows = Normalizer.rows(from: table, mapping: mapping).rows
                 if !rows.isEmpty { return .ready(ParsedStatement(rows: rows, signature: signature, suggestedName: name)) }
@@ -86,7 +86,7 @@ enum StatementReader {
         }
     }
 
-    /// "Chase4090_Activity_20261109.csv" → "4090". Banks often put the card's last digits in the name.
+    /// "Chase1234_Activity_20261109.csv" → "1234". Banks often put the card's last digits in the name.
     static func cardDigits(in url: URL) -> String? {
         var stem = url.deletingPathExtension().lastPathComponent
         // A date in the name ("…_2026-10-12_Coinbase") is not a card number.
@@ -97,7 +97,7 @@ enum StatementReader {
         return nil
     }
 
-    /// "Chase4090_Activity_20261109.csv" → "Chase ••4090".
+    /// "Chase1234_Activity_20261109.csv" → "Chase ••1234".
     static func accountName(for url: URL) -> String {
         let stem = url.deletingPathExtension().lastPathComponent
         let noise: Set<String> = ["activity", "transactions", "transaction", "statement", "statements", "export", "download",

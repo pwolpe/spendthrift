@@ -19,7 +19,7 @@ enum KeywordExtractor {
     /// Returns the recipient named after "A/C:", upper case, a few words: enough to tell recipients apart.
     static func wireRecipient(_ description: String) -> String? {
         let upper = description.uppercased()
-        // Another bank's way: "DOMESTIC MANUAL WIRE DESIGNLUSH INC.", "INT'L WIRED FUNDS OUT BRIDGE TO BHUTAN".
+        // Another bank's way: "DOMESTIC MANUAL WIRE ACME DESIGN LLC", "INT'L WIRED FUNDS OUT SAMPLE RECIPIENT".
         if upper.range(of: "A/C:") == nil,
            let lead = upper.range(of: #"^(?:DOMESTIC|INCOMING|OUTGOING|INT.?L|INTERNATIONAL)\b[A-Z ]*?\bWIRED?\b(?: FUNDS)?(?:[ -]+(?:DEBIT|CREDIT|OUT|IN))?\s+"#, options: .regularExpression) {
             let words = upper[lead.upperBound...].split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
@@ -80,7 +80,7 @@ enum KeywordExtractor {
 
     static func keyword(for description: String, maxTokens: Int) -> String {
         var original = description.uppercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        // A bank account's debit card: "Card Purchase With Pin 03/01 Publix Super Mar 482 … Card 1207".
+        // A bank account's debit card: "Card Purchase With Pin 03/01 Publix Super Mar 482 … Card 1234".
         // The shop is what's between the date and the card number.
         if let lead = original.range(of: #"^(?:RECURRING )?CARD PURCHASE(?: WITH PIN| RETURN)? \d{1,2}/\d{1,2} "#, options: .regularExpression) {
             original = String(original[lead.upperBound...])
@@ -249,41 +249,35 @@ enum KnownMerchants {
     ]
 
     /// Money moving on the investment side, taxes, card payments and housing: recognized from the bank's
-    /// own wording. Some depend on direction: "Blackstone Fund" coming in is a distribution, going out
-    /// a capital call. `flow`: -1 = only money in, +1 = only money out, 0 = either.
+    /// own wording. Some depend on direction: a "DISTRIBUTION" coming in is income, going out
+    /// something else. `flow`: -1 = only money in, +1 = only money out, 0 = either.
     static let flows: [(pattern: String, name: String, category: Category, flow: Int)] = [
         // Investments
-        ("DIST SBS", "Blackstone Distributions", .investmentIncome, 0),
         // Borrowed money is not income, and paying it back is not a capital call: a fund loan's advance
         // and paydown are named for what they are before the fund's own name is looked at.
         ("CAPITAL CALL LOAN ADVANCE", "Investment Loan Advance", .investmentLoan, 0),
-        ("LOAN PAYDOWN BLACKSTONE", "Investment Loan Principal", .investmentLoan, 0),
-        ("BLACKSTONE FUND", "Blackstone Fund Distributions", .investmentIncome, -1),
-        ("BLACKSTONE FUND", "Blackstone Capital Calls", .investing, 1),
-        ("WEBCAPCALL", "Blackstone Capital Calls", .investing, 0), ("CAPITAL CALL", "Capital Call", .investing, 0),
+        ("CAPITAL CALL", "Capital Call", .investing, 0),
         ("ADVANCE ON LOAN", "Investment Loan Advance", .investmentLoan, 0),
         ("PRINCIPAL PAYMENT ON LOAN", "Investment Loan Principal", .investmentLoan, 0),
         ("INTEREST PAYMENT ON LOAN", "Investment Loan Interest", .investmentLoan, 0),
         ("COINBASE CARD", "Coinbase Card Payment", .transfer, 0), ("COINBASE", "Coinbase", .investing, 0),
         ("FID BKG SVC", "Fidelity", .investing, 0), ("FIDELITY BROKERAGE", "Fidelity", .investing, 0),
         ("VANGUARD", "Vanguard", .investing, 0), ("SCHWAB BROKERAGE", "Schwab", .investing, 0),
-        ("ROBINHOOD", "Robinhood", .investing, 0), ("REIT FUNDING", "REIT Redemption", .investing, 0),
+        ("ROBINHOOD", "Robinhood", .investing, 0),
         ("E*TRADE", "E*TRADE", .investing, 0), ("ETRADE", "E*TRADE", .investing, 0), ("MERRILL", "Merrill", .investing, 0),
         ("MORGAN STANLEY", "Morgan Stanley", .investing, 0), ("TD AMERITRADE", "TD Ameritrade", .investing, 0),
         ("WEALTHFRONT", "Wealthfront", .investing, 0), ("BETTERMENT", "Betterment", .investing, 0),
         ("INTERACTIVE BROK", "Interactive Brokers", .investing, 0), ("TREASURYDIRECT", "TreasuryDirect", .investing, 0),
         ("SCHWAB", "Schwab", .investing, 0), ("MONEYLINK", "Schwab", .investing, 0), ("KRAKEN", "Kraken", .investing, 0),
         ("DISTRIBUTION", "Distribution", .investmentIncome, -1), ("CAPITAL GAIN", "Capital Gains", .investmentIncome, -1),
-        ("REALTY INCOME", "Realty Income Dividend", .investmentIncome, 0),
-        ("ORION PROPERTIES", "Orion Properties Dividend", .investmentIncome, 0),
-        ("INTEREST PAYMENT", "Bank Interest", .investmentIncome, -1),
+        ("INTEREST PAYMENT", "Bank Interest", .investmentIncome, -1), ("DIVIDEND", "Dividend", .investmentIncome, -1),
         // Taxes
-        ("USATAXPYMT", "IRS", .taxes, 0), ("IRS USATAX", "IRS", .taxes, 0), ("NYS DTF", "New York State Tax", .taxes, 0),
+        ("USATAXPYMT", "IRS", .taxes, 0), ("IRS USATAX", "IRS", .taxes, 0),
         ("FRANCHISE TAX", "State Tax", .taxes, 0), ("TAX PAYMNT", "State Tax", .taxes, 0),
         ("IRS TREAS", "IRS", .taxes, 0), ("TAX REFUND", "Tax Refund", .taxes, -1), ("TAX REF", "Tax Refund", .taxes, -1),
         ("DEPT OF REVENUE", "State Tax", .taxes, 0), ("DEPARTMENT OF REVENUE", "State Tax", .taxes, 0),
         ("STATE TAX", "State Tax", .taxes, 0), ("EST TAX", "Estimated Tax", .taxes, 1), ("IRS ", "IRS", .taxes, 1),
-        ("NYCPROPTAX", "NYC Property Tax", .home, 0), ("PROPERTY TAX", "Property Tax", .home, 0), ("PROPTAX", "Property Tax", .home, 0),
+        ("PROPERTY TAX", "Property Tax", .home, 0), ("PROPTAX", "Property Tax", .home, 0),
         // Paying off credit cards (named by issuer so each can be matched to its statements)
         ("CHASE CREDIT CRD", "Chase Card Payment", .transfer, 0), ("AMEX EPAYMENT", "American Express Card Payment", .transfer, 0),
         ("AMERICAN EXPRESS ACH", "American Express Card Payment", .transfer, 0),
@@ -297,10 +291,8 @@ enum KnownMerchants {
         ("DISCOVER CARD", "Discover Card Payment", .transfer, 1), ("DISCOVER DC PYMNTS", "Discover Card Payment", .transfer, 1),
         ("CRCARDPMT", "Card Payment", .transfer, 0),
         // Housing and household, paid straight from the bank
-        ("CHASE ACH", "Loan Payment", .home, 1), ("ALLAREAREALTY", "All Area Realty (Common Charges)", .home, 0),
         ("MORTGAGE", "Mortgage", .home, 1), ("MTG PYMT", "Mortgage", .home, 1), ("MTG PMT", "Mortgage", .home, 1),
         ("HOME LOAN", "Mortgage", .home, 1), ("LOANCARE", "Mortgage", .home, 1), ("MR COOPER", "Mortgage", .home, 1),
-        ("MASSMUTUAL", "MassMutual Life Insurance", .bills, 0), ("THE CINCINNATI I", "Cincinnati Insurance", .bills, 0),
         // Cash and cheques
         ("ATM SURCHARGE REFUND", "ATM Fee Refund", .fees, 0), ("ATM WITHDRAW", "Cash Withdrawal", .other, 0),
         ("NON-CHASE ATM", "Cash Withdrawal", .other, 0), ("CHECK #", "Checks Written", .other, 0),
@@ -401,7 +393,7 @@ struct SuggestionInput {
 enum CategorySuggester {
     static var isAvailable: Bool { SystemLanguageModel.default.isAvailable }
 
-    /// Why Apple Intelligence can't help right now, in words Tony can act on. Nil when it's working.
+    /// Why Apple Intelligence can't help right now, in words the person can act on. Nil when it's working.
     static var unavailableReason: String? {
         switch SystemLanguageModel.default.availability {
         case .available: return nil
@@ -441,7 +433,7 @@ enum CategorySuggester {
         return moneyMovementWords.contains { d.contains($0) }
     }
 
-    /// - examples: places Tony already categorized, so the model follows his habits.
+    /// - examples: places the person already categorized, so the model follows their habits.
     static func suggest(_ items: [SuggestionInput], examples: [MerchantRule] = []) async -> [String: Suggestion] {
         guard isAvailable, !items.isEmpty else { return [:] }
         // Purchases can't be "Payments & Transfers" or "Income": the small on-device model reaches for
@@ -472,7 +464,7 @@ enum CategorySuggester {
             return "\(i + 1). \(item.description) (\(kind) \(Money.format(abs(item.averageAmount))))"
         }.joined(separator: "\n")
         var prompt = list
-        // Tony's own categories: the model won't reach for them unless told they exist.
+        // Your own categories: the model won't reach for them unless told they exist.
         let own = Category.custom.map(\.rawValue)
         let ownNote = own.isEmpty ? "" : "This person made their own categories: \(own.joined(separator: ", ")). "
             + "Prefer one of them whenever a transaction fits it (for example anything for pets goes in a Pets category).\n\n"
