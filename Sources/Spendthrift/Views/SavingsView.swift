@@ -23,9 +23,11 @@ extension BudgetStore {
 /// The ideas, each with what it would save in a year and a way to the charges behind it.
 struct SavingsCard: View {
     @Environment(BudgetStore.self) private var store
+    /// Payees the card beside this one already lists (Where to Trim): a habit there is not said again here.
+    var besides: Set<String> = []
 
     var body: some View {
-        let ideas = store.savingsIdeas()
+        let ideas = store.savingsIdeas().filter { idea in idea.kind != .habit || idea.payee.map(besides.contains) != true }
         if !ideas.isEmpty {
             Card {
                 VStack(alignment: .leading, spacing: 12) {

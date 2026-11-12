@@ -242,7 +242,7 @@ struct OverviewView: View {
             // Every payee and category of the month, ranked: where a cut would count for most.
             TrimCard(transactions: store.spending(in: m), stretch: m.name, month: m)
             // The ideas are always about the last twelve months, whatever month is on screen.
-            SavingsCard()
+            SavingsCard(besides: store.trimTop(store.spending(in: m), stretch: m.name, month: m))
             if !DebugHooks.off("ceremony") { CeremonyCard(month: m) }
         }
     }

@@ -11,7 +11,15 @@ extension BudgetStore {
 
     var discoveries: [Discovery] {
         let dismissed = library.dismissedDiscoveries ?? []
-        let kept = (library.discoveries ?? []).filter { !dismissed.contains($0.title.lowercased()) }
+        // Left out: what was put away, and what another page already shows better.
+        let owned = cached("noticed-owned") { ownedElsewhere() }
+        // (Asked on every draw of the Overview: worked out once until the library changes.)
+        let kept: [Discovery] = cached("noticed-kept|\(dismissed.count)|\(library.discoveriesBasis ?? "-")") { (library.discoveries ?? []).filter { item in
+            guard !dismissed.contains(item.title.lowercased()) else { return false }
+            let lines = transactions(in: item)
+            return !Self.isShownElsewhere(kind: item.kind, payees: lines.map(\.merchant),
+                                          yearlyFees: lines.filter { CardEngine.annualFee($0.description).isFee }.count, owned: owned)
+        } }
         // One of each kind before a second of any: four double charges in a row read as one finding.
         var byKind: [String: [Discovery]] = [:], order: [String] = []
         for item in kept { if byKind[item.kind] == nil { order.append(item.kind) }; byKind[item.kind, default: []].append(item) }
@@ -20,6 +28,48 @@ extension BudgetStore {
             for kind in order { if let next = byKind[kind]?.first { mixed.append(next); byKind[kind]?.removeFirst() } }
         }
         return mixed
+    }
+
+    /// What the app's own pages already show, by payee: bills whose price crept up and subscriptions
+    /// that look forgotten (Bills & Subscriptions), small frequent spending (Ways to Save), and
+    /// whether there are cards (the Cards pages show each card's yearly fee).
+    struct Owned: Hashable {
+        var crept: Set<String> = [], forgotten: Set<String> = [], habits: Set<String> = []
+        var hasCards = false
+    }
+
+    func ownedElsewhere() -> Owned {
+        let bills = recurring().filter(\.isActive)
+        return Owned(crept: Set(bills.filter { $0.creep > 0 }.map(\.merchant)), forgotten: Set(bills.filter(\.isForgotten).map(\.merchant)),
+                     habits: Set(savingsIdeas().filter { $0.kind == .habit }.compactMap(\.payee)), hasCards: hasCards)
+    }
+
+    /// Whether a finding only repeats what another page shows: a card's yearly fees, one bill's price
+    /// rise, one subscription that looks forgotten, one frequent small habit. A finding about several
+    /// payees together (two services that do the same job) is the analyst's own, and stays.
+    nonisolated static func isShownElsewhere(kind: String, payees: [String], yearlyFees: Int, owned: Owned) -> Bool {
+        guard !payees.isEmpty else { return false }
+        if owned.hasCards, yearlyFees * 5 >= payees.count * 4 { return true }
+        let who = Set(payees)
+        guard who.count == 1, let one = who.first else { return false }
+        switch kind {
+        case "increase": return owned.crept.contains(one)
+        case "subscription": return owned.forgotten.contains(one) || owned.crept.contains(one)
+        case "habit": return owned.habits.contains(one)
+        default: return false
+        }
+    }
+
+    /// The same, in words, for the analyst to read before it starts.
+    func coveredElsewhere() -> [String] {
+        let owned = ownedElsewhere()
+        var out: [String] = []
+        if owned.hasCards { out.append("Each credit card's yearly fee, the statement credits it paid back, and its interest (the Cards pages).") }
+        if !owned.crept.isEmpty { out.append("Bills whose price went up: \(owned.crept.sorted().prefix(12).joined(separator: ", ")).") }
+        if !owned.forgotten.isEmpty { out.append("Subscriptions that have run a long time and may be forgotten: \(owned.forgotten.sorted().prefix(12).joined(separator: ", ")).") }
+        if !owned.habits.isEmpty { out.append("Small frequent spending at: \(owned.habits.sorted().joined(separator: ", ")).") }
+        out.append("The total spent on fees and interest.")
+        return out
     }
 
     func transactions(in discovery: Discovery) -> [Transaction] {
@@ -68,7 +118,7 @@ extension BudgetStore {
                              text: t.note.map { "\(t.merchant) (\(Redactor.scrub(t.description))) [note: \(Redactor.scrub(String($0.prefix(120))))]" } ?? "\(t.merchant) (\(Redactor.scrub(t.description).prefix(40)))",
                              amount: t.amount, category: t.category.displayName)
         }
-        guard let found = await Discoverer.find(lines, notes: allNotes(limit: 20)) else { return nil }
+        guard let found = await Discoverer.find(lines, notes: allNotes(limit: 20), covered: coveredElsewhere()) else { return nil }
         return found.map { finding in
             Discovery(title: finding.title, detail: finding.detail, kind: finding.kind, entryIDs: finding.lines.map { lines[$0 - 1].id })
         }

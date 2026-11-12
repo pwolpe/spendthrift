@@ -197,9 +197,10 @@ struct ReportContent: View {
                 MonthlyChartCard(data: data)
                 if interactive {
                     let months = Set(data.months)
-                    TrimCard(transactions: store.cached("stretch|\(data.period.id)") { store.transactions.filter { months.contains($0.month) } },
-                             stretch: data.period == .last12 ? "the last 12 months" : data.period.title)
-                    SavingsCard()
+                    let stretch = store.cached("stretch|\(data.period.id)") { store.transactions.filter { months.contains($0.month) } }
+                    let called = data.period == .last12 ? "the last 12 months" : data.period.title
+                    TrimCard(transactions: stretch, stretch: called)
+                    SavingsCard(besides: store.trimTop(stretch, stretch: called, month: nil))
                 }
                 CategoryTableCard(data: data, open: interactive ? open : nil)
                 HStack(alignment: .top, spacing: 22) {

@@ -15,8 +15,15 @@ enum Discoverer {
         let lines: [Int]
     }
 
-    static func find(_ lines: [StoryFinder.Line], notes: [String]) async -> [Finding]? {
+    /// `covered` says what the app already shows on its own pages: not worth one of the few places here.
+    static func find(_ lines: [StoryFinder.Line], notes: [String], covered: [String] = []) async -> [Finding]? {
         guard lines.count >= 40 else { return [] }
+        let elsewhere = covered.isEmpty ? "" : """
+
+        The app already shows the following on its own pages. Do not report them, or anything that says the same \
+        thing in other words; spend your findings on what only a careful reader of every line would see:
+        \(covered.map { "- " + $0 }.joined(separator: "\n"))
+        """
         let system = """
         You are a sharp, kind personal bookkeeper who has just read a year of someone's charges. Tell them up to 8 \
         things they would want to know and probably don't. Look for:
@@ -29,7 +36,7 @@ enum Discoverer {
         - tax: charges that may matter at tax time (donations, medical, a home office)
         - other: anything else genuinely striking
         Be specific to this person; no generic advice, nothing obvious (that rent is large, that travel costs money), \
-        and do not report trips. Read the person's notes first and respect them.
+        and do not report trips. Read the person's notes first and respect them.\(elsewhere)
 
         For each: {"kind": "…", "title": "…", "detail": "…", "lines": [numbers]}
         title: under 9 words, names the place or thing, no dollar amounts.

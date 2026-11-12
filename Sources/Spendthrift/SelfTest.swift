@@ -570,6 +570,19 @@ enum SelfTest {
         check("memories: a payee that is only the bank's words for moving money is nothing to remember or to draw",
               BudgetStore.isBankWords("ACH Debit") && BudgetStore.isBankWords("Wire Transfer") && BudgetStore.isBankWords("Check 1042")
               && !BudgetStore.isBankWords("World Nomads") && !BudgetStore.isBankWords("Bank Street Bookstore") && !BudgetStore.isBankWords("Check Republic"))
+        do {
+            let owned = BudgetStore.Owned(crept: ["Phone Co"], forgotten: ["Old Stream"], habits: ["Corner Cafe"], hasCards: true)
+            check("noticed: a finding that only repeats another page is left to that page",
+                  BudgetStore.isShownElsewhere(kind: "increase", payees: ["Phone Co", "Phone Co"], yearlyFees: 0, owned: owned)
+                  && BudgetStore.isShownElsewhere(kind: "habit", payees: ["Corner Cafe"], yearlyFees: 0, owned: owned)
+                  && BudgetStore.isShownElsewhere(kind: "fees", payees: ["Bank Card", "Other Card"], yearlyFees: 2, owned: owned)
+                  && BudgetStore.isShownElsewhere(kind: "subscription", payees: ["Old Stream"], yearlyFees: 0, owned: owned))
+            check("noticed: a finding of the analyst's own stays: two services for one job, a double charge, a rise the bills page does not know",
+                  !BudgetStore.isShownElsewhere(kind: "subscription", payees: ["Old Stream", "New Stream"], yearlyFees: 0, owned: owned)
+                  && !BudgetStore.isShownElsewhere(kind: "duplicate", payees: ["Phone Co", "Phone Co"], yearlyFees: 0, owned: owned)
+                  && !BudgetStore.isShownElsewhere(kind: "increase", payees: ["Gym"], yearlyFees: 0, owned: owned)
+                  && !BudgetStore.isShownElsewhere(kind: "fees", payees: ["Bank Card"], yearlyFees: 1, owned: BudgetStore.Owned()))
+        }
         // What the statements say about a credit card.
         do {
             check("cards: a credit line names its benefit; a refund, a fraud reversal and a bank transfer do not",

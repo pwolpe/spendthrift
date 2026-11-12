@@ -3,6 +3,13 @@ import SwiftUI
 /// Where to trim: everything spent in a stretch, ranked, by payee or by category. With "chosen"
 /// on, only what was a choice is counted, so the mortgage does not sit on top of a list of things
 /// nobody could cut.
+extension BudgetStore {
+    /// The payees Where to Trim puts in front of the person for a stretch (its first ten, by what was chosen).
+    func trimTop(_ transactions: [Transaction], stretch: String, month: Month?) -> Set<String> {
+        Set(trimmed(transactions, stretch: stretch, month: month, byPayee: true, chosenOnly: true).lines.prefix(10).map(\.name))
+    }
+}
+
 struct TrimCard: View {
     @Environment(BudgetStore.self) private var store
     /// The charges of the stretch on screen, and what to call it ("November", "the last 12 months").

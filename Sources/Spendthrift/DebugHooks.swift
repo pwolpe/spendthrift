@@ -370,7 +370,11 @@ enum DebugHooks {
                 }
                 store.importReveal = nil
             }
-            await snap("50-payees", outDir) { PlacesView(scrolls: false).environment(store) }
+            // What "Things I noticed" keeps, and what it leaves to other pages.
+            let shownNow = Set(store.discoveries.map(\.title))
+            for item in store.library.discoveries ?? [] { print("NOTICED \(shownNow.contains(item.title) ? "keeps" : "LEAVES") [\(item.kind)] \(item.title)") }
+            for idea in store.savingsIdeas() { print("SAVING [\(idea.kind.rawValue)] \(idea.title)") }
+
             let sketches = store.payeeSketches()
             print("SKETCHES \(sketches.count) of \(Set(store.transactions.map(\.merchant)).count) payees")
             for (kind, count) in Dictionary(grouping: sketches.values, by: { $0.components(separatedBy: " ").prefix(2).joined(separator: " ") }).mapValues(\.count).sorted(by: { $0.value > $1.value }).prefix(14) { print("SKETCH KIND \(count) × \(kind)…") }
