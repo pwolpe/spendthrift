@@ -200,6 +200,19 @@ enum DebugHooks {
             store.saveForQuit()
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_SEPARATE="Paramount+|hotel|Paramount Hotel|Travel": every way the payee is written that
+        // contains the word becomes the named payee, as the "Not this payee?" link on a payee's page does.
+        if let spec = env["SPENDTHRIFT_SEPARATE"]?.split(separator: "|").map(String.init), spec.count == 4 {
+            let spellings = Set(store.transactions.filter { $0.merchant == spec[0] }.map { MerchantResolver.spelling($0.description) })
+                .filter { $0.localizedCaseInsensitiveContains(spec[1]) }
+            for spelling in spellings.sorted() {
+                store.separate(spelling: spelling, from: spec[0], as: spec[2], category: Category.pickable.first { $0.rawValue == spec[3] })
+                print("SEPARATE \(spelling) -> \(spec[2])")
+            }
+            print("SEPARATE now: \(spec[0]) \(store.transactions.filter { $0.merchant == spec[0] }.count), \(spec[2]) \(store.transactions.filter { $0.merchant == spec[2] }.count)")
+            try? await Task.sleep(for: .seconds(2))
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_CLEANUP=1: re-key lines the app now reads better, print what changed, then quit.
         if env["SPENDTHRIFT_CLEANUP"] != nil {
             for line in store.cleanUpPayees() { print("CLEANUP \(line)") }
@@ -341,7 +354,7 @@ enum DebugHooks {
             }
             NSApp.terminate(nil); return
         }
-        if env["SPENDTHRIFT_SELFTEST"] != nil { await selfTest(files: files); NSApp.terminate(nil); return }
+        if env["SPENDTHRIFT_SELFTEST"] != nil { await SelfTest.run(files: files); NSApp.terminate(nil); return }
 
         await snap("03-review", outDir) { ReviewView(scrolls: false) }
         let confirmedForThePicture = store.reviewItems.map(\.key)
@@ -355,6 +368,8 @@ enum DebugHooks {
         }
         store.overviewDetail = nil
         store.overviewShowsYear = true
+        // SPENDTHRIFT_YEAR=2023 picks the year; any other value shows the latest.
+        if let year = env["SPENDTHRIFT_YEAR"].flatMap(Int.init) { store.overviewPeriod = .year(year) }
         await snap("04-overview-year", outDir) { OverviewView(scrolls: false) }
         store.overviewShowsYear = false
         if let p = ReportData.periods(for: store).first {
@@ -489,112 +504,6 @@ enum DebugHooks {
     }
 
     /// Exercises the things Tony does by clicking: changing categories, undoing an import, re-importing.
-    private static func selfTest(files: [URL]) async {
-        let store = BudgetStore.shared
-        func check(_ name: String, _ ok: Bool) { print("SELFTEST \(ok ? "PASS" : "FAIL") \(name)") }
-        // One way a payee is written can be made a payee of its own; the rest stay, and the choice is kept.
-        let bySpelling = Dictionary(grouping: store.transactions, by: \.merchant)
-            .mapValues { Dictionary(grouping: $0) { MerchantResolver.spelling($0.description) } }
-        if let (payee, spellings) = bySpelling.first(where: { $0.value.count > 1 }), let (spelling, moving) = spellings.min(by: { $0.value.count < $1.value.count }) {
-            let before = store.transactions.filter { $0.merchant == payee }.count
-            store.separate(spelling: spelling, from: payee, as: "Somebody Else Entirely", category: .travel)
-            let moved = store.transactions.filter { $0.merchant == "Somebody Else Entirely" }
-            check("separate one spelling from a payee", moved.count == moving.count && moved.allSatisfy { $0.category == .travel }
-                  && store.transactions.filter { $0.merchant == payee }.count == before - moving.count
-                  && moved.first.map { MerchantResolver.key(for: $0.description, amount: $0.amount, existingKeys: [String](), spellings: [spelling.uppercased(): $0.merchantKey]) == $0.merchantKey } == true)
-        } else { print("SELFTEST SKIP separate one spelling (no payee here is written two ways)") }
-        // Back always returns to where a link was followed from, however deep; the sidebar is a fresh start.
-        if let payee = store.transactions.first?.merchant, let month = store.months.first {
-            store.selection = .overview
-            store.overviewMonth = month
-            store.stepInto(.spending)
-            store.showCharges(TransactionFilter(category: .dining, month: month))
-            store.showPlace(payee)
-            store.go(to: .transactions)
-            let deep = store.selection == .transactions && store.route.isEmpty && store.canGoBack
-            store.back()
-            let onPayee = store.selection == .overview && store.route.last == .place(payee) && store.overviewDetail == .spending
-            store.back(); store.back()
-            let onDetail = store.route.isEmpty && store.overviewDetail == .spending && store.overviewMonth == month
-            store.back()
-            check("back retraces every step", deep && onPayee && onDetail && store.overviewDetail == nil && !store.canGoBack)
-            store.showPlace(payee)
-            store.selection = .places
-            check("the sidebar starts afresh", store.route.isEmpty && !store.canGoBack)
-            store.selection = .overview
-            store.overviewMonth = nil
-        }
-        // SPENDTHRIFT_EXPLAIN="Whitfield|my accountant, for tax prep": say what a place was and print what happened.
-        if let spec = ProcessInfo.processInfo.environment["SPENDTHRIFT_EXPLAIN"]?.split(separator: "|", maxSplits: 1).map(String.init), spec.count == 2,
-           let t = store.transactions.first(where: { $0.merchant.localizedCaseInsensitiveContains(spec[0]) }) {
-            let before = "\(t.merchant) | \(t.category.displayName)"
-            let ok = await store.explain(t.merchantKey, said: spec[1])
-            let after = store.transactions.first { $0.id == t.id }
-            print("EXPLAIN \(ok ? "ok" : "failed"): \(before)  →  \(after?.merchant ?? "?") | \(after?.category.displayName ?? "?") | note: \(after?.note ?? "-") | needs check: \(after?.needsCheck ?? true)")
-        }
-        if store.stories.count >= 2, let moving = store.transactions(in: store.stories[0]).first?.id {
-            let from = store.stories[0], to = store.stories[1]
-            let before = store.transactions(in: to).count
-            store.move([moving], to: to)
-            check("move a charge between trips", store.story(containing: moving)?.fingerprint == to.fingerprint
-                  && store.stories.first { $0.fingerprint == to.fingerprint }.map { store.transactions(in: $0).count } == before + 1)
-            store.move([moving], to: nil)
-            check("take a charge out of every trip", store.story(containing: moving) == nil)
-            store.move([moving], to: from)
-        }
-        guard let t = store.transactions.first(where: { $0.countsAsSpending && $0.category != .gifts }) else { return check("has data", false) }
-        let samePlace = store.transactions.filter { $0.merchantKey == t.merchantKey }.count
-
-        store.setCategory(.gifts, for: [t.id], wholePlace: false)
-        check("only-this-charge changes one", store.transactions.filter { $0.merchantKey == t.merchantKey && $0.category == .gifts }.count == 1)
-        check("override is flagged", store.transactions.first { $0.id == t.id }?.isOverride == true)
-
-        store.setCategory(.travel, for: [t.id], wholePlace: true)
-        check("whole-place changes all \(samePlace)", store.transactions.filter { $0.merchantKey == t.merchantKey && $0.category == .travel }.count == samePlace)
-        check("whole-place marks as user's choice", store.place(t.merchantKey)?.source == .user && store.place(t.merchantKey)?.confirmed == true)
-
-        store.renamePlace(t.merchantKey, to: "Renamed Place")
-        check("rename applies everywhere", store.transactions.filter { $0.merchant == "Renamed Place" }.count == samePlace)
-
-        // Custom categories
-        let pets = store.saveCategory(CustomCategory(name: "Pets", symbol: "pawprint.fill", color: "teal"))
-        check("create custom category", pets != nil && Category.spendingCases.contains(Category("Pets")) && Category("Pets").symbol == "pawprint.fill")
-        check("duplicate name refused", store.saveCategory(CustomCategory(name: "pets", symbol: "tag.fill", color: "red")) == nil
-              && store.saveCategory(CustomCategory(name: "Dining", symbol: "tag.fill", color: "red")) == nil)
-        if let pets {
-            store.setCategory(pets, forPlace: t.merchantKey)
-            check("file a place under it", store.transactions.filter { $0.category == pets }.count == samePlace)
-            var edited = store.customCategories[0]; edited.name = "Dog"
-            store.saveCategory(edited)
-            check("rename keeps its charges", store.transactions.filter { $0.category == Category("Dog") }.count == samePlace && !Category.allCases.contains(pets))
-            check("AI schema offers it", Category.spendingCases.map(\.rawValue).contains("Dog") && AISchemas.merchantGuesses(count: 1, purchasesOnly: true) != nil)
-            store.deleteCategory(store.customCategories[0])
-            check("delete moves charges to Other", store.transactions.filter { $0.merchantKey == t.merchantKey && $0.category == .other }.count == samePlace && Category.custom.isEmpty)
-            store.setCategory(.travel, forPlace: t.merchantKey)
-        }
-
-        let before = store.transactions.count, accountsBefore = store.accounts.count
-        store.importFiles(files)
-        try? await Task.sleep(for: .seconds(3))
-        check("re-import adds nothing (\(store.transactions.count) vs \(before))", store.transactions.count == before && store.accounts.count == accountsBefore)
-        check("choices survive re-import", store.transactions.filter { $0.merchantKey == t.merchantKey && $0.category == .travel }.count == samePlace)
-
-        if let account = store.accounts.first {
-            let spent = store.spent(in: account)
-            store.flipAmounts(account.id)
-            check("flip swaps signs", abs(store.spent(in: account) + spent) < 0.01 || spent == 0)
-            store.flipAmounts(account.id)
-            check("flip twice restores", abs(store.spent(in: account) - spent) < 0.01)
-            let n = store.transactionCount(for: account)
-            store.removeAccount(account.id)
-            check("remove account drops its \(n) transactions", store.transactions.count == before - n)
-        }
-        // Saved library reloads identically.
-        try? await Task.sleep(for: .seconds(1))
-        let reloaded = Library.load(paths: store.paths).0
-        check("saved to disk (\(reloaded.entries.count) entries)", reloaded.entries.count == store.transactions.count)
-    }
-
     private static func settle() async {
         for _ in 0..<240 {
             try? await Task.sleep(for: .milliseconds(500))

@@ -1,0 +1,50 @@
+#!/bin/zsh
+# Builds the app and has it check itself.
+#
+#   scripts/test.sh                 the made-up statements in Tests/Fixtures, then (if this Mac has
+#                                   one) a copy of your own library. The real one is never touched.
+#   scripts/test.sh --fixtures      the made-up statements only
+#   scripts/test.sh --library DIR   also a copy of the library in DIR (a Spendthrift data folder)
+#
+# Nothing is sent anywhere: the run is offline. Exits non-zero if any check fails.
+set -u
+cd "$(dirname "$0")/.."
+ROOT=$PWD
+OWN="$HOME/Library/Application Support/Spendthrift"
+LIBRARY=""; [[ -f "$OWN/library.json" ]] && LIBRARY=$OWN
+while (( $# )); do
+  case $1 in
+    --fixtures) LIBRARY="" ;;
+    --library) shift; LIBRARY=$1 ;;
+  esac
+  shift
+done
+
+scripts/build.sh > /dev/null 2>&1 || { echo "The build failed. Run scripts/build.sh to see why."; exit 2 }
+APP="$ROOT/build/Spendthrift.app/Contents/MacOS/Spendthrift"
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+bad=0
+
+run() {   # name, data folder, files to import (colon-separated)
+  local log="$WORK/$1.log"
+  SPENDTHRIFT_HOME="$2" SPENDTHRIFT_SNAPSHOT="$WORK/$1-snaps" SPENDTHRIFT_NO_CLOUD=1 SPENDTHRIFT_NO_SHOW=1 \
+    SPENDTHRIFT_SELFTEST=1 SPENDTHRIFT_IMPORT="$3" "$APP" > "$log" 2>&1
+  local passed=$(grep -c "^SELFTEST PASS" "$log") failed=$(grep -c "^SELFTEST FAIL" "$log")
+  grep "^SELFTEST \(FAIL\|SKIP\)" "$log"
+  if (( failed > 0 )) || ! grep -q "^SELFTEST SUMMARY" "$log"; then
+    bad=1
+    grep -q "^SELFTEST SUMMARY" "$log" || { echo "$1: the run stopped before the end. Last lines:"; tail -3 "$log" }
+  fi
+  echo "$1: $passed passed, $failed failed"
+}
+
+fixtures=(Tests/Fixtures/*.(csv|CSV|qfx|pdf)(N))
+run "fixtures" "$WORK/fixtures-home" "${(j/:/)fixtures:a}"
+
+if [[ -n $LIBRARY ]]; then
+  mkdir -p "$WORK/library-home"
+  for f in library.json orders.json; do [[ -f "$LIBRARY/$f" ]] && cp "$LIBRARY/$f" "$WORK/library-home/"; done
+  run "a copy of the library" "$WORK/library-home" ""
+fi
+exit $bad

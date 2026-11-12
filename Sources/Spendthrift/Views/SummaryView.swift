@@ -1,11 +1,16 @@
 import SwiftUI
 
-/// The top of the Overview: what came in, and what it did. One bar, income as the whole track,
-/// filled by what was lived on and owed. What's left is gold: kept or invested, it is still yours.
+/// The top of the Overview: did living stay within what was earned?
+///
+/// Income is the whole track. Income taxes come off first (they were never yours to spend), then
+/// what was lived on and paid in interest. What is left is gold: kept or invested, it is still yours.
+/// Investing never counts against the verdict. Within a hundredth of income either way is called even.
 struct FlowHero: View {
     let data: CashFlowData
     var action: (() -> Void)?
     @State private var hovered = false
+
+    enum Verdict { case within, even, over, unknown }
 
     private struct Part: Identifiable {
         var id: String { name }
@@ -14,69 +19,79 @@ struct FlowHero: View {
         let color: Color
     }
 
+    static func verdict(for data: CashFlowData) -> Verdict {
+        guard data.totalIncome > 0.5 else { return .unknown }
+        if abs(data.surplus) < data.totalIncome * 0.01 { return .even }
+        return data.surplus > 0 ? .within : .over
+    }
+
     var body: some View {
         let income = data.totalIncome
-        let within = data.surplus >= 0
+        let verdict = Self.verdict(for: data)
         let parts = [
-            Part(name: "Lived on", amount: data.spending, color: Theme.spent),
             Part(name: "Income taxes", amount: data.taxes, color: Category.taxes.color),
+            Part(name: "Lived on", amount: data.spending, color: Theme.spent),
             Part(name: "Loan interest", amount: data.loanInterest, color: Category.investmentLoan.color.opacity(0.7)),
         ].filter { $0.amount > 0.5 }
         let used = parts.reduce(0) { $0 + $1.amount }
         let left = max(0, income - used)
         let scale = max(income, used, 1)
-        let color: Color = within ? Theme.good : Theme.spent
 
         let card = Card(padding: 22) {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(alignment: .center, spacing: 18) {
-                        if income > 0 { SpotArt(name: within ? "within" : "over", height: 92) }
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(data.title.uppercased())
-                                .font(Theme.mono(10, .bold)).tracking(1.2).foregroundStyle(.secondary)
-                            Text(headline(income: income, used: used, within: within))
-                                .font(.system(size: 26, weight: .bold, design: .serif))
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(sentence(income: income, within: within))
-                                .font(.body).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 0)
-                        if income > 0 { Stamp(text: within ? "WITHIN MEANS" : "OVER", color: color, size: 13).padding(.trailing, 6) }
-                        if action != nil {
-                            Image(systemName: "chevron.right").font(.callout.weight(.semibold))
-                                .foregroundStyle(hovered ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
-                        }
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .center, spacing: 18) {
+                    if verdict == .within || verdict == .over { SpotArt(name: verdict == .within ? "within" : "over", height: 92) }
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(data.title.uppercased())
+                            .font(Theme.mono(10, .bold)).tracking(1.2).foregroundStyle(.secondary)
+                        Text(headline(verdict))
+                            .font(.system(size: 26, weight: .bold, design: .serif))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(sentence(verdict))
+                            .font(.body).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    if used > 0.5 || income > 0.5 {
-                        GeometryReader { geo in
-                            let width = geo.size.width
-                            ZStack(alignment: .leading) {
-                                HStack(spacing: 2) {
-                                    ForEach(parts) { part in
-                                        Rectangle().fill(part.color.gradient)
-                                            .frame(width: max(3, (width - CGFloat(parts.count) * 2) * part.amount / scale))
-                                    }
-                                    // What wasn't consumed: kept or put to work. Gold, because it is still yours.
-                                    if left > 0.5 { Rectangle().fill(Theme.goldDeep.gradient) }
-                                    Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                    switch verdict {
+                    case .within: Stamp(text: "WITHIN MEANS", color: Theme.good, size: 13).padding(.trailing, 6)
+                    case .even: Stamp(text: "ABOUT EVEN", color: Theme.caution, size: 13).padding(.trailing, 6)
+                    case .over: Stamp(text: "OVER", color: Theme.spent, size: 13).padding(.trailing, 6)
+                    case .unknown: EmptyView()
+                    }
+                    if action != nil {
+                        Image(systemName: "chevron.right").font(.callout.weight(.semibold))
+                            .foregroundStyle(hovered ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                    }
+                }
+                if used > 0.5 || income > 0.5 {
+                    GeometryReader { geo in
+                        let width = geo.size.width
+                        ZStack(alignment: .leading) {
+                            HStack(spacing: 2) {
+                                ForEach(parts) { part in
+                                    Rectangle().fill(part.color.gradient)
+                                        .frame(width: max(3, (width - CGFloat(parts.count) * 2) * part.amount / scale))
                                 }
-                                .clipShape(Capsule())
-                                // Spent past what came in: mark where income ended.
-                                if income > 0.5, used > income + 0.5 {
-                                    Rectangle().fill(Color.primary).frame(width: 2, height: 28).offset(x: width * income / scale - 1)
-                                }
+                                // What wasn't consumed: kept or put to work. Gold, because it is still yours.
+                                if left > 0.5 { Rectangle().fill(Theme.goldDeep.gradient) }
+                                Spacer(minLength: 0)
+                            }
+                            .clipShape(Capsule())
+                            // Lived past what came in: mark where income ended.
+                            if income > 0.5, used > income + 0.5 {
+                                Rectangle().fill(Color.primary).frame(width: 2, height: 28).offset(x: width * income / scale - 1)
                             }
                         }
-                        .frame(height: 18)
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 14, alignment: .leading)], alignment: .leading, spacing: 10) {
-                            figure("Came in", income, nil)
-                            ForEach(parts) { figure($0.name, $0.amount, $0.color) }
-                            if left > 0.5 { figure("Left to keep or invest", left, Theme.goldDeep) }
-                        }
+                    }
+                    .frame(height: 18)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 14, alignment: .leading)], alignment: .leading, spacing: 10) {
+                        figure("Came in", income, nil)
+                        ForEach(parts) { figure($0.name, $0.amount, $0.color) }
+                        if left > 0.5 { figure("Left to keep or invest", left, Theme.goldDeep) }
                     }
                 }
             }
+        }
         // With somewhere to go it is a button; on the page it leads to, it is just the card.
         if let action {
             Button(action: action) { card.contentShape(Rectangle()) }
@@ -86,6 +101,32 @@ struct FlowHero: View {
         } else {
             card
         }
+    }
+
+    private func headline(_ verdict: Verdict) -> String {
+        switch verdict {
+        case .within: "You lived within your income"
+        case .even: "You lived on about what you took home"
+        case .over: "You lived on \(Money.format(-data.surplus, cents: false)) more than you took home"
+        case .unknown: data.spending > 0.5 ? "\(Money.format(data.spending, cents: false)) spent so far" : "Nothing here yet"
+        }
+    }
+
+    /// The sum, in words: what came in, less tax, against what was lived on.
+    private func sentence(_ verdict: Verdict) -> String {
+        guard verdict != .unknown else { return "No income has shown up for \(data.title) yet, so there is nothing to measure it against." }
+        let money = { (v: Double) in Money.format(v, cents: false) }
+        let takeHome = data.totalIncome - data.taxes
+        var text = data.taxes > 0.5 ? "After \(money(data.taxes)) in income taxes, \(money(takeHome)) was yours. "
+                                    : "\(money(takeHome)) came in. "
+        text += "You lived on \(money(data.spending))"
+        if data.loanInterest > 0.5 { text += " and paid \(money(data.loanInterest)) in loan interest" }
+        switch verdict {
+        case .within: text += ", and \(money(data.surplus)) was left to keep or invest."
+        case .even: text += data.surplus >= 0 ? ", which left \(money(data.surplus))." : ", \(money(-data.surplus)) more than that."
+        default: text += "."
+        }
+        return text + (data.built > 0.5 ? " Money you invested is never counted as spending." : "")
     }
 
     private func figure(_ name: String, _ amount: Double, _ color: Color?) -> some View {
@@ -193,7 +234,9 @@ struct MiniRing: View {
                 for slice in slices where slice.total / sum > 0.004 {
                     let sweep = slice.total / sum * 360
                     var path = Path()
-                    path.addArc(center: center, radius: radius, startAngle: .degrees(start + 1), endAngle: .degrees(start + max(sweep - 1, 0.5)), clockwise: false)
+                    // The gap between slices shrinks with the slice: an end before its start would draw the long way round.
+                    let gap = min(1, sweep / 4)
+                    path.addArc(center: center, radius: radius, startAngle: .degrees(start + gap), endAngle: .degrees(start + sweep - gap), clockwise: false)
                     context.stroke(path, with: .color(slice.category.color), style: StrokeStyle(lineWidth: 8, lineCap: .butt))
                     start += sweep
                 }

@@ -239,19 +239,28 @@ To back up or move Tony to a new Mac, copy that folder.
 Two rules the code keeps: every number shown is computed in code (a model only reads intent or
 writes prose around figures it is given), and every link goes through `BudgetStore.navigate`.
 
-## Testing (for Paul)
-
-A self-driving test mode, enabled only through environment variables:
+## Testing
 
 ```sh
-open -W -n "build/Spendthrift.app" --stdout run.log \
-  --env SPENDTHRIFT_HOME=/tmp/tony-test \
-  --env SPENDTHRIFT_SNAPSHOT=/tmp/tony-test/snaps \
-  --env "SPENDTHRIFT_IMPORT=a.csv:b.pdf:c.qfx"
+scripts/test.sh
 ```
 
-It imports the files, logs how every place was sorted, the month's superlatives, notes and sample Ask answers,
-and saves pictures of the main screens. Add `--env SPENDTHRIFT_SELFTEST=1` to exercise category
-changes, re-import, undo-style removal and saving (prints PASS/FAIL lines). `SPENDTHRIFT_HOME`
-alone runs the app against a scratch folder. To preview how a statement will be read:
+builds the app and has it check itself, offline, and exits non-zero if anything fails. It runs twice:
+against the made-up statements in `Tests/Fixtures`, and (when this Mac has one) against a copy of
+your own library, which is never touched. `--fixtures` runs only the first.
+
+The checks live in `Sources/Spendthrift/SelfTest.swift`, in three parts:
+
+- **Rules that need no data**: which payee a line belongs to, how orders match card charges, what an
+  answer may quote.
+- **Sums that must agree** for any library: the verdict against its parts, a year against its months,
+  each card against the page it opens. A screen can never say two different things.
+- **Doing what a person would do**: changing categories, renaming, separating a payee, moving a charge
+  between trips, following links and going back, importing twice, saving and reloading.
+
+When a bug is found, a check for it goes in before the fix.
+
+The same self-driving mode is available by hand through environment variables: `SPENDTHRIFT_HOME`
+runs the app against a scratch folder, `SPENDTHRIFT_SNAPSHOT=<dir>` saves a picture of each screen,
+`SPENDTHRIFT_IMPORT=a.csv:b.pdf` imports files first. To preview how a statement will be read:
 `"build/Spendthrift.app/Contents/MacOS/Spendthrift" --inspect file.pdf`
