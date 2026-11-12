@@ -17,7 +17,53 @@ enum SelfTest {
 
     // MARK: Rules that need no data
 
+    /// A charge built by hand: `days` after 2024-01-15.
+    private static func charge(_ payee: String, _ amount: Double, day days: Int, category: Category = .subscriptions) -> Transaction {
+        let start = DateParsing.isoDay("2024-01-15") ?? .now
+        let date = Calendar.current.date(byAdding: .day, value: days, to: start) ?? start
+        return Transaction(id: UUID(), date: date, month: Month(date: date), description: payee.uppercased(), amount: amount,
+                           merchant: payee, merchantKey: "own:" + payee, category: category, account: "Card", accountID: UUID(),
+                           source: .user, needsCheck: false, isOverride: false)
+    }
+
+    /// `count` charges a month apart, the first on 2024-01-15, with these amounts (the last is repeated if short).
+    private static func monthly(_ payee: String, _ amounts: [Double], count: Int? = nil) -> [Transaction] {
+        let start = DateParsing.isoDay("2024-01-15") ?? .now
+        return (0..<(count ?? amounts.count)).map { i in
+            let date = Calendar.current.date(byAdding: .month, value: i, to: start) ?? start
+            var t = charge(payee, amounts[min(i, amounts.count - 1)], day: 0)
+            t = Transaction(id: t.id, date: date, month: Month(date: date), description: t.description, amount: t.amount, merchant: payee,
+                            merchantKey: t.merchantKey, category: t.category, account: "Card", accountID: t.accountID,
+                            source: .user, needsCheck: false, isOverride: false)
+            return t
+        }
+    }
+
+    private static func recurringRules() {
+        let end = DateParsing.isoDay("2025-01-20") ?? .now
+        let steady = RecurringEngine.find(in: monthly("Steady", [9.99], count: 12), asOf: end)
+        check("twelve equal monthly charges are a monthly bill, 12 times the amount a year",
+              steady.count == 1 && steady[0].cadence == .monthly && abs(steady[0].yearly - 119.88) < 0.001 && steady[0].isActive && steady[0].chargeIDs.count == 12)
+        let wild = monthly("Wild", [12, 80, 25, 140, 9, 60, 33, 110], count: 8)
+        check("a payee charged monthly at wildly different amounts is not a bill", RecurringEngine.find(in: wild, asOf: end).isEmpty)
+        let yearly = RecurringEngine.find(in: [charge("Annual", 99, day: 0), charge("Annual", 99, day: 365)], asOf: end)
+        check("two charges a year apart are a yearly bill", yearly.count == 1 && yearly[0].cadence == .yearly && abs(yearly[0].yearly - 99) < 0.001)
+        check("two charges a month apart are not yet a bill", RecurringEngine.find(in: [charge("Fresh", 5, day: 0), charge("Fresh", 5, day: 30)], asOf: end).isEmpty)
+        let crept = RecurringEngine.find(in: monthly("Creeper", [10, 10, 11, 12]), asOf: DateParsing.isoDay("2024-04-20") ?? .now)
+        check("a price that went from 10 to 12 crept up 2, or 24 a year", crept.count == 1 && abs(crept[0].creep - 2) < 0.001 && abs(crept[0].extraPerYear - 24) < 0.001)
+        let gone = RecurringEngine.find(in: monthly("Gone", [15], count: 6), asOf: DateParsing.isoDay("2024-06-15")?.addingTimeInterval(4 * 30 * 86_400) ?? .now)
+        check("a bill whose last charge was four gaps ago has ended", gone.count == 1 && !gone[0].isActive && gone[0].next == nil)
+        let old = RecurringEngine.find(in: monthly("Old", [15.99], count: 14), asOf: DateParsing.isoDay("2025-03-01") ?? .now)
+        check("a long-running active subscription worth $60 or more a year is worth a look",
+              old.count == 1 && old[0].isForgotten
+              && RecurringEngine.find(in: monthly("Rent", [1500], count: 14).map { var t = $0; t = Transaction(id: t.id, date: t.date, month: t.month, description: t.description, amount: t.amount, merchant: t.merchant, merchantKey: t.merchantKey, category: .home, account: t.account, accountID: t.accountID, source: .user, needsCheck: false, isOverride: false); return t },
+                                      asOf: DateParsing.isoDay("2025-03-01") ?? .now).allSatisfy { !$0.isForgotten })
+        let steps = InsightEngine.subscriptions(asOf: Month(year: 2024, month: 4), in: monthly("Netflix", [15.49], count: 4))
+        check("the older subscriptions list still finds a monthly charge", steps.count == 1 && steps[0].merchant == "Netflix" && abs(steps[0].monthlyAmount - 15.49) < 0.001)
+    }
+
     private static func logic() {
+        recurringRules()
         // Who a line belongs to.
         check("a known name needs its whole name", KnownMerchants.match("PARAMOUNT+ 888-274-5343 CA", generic: false)?.name == "Paramount+"
               && KnownMerchants.match("PARAMOUNT HOTEL NEW YORK NY", generic: false) == nil)
@@ -70,9 +116,14 @@ enum SelfTest {
     // MARK: Sums that must agree, whatever the library holds
 
     private static func books(_ store: BudgetStore) {
+        let near = { (a: Double, b: Double) in abs(a - b) < 0.01 }
+        let repeating = store.recurring()
+        let billIDs = Set(store.transactions.map(\.id))
+        check("every bill and subscription is made of charges that exist", repeating.allSatisfy { $0.chargeIDs.allSatisfy(billIDs.contains) && $0.chargeIDs.count >= 2 })
+        check("the Bills & Subscriptions card is the sum of its active rows", near(repeating.filter(\.isActive).reduce(0) { $0 + $1.yearly },
+              repeating.filter(\.isActive).reduce(0) { $0 + $1.amount * $1.cadence.perYear }) && repeating.filter { !$0.isActive }.allSatisfy { $0.next == nil })
         guard let period = ReportData.periods(for: store).first else { return }
         let year = CashFlowData(store: store, period: period)
-        let near = { (a: Double, b: Double) in abs(a - b) < 0.01 }
         let months = year.months.map { CashFlowData(store: store, month: $0) }
         check("the verdict is income less what was consumed", near(year.surplus, year.totalIncome - year.spending - year.taxes - year.loanInterest))
         check("a year is the sum of its months", near(months.reduce(0) { $0 + $1.spending }, year.spending)

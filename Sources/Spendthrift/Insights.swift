@@ -50,26 +50,16 @@ struct Subscription: Identifiable, Hashable {
 }
 
 enum InsightEngine {
-    private static func monthCharges(_ txns: [Transaction]) -> [Month: [Transaction]] {
-        Dictionary(grouping: txns) { $0.month }
-    }
-
-    /// Merchants charged about the same amount, once a month, in at least 2 of the last 4 months.
+    /// Payees charged about the same amount every month, as of the end of that month (or the last charge
+    /// there is, if sooner). Two charges are enough here, so a new subscription is noticed in its second month.
     static func subscriptions(asOf month: Month, in all: [Transaction]) -> [Subscription] {
-        let window = Set((0..<4).map { month.adding(-$0) })
-        let spending = all.filter { $0.countsAsSpending && $0.amount > 0 && window.contains($0.month) }
-        return Dictionary(grouping: spending, by: \.merchant).compactMap { name, txns in
-            let byMonth = monthCharges(txns)
-            guard byMonth.count >= 2, byMonth.values.allSatisfy({ $0.count == 1 }) else { return nil }
-            let amounts = txns.map(\.amount).sorted()
-            let median = amounts[amounts.count / 2]
-            guard amounts.allSatisfy({ abs($0 - median) <= median * 0.2 }) else { return nil }
-            let latest = txns.max { $0.date < $1.date }!
-            // Must still be active: charged this month or last.
-            guard latest.month >= month.adding(-1) else { return nil }
-            return Subscription(merchant: name, category: latest.category, monthlyAmount: latest.amount, lastCharge: latest.date)
-        }
-        .sorted { $0.monthlyAmount > $1.monthlyAmount }
+        let end = Calendar.current.date(byAdding: .month, value: 1, to: month.firstDay)?.addingTimeInterval(-1) ?? month.firstDay
+        let known = all.filter { $0.date <= end }
+        let asOf = min(end, known.last?.date ?? end)
+        return RecurringEngine.find(in: known, asOf: asOf, minCharges: 2)
+            .filter { $0.cadence == .monthly && $0.isActive }
+            .map { Subscription(merchant: $0.merchant, category: $0.category, monthlyAmount: $0.amount, lastCharge: $0.last) }
+            .sorted { $0.monthlyAmount > $1.monthlyAmount }
     }
 
     static func insights(for month: Month, in all: [Transaction]) -> [Insight] {

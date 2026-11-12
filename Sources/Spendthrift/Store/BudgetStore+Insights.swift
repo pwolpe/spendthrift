@@ -96,8 +96,18 @@ extension BudgetStore {
         changed()
     }
 
+    /// Bills and subscriptions: what repeats, as of the latest charge. Kept until the library changes.
+    func recurring() -> [RecurringEngine.Recurring] {
+        if let kept = recurringCache { return kept }
+        let found = transactions.last.map { RecurringEngine.find(in: transactions, asOf: $0.date) } ?? []
+        recurringCache = found
+        return found
+    }
+
+    /// The charges that come around every month and are still coming.
     func subscriptions() -> [Subscription] {
-        guard let last = months.last else { return [] }
-        return InsightEngine.subscriptions(asOf: last, in: transactions)
+        recurring().filter { $0.cadence == .monthly && $0.isActive }
+            .map { Subscription(merchant: $0.merchant, category: $0.category, monthlyAmount: $0.amount, lastCharge: $0.last) }
+            .sorted { $0.monthlyAmount > $1.monthlyAmount }
     }
 }

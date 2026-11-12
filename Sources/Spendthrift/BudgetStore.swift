@@ -30,6 +30,7 @@ final class BudgetStore {
     // Worked out when first asked for and kept until the library next changes: pages ask for these
     // every time they redraw.
     @ObservationIgnored var insightCache: [Month: [Insight]] = [:]
+    @ObservationIgnored var recurringCache: [RecurringEngine.Recurring]?
     @ObservationIgnored var awardCache: [Month: [Award]] = [:]
     @ObservationIgnored var reportCache: [ReportPeriod: ReportData] = [:]
     /// The charges an order history could explain, kept until the library next changes.
@@ -59,7 +60,7 @@ final class BudgetStore {
     var overviewPeriod: ReportPeriod?
     /// Which of the Overview's cards has been stepped into, if any. Nil is the summary itself.
     var overviewDetail: OverviewDetail?
-    enum OverviewDetail: String { case flow, spending, income, investing }
+    enum OverviewDetail: String { case flow, spending, income, investing, recurring }
     /// What is typed in the box on the Places page, and the stretch of time it looks at (kept while a place is open).
     var placeSearch = ""
     var placeSpan = PlacesView.Span.all
@@ -308,7 +309,7 @@ final class BudgetStore {
         transactions = list
         indexByID = nil
         orderChargeCache = nil
-        insightCache = [:]; awardCache = [:]; reportCache = [:]
+        insightCache = [:]; recurringCache = nil; awardCache = [:]; reportCache = [:]
         months = Array(Set(list.map(\.month))).sorted()
         spendingByMonth = Dictionary(grouping: list.filter(\.countsAsSpending), by: \.month)
 

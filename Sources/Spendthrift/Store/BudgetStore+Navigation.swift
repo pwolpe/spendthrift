@@ -151,6 +151,7 @@ extension BudgetStore {
             case .spending: return "their everyday spending, by category and month"
             case .income: return "their income, by who paid it"
             case .investing: return "the investment side: what was invested and what came back"
+            case .recurring: return "their bills and subscriptions: what repeats, what it costs a year, what crept up and what looks forgotten"
             case .flow: return "all their money in and out (income, spending, taxes, investing)"
             case nil: return "the Overview: what came in and what it did, with spending, income and investing"
             }
@@ -171,6 +172,7 @@ extension BudgetStore.OverviewDetail {
         case .spending: "Spending"
         case .income: "Income"
         case .investing: "Investing"
+        case .recurring: "Bills & Subscriptions"
         }
     }
 }

@@ -221,7 +221,7 @@ enum AnswerEngine {
             let subs = store.subscriptions()
             let monthly = subs.reduce(0) { $0 + $1.monthlyAmount }
             return Answer(question: question, query: q,
-                          headline: subs.isEmpty ? "I don't see any regular monthly charges yet. I need at least two months of statements."
+                          headline: subs.isEmpty ? "I don't see any regular monthly charges yet. I need at least three months of statements."
                                                  : "You have \(subs.count) regular monthly charges, about \(Money.format(monthly)) a month (\(Money.format(monthly * 12, cents: false)) a year).",
                           rows: subs.map { ($0.merchant, "last charged \($0.lastCharge.formatted(.dateTime.month(.abbreviated).day()))", Money.format($0.monthlyAmount) + "/mo", $0.category) })
         }

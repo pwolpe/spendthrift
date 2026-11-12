@@ -391,7 +391,7 @@ enum DebugHooks {
         try? await Task.sleep(for: .seconds(8))   // let the daily picture and the recap finish
         await settle()
         await snap("04-overview", outDir) { OverviewView(scrolls: false) }
-        for detail in [BudgetStore.OverviewDetail.spending, .income, .investing, .flow] {
+        for detail in [BudgetStore.OverviewDetail.spending, .income, .investing, .flow, .recurring] {
             store.overviewDetail = detail
             await snap("04-overview-\(detail.rawValue)", outDir) { OverviewView(scrolls: false) }
         }

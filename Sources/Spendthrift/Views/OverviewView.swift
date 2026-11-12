@@ -75,7 +75,7 @@ struct OverviewView: View {
             }
             HStack(alignment: .top, spacing: 16) {
                 noticed
-                if !DebugHooks.off("coming") { comingUpCard }
+                if !DebugHooks.off("coming") { recurringCard }
             }
             if !store.overviewShowsYear, let m = currentMonth, !DebugHooks.off("stories") { storiesThisMonth(m) }
         } else {
@@ -154,9 +154,10 @@ struct OverviewView: View {
 
     @ViewBuilder
     private func detailPage(_ detail: BudgetStore.OverviewDetail) -> some View {
-        if store.months.count > 1 { scopePicker }
+        if detail != .recurring, store.months.count > 1 { scopePicker }
         if let data = flowData {
             switch detail {
+            case .recurring: RecurringView()
             case .flow: CashFlowContent(data: data, interactive: true)
             case .income: IncomeDetail(data: data)
             case .investing: InvestingDetail(data: data)
@@ -253,35 +254,38 @@ struct OverviewView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Charges that repeat every month, and when each is due next: no surprises.
+    /// What repeats, what it costs a year, and what is due next; the header opens the whole page.
     @ViewBuilder
-    private var comingUpCard: some View {
-        let today = Calendar.current.startOfDay(for: .now)
-        let horizon = today.addingTimeInterval(31 * 24 * 3600)
-        let upcoming: [(sub: Subscription, due: Date)] = store.subscriptions().compactMap { sub in
-            var due = sub.lastCharge
-            // Step forward a month at a time until the date is today or later.
-            for _ in 0..<24 where due < today { due = Calendar.current.date(byAdding: .month, value: 1, to: due) ?? horizon.addingTimeInterval(1) }
-            return due <= horizon ? (sub, due) : nil
-        }.sorted { $0.due < $1.due }
-        if !upcoming.isEmpty {
+    private var recurringCard: some View {
+        let active = store.recurring().filter(\.isActive)
+        if !active.isEmpty {
+            let total = active.reduce(0) { $0 + $1.yearly }
+            let due = active.filter { $0.next != nil }.sorted { ($0.next ?? .distantFuture) < ($1.next ?? .distantFuture) }.prefix(4)
             Card {
                 VStack(alignment: .leading, spacing: 12) {
-                    SectionHeader(title: "Coming up", subtitle: "Charges that repeat, due in the next month")
-                    ForEach(Array(upcoming.prefix(7).enumerated()), id: \.offset) { _, item in
-                        PayeeLine(name: item.sub.merchant, category: item.sub.category,
-                                  detail: Calendar.current.isDateInToday(item.due) ? "Today"
-                                      : Calendar.current.isDateInTomorrow(item.due) ? "Tomorrow"
-                                      : item.due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()),
-                                  amount: item.sub.monthlyAmount) { store.showPlace(item.sub.merchant) }
+                    Button { store.stepInto(.recurring) } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 7) {
+                                Image(systemName: "repeat.circle.fill").font(.callout.weight(.semibold)).foregroundStyle(.purple)
+                                Text("Bills & Subscriptions").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                            }
+                            Text("\(Money.format(total, cents: false)) a year")
+                                .font(.system(size: 32, weight: .bold, design: .rounded)).monospacedDigit()
+                                .lineLimit(1).minimumScaleFactor(0.55)
+                            Text("\(active.count) \(active.count == 1 ? "thing that repeats" : "things that repeat")")
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     Divider()
-                    HStack {
-                        Text("About").foregroundStyle(.secondary)
-                        Spacer()
-                        Text(Money.format(upcoming.reduce(0) { $0 + $1.sub.monthlyAmount }, cents: false)).font(.headline).monospacedDigit()
+                    ForEach(Array(due), id: \.id) { item in
+                        PayeeLine(name: item.merchant, category: item.category,
+                                  detail: "Due " + (item.next?.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) ?? ""),
+                                  amount: item.amount) { store.showPlace(item.merchant) }
                     }
-                    .font(.callout)
                 }
             }
         }

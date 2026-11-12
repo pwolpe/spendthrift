@@ -68,7 +68,9 @@ an import still finishes on the on-device paths and a banner says what happened.
   for the month, and in Year view a year in review you can save as PDF), **Income** (who paid) and
   **Investing** (where the money came from and what it did). The verdict itself opens **Money In and
   Out**, the full statement, with transfers between your own accounts left out and card payments
-  counted once.
+  counted once. A **Bills & Subscriptions** card shows what repeats and what it costs a year, with the
+  next four due; it opens a page listing every bill by how often it comes, what crept up in price, what
+  may have been forgotten, and what has stopped.
 - **Back**: every link inside a page (a category, a month, a trip, a payee, an order, a statement) goes
   through one history, so **Back** (or ⌘[) returns to where you came from. Choosing a section in the
   sidebar starts fresh.
