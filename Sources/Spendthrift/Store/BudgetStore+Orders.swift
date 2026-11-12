@@ -59,6 +59,14 @@ extension BudgetStore {
         for item in orders.items { ordered[item.orderID, default: 0] += max(0, item.cents) }
         let refunds = orders.refunds ?? [:], sorted = orders.sorted ?? [:]
         var dates: [String: Date] = [:]
+        // The same name, kind and person come up again and again: squeeze each for searching only once.
+        var squeezed: [String: String] = [:]
+        func squeeze(_ text: String) -> String {
+            if let done = squeezed[text] { return done }
+            let done = PlacesView.squeeze(text)
+            squeezed[text] = done
+            return done
+        }
         orderRows = orders.items.enumerated().compactMap { i, item in
             let parsed = dates[item.date] ?? DateParsing.parse(item.date, format: "yyyy-MM-dd")
             guard let date = parsed else { return nil }
@@ -73,20 +81,23 @@ extension BudgetStore {
             // Until the model has said what kind of thing it is, the shop's own shelf stands in.
             let kind = read?.kind ?? (item.shop == .digital ? "Kindle & Digital Media" : item.shop == .groceries ? "Fresh Food" : "Not Read Yet")
             return OrderRow(id: i, item: item, date: date, month: Month(date: date), name: name, category: category, kind: kind, net: net,
-                            haystack: [name, item.name, kind, category.rawValue, item.who ?? ""].map(PlacesView.squeeze).joined(separator: " "),
+                            haystack: [name, item.name, kind, category.rawValue, item.who ?? ""].map(squeeze).joined(separator: " "),
                             charge: charge[i])
         }
         orderPeople = Array(Set(orders.items.compactMap(\.who))).sorted()
         var coverage = OrderCoverage()
         let last = orders.items.map(\.date).max()
         coverage.through = last.flatMap { DateParsing.parse($0, format: "yyyy-MM-dd") }
-        for c in orderCharges {
+        let charges = orderCharges, apart = apartEntryIDs
+        var list: [OrderCharge] = []
+        for c in charges {
+            let itemized = orders.matches[c.id.uuidString] != nil
             coverage.charges += 1
-            if orders.matches[c.id.uuidString] != nil { coverage.itemized += 1 } else if let last, c.date > last { coverage.newer += 1 }
+            if itemized { coverage.itemized += 1 } else if let last, c.date > last { coverage.newer += 1 }
+            if !apart.contains(c.id) { list.append(OrderCharge(id: c.id, date: c.date, amount: Double(c.cents) / 100, itemized: itemized, shop: c.shop)) }
         }
         orderCoverage = coverage
-        orderChargeList = orderCharges.map { OrderCharge(id: $0.id, date: $0.date, amount: Double($0.cents) / 100, itemized: orders.matches[$0.id.uuidString] != nil, shop: $0.shop) }
-            .filter { charge in !apartEntryIDs.contains(charge.id) }
+        orderChargeList = list
     }
 
     /// Charges on accounts kept apart: not the person's own, so not part of this tie-out either.
@@ -137,18 +148,32 @@ extension BudgetStore {
     }
 
     func loadOrders() async {
-        let file = paths.ordersFile
-        let saved = await Task.detached { OrderBook.load(file) }.value
+        let file = paths.ordersFile, entries = library.entries
+        // Read the file and pick out the charges it could explain away from the main thread: the
+        // window is already up, and nothing on it should wait for this.
+        let (saved, charges) = await Task.detached(priority: .utility) { (OrderBook.load(file), Self.orderCharges(in: entries)) }.value
         guard !saved.items.isEmpty else { return }
+        if orderChargeCache == nil, entries.count == library.entries.count { orderChargeCache = charges }
+        Launch.mark("orders read")
         orders = saved
         refreshOrderRows()
+        Launch.mark("order rows laid out")
         await rematchOrders()   // statements may have been added since the orders were last lined up
+        Launch.mark("orders rematched")
         await readOrderListings()
     }
 
     /// The charges an order export could explain: spending at the shops it covers.
+    /// Worked out once for each state of the library and kept: it means reading every line on file.
     private var orderCharges: [OrderMatcher.Charge] {
-        library.entries.compactMap { entry in
+        if let kept = orderChargeCache { return kept }
+        let charges = Self.orderCharges(in: library.entries)
+        orderChargeCache = charges
+        return charges
+    }
+
+    nonisolated private static func orderCharges(in entries: [LedgerEntry]) -> [OrderMatcher.Charge] {
+        entries.compactMap { entry in
             guard entry.amount > 0, let shop = OrderMatcher.shop(of: entry.description) else { return nil }
             return .init(id: entry.id, date: entry.date, cents: Int((entry.amount * 100).rounded()), shop: shop)
         }

@@ -91,8 +91,7 @@ extension BudgetStore {
     }
 
     func transactions(in story: Story) -> [Transaction] {
-        let ids = Set(story.entryIDs)
-        return transactions.filter { ids.contains($0.id) }
+        transactions(withIDs: story.entryIDs)
     }
 
     func dismissStory(_ story: Story) {

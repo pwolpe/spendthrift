@@ -260,6 +260,10 @@ The checks live in `Sources/Spendthrift/SelfTest.swift`, in three parts:
 
 When a bug is found, a check for it goes in before the fix.
 
+The script ends by timing how long the app takes to open. `SPENDTHRIFT_TIMING=1` prints each step
+of starting up with its cost; `SPENDTHRIFT_BENCH=1` (with `SPENDTHRIFT_SNAPSHOT`) times the things
+pages do over and over.
+
 The same self-driving mode is available by hand through environment variables: `SPENDTHRIFT_HOME`
 runs the app against a scratch folder, `SPENDTHRIFT_SNAPSHOT=<dir>` saves a picture of each screen,
 `SPENDTHRIFT_IMPORT=a.csv:b.pdf` imports files first. To preview how a statement will be read:

@@ -21,7 +21,8 @@ struct OverviewView: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        let _ = Launch.mark("overview body")
+        return VStack(alignment: .leading, spacing: 20) {
             if let detail = store.overviewDetail, flowData != nil {
                 detailPage(detail)
             } else {
@@ -168,7 +169,7 @@ struct OverviewView: View {
     @ViewBuilder
     private var spendingDetail: some View {
         if store.overviewShowsYear, let period = currentPeriod {
-            ReportContent(data: ReportData(store: store, period: period), interactive: true)
+            ReportContent(data: store.report(for: period), interactive: true)
         } else if let m = currentMonth {
             header(m)
             HStack(alignment: .top, spacing: 20) {
@@ -213,7 +214,7 @@ struct OverviewView: View {
                 Spacer()
                 if store.overviewDetail == .spending {
                     Button {
-                        ReportExporter.savePDF(data: ReportData(store: store, period: current), store: store)
+                        ReportExporter.savePDF(data: store.report(for: current), store: store)
                     } label: {
                         Label("Save as PDF", systemImage: "square.and.arrow.down")
                     }

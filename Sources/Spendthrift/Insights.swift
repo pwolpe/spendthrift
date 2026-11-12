@@ -51,13 +51,13 @@ struct Subscription: Identifiable, Hashable {
 
 enum InsightEngine {
     private static func monthCharges(_ txns: [Transaction]) -> [Month: [Transaction]] {
-        Dictionary(grouping: txns) { Month(date: $0.date) }
+        Dictionary(grouping: txns) { $0.month }
     }
 
     /// Merchants charged about the same amount, once a month, in at least 2 of the last 4 months.
     static func subscriptions(asOf month: Month, in all: [Transaction]) -> [Subscription] {
         let window = Set((0..<4).map { month.adding(-$0) })
-        let spending = all.filter { $0.countsAsSpending && $0.amount > 0 && window.contains(Month(date: $0.date)) }
+        let spending = all.filter { $0.countsAsSpending && $0.amount > 0 && window.contains($0.month) }
         return Dictionary(grouping: spending, by: \.merchant).compactMap { name, txns in
             let byMonth = monthCharges(txns)
             guard byMonth.count >= 2, byMonth.values.allSatisfy({ $0.count == 1 }) else { return nil }
@@ -66,7 +66,7 @@ enum InsightEngine {
             guard amounts.allSatisfy({ abs($0 - median) <= median * 0.2 }) else { return nil }
             let latest = txns.max { $0.date < $1.date }!
             // Must still be active: charged this month or last.
-            guard Month(date: latest.date) >= month.adding(-1) else { return nil }
+            guard latest.month >= month.adding(-1) else { return nil }
             return Subscription(merchant: name, category: latest.category, monthlyAmount: latest.amount, lastCharge: latest.date)
         }
         .sorted { $0.monthlyAmount > $1.monthlyAmount }
@@ -74,9 +74,9 @@ enum InsightEngine {
 
     static func insights(for month: Month, in all: [Transaction]) -> [Insight] {
         let spending = all.filter(\.countsAsSpending)
-        guard let firstDataMonth = spending.map({ Month(date: $0.date) }).min(),
+        guard let firstDataMonth = spending.map({ $0.month }).min(),
               let lastDate = spending.map(\.date).max() else { return [] }
-        let thisMonth = spending.filter { Month(date: $0.date) == month }
+        let thisMonth = spending.filter { $0.month == month }
         let monthIsComplete = Month(date: lastDate) > month || Calendar.current.component(.day, from: lastDate) >= 25
         var out: [Insight] = []
 
@@ -84,14 +84,14 @@ enum InsightEngine {
         for sub in subscriptions(asOf: month, in: all) {
             let history = spending.filter { $0.merchant == sub.merchant }.sorted { $0.date < $1.date }
             guard let first = history.first else { continue }
-            let firstMonth = Month(date: first.date)
+            let firstMonth = first.month
             if firstMonth >= month.adding(-1), firstMonth > firstDataMonth {
                 out.append(Insight(id: "sub-\(sub.merchant)-\(firstMonth.key)", kind: .newSubscription,
                                    title: "New subscription: \(sub.merchant)",
                                    detail: "\(Money.format(sub.monthlyAmount)) a month, starting \(firstMonth.name).", target: .place(sub.merchant)))
             }
-            let inMonth = history.filter { Month(date: $0.date) == month }
-            let before = history.filter { Month(date: $0.date) < month }
+            let inMonth = history.filter { $0.month == month }
+            let before = history.filter { $0.month < month }
             if let now = inMonth.last, let prev = before.last,
                now.amount > prev.amount + 0.5, now.amount / prev.amount >= 1.03, now.amount / prev.amount <= 1.5 {
                 out.append(Insight(id: "price-\(sub.merchant)-\(month.key)", kind: .priceIncrease,
@@ -117,7 +117,7 @@ enum InsightEngine {
         }
 
         // Unusually large purchases
-        let earlier = spending.filter { Month(date: $0.date) < month && $0.amount > 0 }
+        let earlier = spending.filter { $0.month < month && $0.amount > 0 }
         let byCategory = Dictionary(grouping: earlier, by: \.category)
         let unusual = thisMonth.filter { t in
             guard t.amount >= 150, t.category != .unsorted else { return false }
@@ -136,7 +136,7 @@ enum InsightEngine {
         let previous = (1...3).map { month.adding(-$0) }.filter { $0 >= firstDataMonth }
         if previous.count >= 2 {
             let current = Dictionary(grouping: thisMonth, by: \.category).mapValues { $0.reduce(0) { $0 + $1.amount } }
-            let pastTotals = Dictionary(grouping: spending.filter { previous.contains(Month(date: $0.date)) }, by: \.category)
+            let pastTotals = Dictionary(grouping: spending.filter { previous.contains($0.month) }, by: \.category)
                 .mapValues { $0.reduce(0) { $0 + $1.amount } / Double(previous.count) }
             for category in Category.spendingCases {
                 let now = current[category] ?? 0, usual = pastTotals[category] ?? 0
@@ -177,7 +177,7 @@ struct Award: Identifiable, Hashable {
 enum AwardEngine {
     static func awards(for month: Month, in all: [Transaction]) -> [Award] {
         let spending = all.filter { $0.countsAsSpending && $0.category != .unsorted }
-        let thisMonth = spending.filter { Month(date: $0.date) == month }
+        let thisMonth = spending.filter { $0.month == month }
         guard !thisMonth.isEmpty else { return [] }
         var awards: [Award] = []
         var usedWinners: Set<String> = []
@@ -217,9 +217,9 @@ enum AwardEngine {
         }
 
         // Newcomer: first-ever appearance this month (only if we have earlier history).
-        let firstDataMonth = spending.map { Month(date: $0.date) }.min() ?? month
+        let firstDataMonth = spending.map { $0.month }.min() ?? month
         if firstDataMonth < month {
-            let seenBefore = Set(spending.filter { Month(date: $0.date) < month }.map(\.merchant))
+            let seenBefore = Set(spending.filter { $0.month < month }.map(\.merchant))
             if let newcomer = places.filter({ !seenBefore.contains($0.name) && !usedWinners.contains($0.name) && $0.total >= 10 })
                 .max(by: { $0.total < $1.total }) {
                 awards.append(Award(title: "New this month", winner: newcomer.name, value: Money.format(newcomer.total),
@@ -232,7 +232,7 @@ enum AwardEngine {
         let previous = (1...3).map { month.adding(-$0) }.filter { $0 >= firstDataMonth }
         if previous.count >= 2 {
             let current = Dictionary(grouping: thisMonth, by: \.category).mapValues { $0.reduce(0.0) { $0 + $1.amount } }
-            let past = Dictionary(grouping: spending.filter { previous.contains(Month(date: $0.date)) }, by: \.category)
+            let past = Dictionary(grouping: spending.filter { previous.contains($0.month) }, by: \.category)
                 .mapValues { $0.reduce(0.0) { $0 + $1.amount } / Double(previous.count) }
             let drops = past.compactMap { cat, usual -> (Category, Double)? in
                 let drop = usual - (current[cat] ?? 0)
@@ -247,7 +247,7 @@ enum AwardEngine {
         // Lifetime achievement: the longest-running regular charge.
         let subs = InsightEngine.subscriptions(asOf: month, in: all)
         let lifetime = subs.map { sub -> (Subscription, Int) in
-            let months = Set(spending.filter { $0.merchant == sub.merchant }.map { Month(date: $0.date) }).count
+            let months = Set(spending.filter { $0.merchant == sub.merchant }.map { $0.month }).count
             return (sub, months)
         }.filter { !usedWinners.contains($0.0.merchant) }.max { $0.1 < $1.1 }
         if let (sub, months) = lifetime, months >= 3 {
@@ -321,7 +321,7 @@ struct CeremonyCard: View {
 
     var body: some View {
         let insights = store.insights(for: month)
-        let awards = AwardEngine.awards(for: month, in: store.transactions)
+        let awards = store.awards(for: month)
         // Only what the page doesn't already show: the ring and Top payees cover the leaders.
         let printed = awards.filter { !$0.isLeader }
         Card {

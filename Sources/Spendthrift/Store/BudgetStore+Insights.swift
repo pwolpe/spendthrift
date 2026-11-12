@@ -70,7 +70,25 @@ extension BudgetStore {
     }
 
     func insights(for month: Month) -> [Insight] {
-        InsightEngine.insights(for: month, in: transactions).filter { !library.dismissedInsights.contains($0.id) }
+        let found = insightCache[month] ?? InsightEngine.insights(for: month, in: transactions)
+        insightCache[month] = found
+        return found.filter { !library.dismissedInsights.contains($0.id) }
+    }
+
+    /// The month's superlatives.
+    func awards(for month: Month) -> [Award] {
+        if let kept = awardCache[month] { return kept }
+        let found = AwardEngine.awards(for: month, in: transactions)
+        awardCache[month] = found
+        return found
+    }
+
+    /// The year in review for one period.
+    func report(for period: ReportPeriod) -> ReportData {
+        if let kept = reportCache[period] { return kept }
+        let made = ReportData(store: self, period: period)
+        reportCache[period] = made
+        return made
     }
 
     func dismissInsight(_ insight: Insight) {

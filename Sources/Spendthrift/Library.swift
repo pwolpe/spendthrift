@@ -126,7 +126,28 @@ struct Library: Codable {
         case unreadable
     }
 
+    /// Reading the saved file is the longest single step of starting up, and needs nothing from the
+    /// rest of the app: `preload` starts it on another thread the moment the process begins, so it
+    /// runs while the Mac is setting the app up, and `load` picks up the result.
+    nonisolated(unsafe) private static var early: (file: URL, library: Library?)?
+    private static let earlyDone = DispatchGroup()
+
+    static func preload(paths: BudgetPaths = BudgetPaths()) {
+        let file = paths.libraryFile
+        earlyDone.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            early = (file, read(file))
+            earlyDone.leave()
+        }
+    }
+
     static func load(paths: BudgetPaths) -> (Library, LoadResult) {
+        earlyDone.wait()
+        if let ready = early, ready.file == paths.libraryFile, let library = ready.library {
+            early = nil
+            return (library, .loaded)
+        }
+        early = nil
         let fm = FileManager.default
         guard fm.fileExists(atPath: paths.libraryFile.path) else { return (Library(), .fresh) }
         if let library = read(paths.libraryFile) { return (library, .loaded) }

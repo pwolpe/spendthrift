@@ -257,7 +257,10 @@ enum OrderMatcher {
 
     /// Which shop a statement line is from, by how these shops sign their charges. Nil for anything else.
     static func shop(of description: String) -> OrderItem.Shop? {
+        // Nearly every line on a statement is from somewhere else. Each shop's name has an "a" followed
+        // closely by an "m" or "z" (amazon, amzn), or one of four other words; rule the rest out cheaply.
         let d = description.lowercased()
+        guard d.contains("am") || d.contains("whole") || d.contains("kindle") || d.contains("audible") || d.contains("prime video") else { return nil }
         if d.contains("whole foods") || d.contains("wholefds") || d.contains("amazon fresh") || d.contains("amazon go") { return .groceries }
         if ["kindle", "audible", "prime video", "amazon prime", "amazon digital", "amzn digital", "amazon music"].contains(where: d.contains) { return .digital }
         if d.contains("amazon") || d.contains("amzn") { return .store }

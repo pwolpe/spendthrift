@@ -359,6 +359,12 @@ struct Month: Hashable, Comparable, Identifiable {
     let month: Int
 
     init(year: Int, month: Int) { self.year = year; self.month = month }
+    /// The month of a day written yyyy-MM-dd, read straight off the text.
+    init?(isoDay: String) {
+        let b = isoDay.utf8
+        guard b.count >= 7, let year = Int(isoDay.prefix(4)), let month = Int(isoDay.dropFirst(5).prefix(2)), (1...12).contains(month) else { return nil }
+        self.year = year; self.month = month
+    }
     init(date: Date) {
         let c = Calendar.current.dateComponents([.year, .month], from: date)
         year = c.year ?? 2000

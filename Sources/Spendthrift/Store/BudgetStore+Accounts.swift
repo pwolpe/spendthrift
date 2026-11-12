@@ -71,8 +71,9 @@ extension BudgetStore {
     func refreshDownloads() {
         guard ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] == nil else { return }
         let known = library.importedHashes.union(library.dismissedDownloads)
+        let memory = paths.root.appendingPathComponent("downloads-seen.json")
         Task.detached(priority: .utility) {
-            let found = Self.scanDownloads(excluding: known)
+            let found = Self.scanDownloads(excluding: known, memory: memory)
             await MainActor.run { self.foundInDownloads(found) }
         }
     }
@@ -117,33 +118,43 @@ extension BudgetStore {
         downloadsWatcher = source
     }
 
-    nonisolated private static func scanDownloads(excluding known: Set<String>) -> [URL] {
+    /// What a file in Downloads turned out to be, so it is opened once and not at every launch:
+    /// whether it reads as a statement, and the fingerprint of its contents. Good for as long as
+    /// the file's size and date stay the same.
+    private struct Seen: Codable {
+        var stamp: String
+        var isStatement: Bool
+        var hash: String?
+    }
+
+    nonisolated private static func scanDownloads(excluding known: Set<String>, memory: URL) -> [URL] {
         guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first,
               let items = try? FileManager.default.contentsOfDirectory(
-                at: downloads, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])
+                at: downloads, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey], options: [.skipsHiddenFiles])
         else { return [] }
         let cutoff = Date.now.addingTimeInterval(-60 * 24 * 3600)
-        return items
-            .compactMap { url -> (URL, Date)? in
-                let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-                return date > cutoff ? (url, date) : nil
-            }
-            .filter { url, _ in
-                switch url.pathExtension.lowercased() {
-                case "csv", "ofx", "qfx", "qbo", "xlsx": return true
+        let before = (try? Data(contentsOf: memory)).flatMap { try? JSONDecoder().decode([String: Seen].self, from: $0) } ?? [:]
+        var after: [String: Seen] = [:]
+        var found: [(URL, Date)] = []
+        for url in items {
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let date = values?.contentModificationDate ?? .distantPast
+            guard date > cutoff else { continue }
+            let kind = url.pathExtension.lowercased()
+            guard ["csv", "ofx", "qfx", "qbo", "xlsx", "pdf"].contains(kind) else { continue }
+            let stamp = "\(values?.fileSize ?? -1)|\(date.timeIntervalSince1970)"
+            var seen = before[url.lastPathComponent].flatMap { $0.stamp == stamp ? $0 : nil }
+            if seen == nil {
                 // Judge PDFs by their first page, not their name: Amex calls them "2026-11-03.pdf",
                 // and a "closing-statement.pdf" from a home purchase isn't a bank statement.
-                case "pdf": return PDFStatement.looksLikeStatement(url)
-                default: return false
-                }
+                let isStatement = kind == "pdf" ? PDFStatement.looksLikeStatement(url) : true
+                seen = Seen(stamp: stamp, isStatement: isStatement, hash: isStatement ? (try? Data(contentsOf: url)).map(hash) : nil)
             }
-            .filter { url, _ in
-                guard let data = try? Data(contentsOf: url) else { return false }
-                return !known.contains(hash(data))
-            }
-            .sorted { $0.1 > $1.1 }
-            .prefix(60)
-            .map(\.0)
+            after[url.lastPathComponent] = seen
+            if let seen, seen.isStatement, let hash = seen.hash, !known.contains(hash) { found.append((url, date)) }
+        }
+        if let data = try? JSONEncoder().encode(after) { try? data.write(to: memory, options: .atomic) }
+        return found.sorted { $0.1 > $1.1 }.prefix(60).map(\.0)
     }
 
     func dismissDownload(_ url: URL) {

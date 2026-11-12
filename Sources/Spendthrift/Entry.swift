@@ -10,6 +10,8 @@ import AppKit
 enum Entry {
     static func main() {
         setvbuf(stdout, nil, _IOLBF, 0)   // line-buffered logs for debugging
+        Launch.mark("main")
+        Library.preload()
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--compose"), i + 4 < args.count {
             // Debug aid: --compose <caricature> <backdrop|-> <prop|-> <out.png>

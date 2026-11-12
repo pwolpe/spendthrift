@@ -29,6 +29,18 @@ enum SelfTest {
               && MerchantResolver.key(for: "PARAMOUNT+ CA", amount: 5, existingKeys: [String]()) == "known:Paramount+")
         check("finding a payee ignores punctuation and case", PlacesView.squeeze("Barry's  Bootcamp") == "barrysbootcamp")
 
+        // The quick way of reading a day must agree with the careful one, every day, clock changes included.
+        let careful = DateParsing.formatter("yyyy-MM-dd")
+        var day = careful.date(from: "2015-01-01")!, agree = true
+        for _ in 0..<(17 * 366) {
+            let text = careful.string(from: day)
+            if let quick = DateParsing.isoDay(text), quick != careful.date(from: text) { agree = false }
+            day = Calendar.current.date(byAdding: .day, value: 1, to: day)!
+        }
+        check("days are read the same the quick way and the careful way", agree
+              && DateParsing.isoDay("2026-02-30") == nil && DateParsing.isoDay("2026-13-01") == nil && DateParsing.isoDay("11/03/2026") == nil
+              && DateParsing.isoDay("2024-02-29") != nil && Month(isoDay: "2026-03-09") == Month(year: 2026, month: 3))
+
         // Orders against card charges.
         func item(_ order: String, _ cents: Int, _ date: String, gift: Bool = false) -> OrderItem {
             var item = OrderItem(orderID: order, shop: .store, date: date, shipment: date + "T10:00", name: "Thing from \(order)", cents: cents, quantity: 1)
@@ -70,6 +82,12 @@ enum SelfTest {
               : verdict == .even ? abs(year.surplus) < year.totalIncome * 0.01 : (verdict == .within) == (year.surplus > 0))
         check("money kept apart is counted nowhere else", Set(store.transactions.map(\.id)).isDisjoint(with: store.setApart.map(\.id)))
         check("every charge falls in a month the app knows", store.transactions.allSatisfy { store.months.contains($0.month) })
+        check("charges are kept oldest first, each in the month of its day", zip(store.transactions, store.transactions.dropFirst()).allSatisfy { $0.date <= $1.date }
+              && store.transactions.allSatisfy { $0.month == Month(date: $0.date) })
+        if let trip = store.stories.first {
+            let ids = Set(trip.entryIDs)
+            check("a trip's charges are found by index as by search", store.transactions(in: trip).map(\.id) == store.transactions.filter { ids.contains($0.id) }.map(\.id))
+        }
         let ids = Set(store.library.entries.map(\.id.uuidString))
         check("every order match points at real items and a real charge", store.orders.matches.allSatisfy { key, match in
             ids.contains(key) && !match.items.isEmpty && match.items.allSatisfy { store.orders.items.indices.contains($0) }

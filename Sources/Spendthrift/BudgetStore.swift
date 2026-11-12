@@ -25,6 +25,23 @@ final class BudgetStore {
     var domainByName: [String: String] = [:]
     @ObservationIgnored private var spendingByMonth: [Month: [Transaction]] = [:]
     @ObservationIgnored private var dateCache: [String: Date] = [:]
+    /// Where each transaction sits in `transactions`, made the first time something asks by id.
+    @ObservationIgnored private var indexByID: [UUID: Int]?
+    // Worked out when first asked for and kept until the library next changes: pages ask for these
+    // every time they redraw.
+    @ObservationIgnored var insightCache: [Month: [Insight]] = [:]
+    @ObservationIgnored var awardCache: [Month: [Award]] = [:]
+    @ObservationIgnored var reportCache: [ReportPeriod: ReportData] = [:]
+    /// The charges an order history could explain, kept until the library next changes.
+    @ObservationIgnored var orderChargeCache: [OrderMatcher.Charge]?
+
+    /// The transactions with these ids, oldest first.
+    func transactions(withIDs ids: some Sequence<UUID>) -> [Transaction] {
+        if indexByID == nil {
+            indexByID = Dictionary(transactions.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        }
+        return Set(ids).compactMap { indexByID?[$0] }.sorted().map { transactions[$0] }
+    }
 
     // UI state
     /// The sidebar section. Set directly, it is a fresh start; links inside pages use `navigate`.
@@ -153,12 +170,17 @@ final class BudgetStore {
     var explaining: Set<String> = []
 
     private init() {
+        Launch.mark("store begins")
         let (loaded, result) = Library.load(paths: paths)
         library = loaded
+        Launch.mark("library read (\(loaded.entries.count) entries)")
         CustomCategories.set(library.customCategories ?? [])
         splitWiresByRecipient()
+        Launch.mark("wires split")
         joinSplitBankAccounts()
+        Launch.mark("accounts joined")
         rebuild()
+        Launch.mark("rebuilt")
         switch result {
         case .restoredFromBackup(let date):
             let when = date.map { " from \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
@@ -174,6 +196,7 @@ final class BudgetStore {
         Task { await sortRemaining() }
         Task { await notePeriodsIfNeeded() }
         Task { await loadOrders() }
+        Launch.mark("store ready")
     }
 
     // MARK: - Persistence
@@ -184,16 +207,23 @@ final class BudgetStore {
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            saveNow()
+            // Writing the file takes long enough to feel if it holds up the window, so a copy is
+            // written from another thread. One queue, so two saves can never land out of order.
+            let snapshot = library, paths = paths
+            Self.saving.async { snapshot.save(paths: paths) }
         }
     }
+
+    nonisolated private static let saving = DispatchQueue(label: "spendthrift.save", qos: .utility)
 
     /// Writes everything to disk right now (before quitting to install an update).
     func saveForQuit() { saveNow() }
 
+    /// Writes the library before returning, after any save already under way.
     func saveNow() {
         saveTask?.cancel()
-        library.save(paths: paths)
+        let snapshot = library, paths = paths
+        Self.saving.sync { snapshot.save(paths: paths) }
     }
 
     // MARK: - Deriving what the screens show
@@ -244,8 +274,12 @@ final class BudgetStore {
         // never join the main list, so no total anywhere in the app can pick them up by accident.
         let apartAccounts = Set(library.accounts.filter { $0.apart != nil }.map(\.id))
         var apartList: [Transaction] = []
-        for e in library.entries {
-            guard let date = date(e.date) else { continue }
+        // Oldest first. Sorting where each line goes is far cheaper than sorting the finished lines.
+        let when = library.entries.map { date($0.date) }
+        let order = library.entries.indices.filter { when[$0] != nil }.sorted { (when[$0]!, $0) < (when[$1]!, $1) }
+        for index in order {
+            let e = library.entries[index]
+            guard let date = when[index] else { continue }
             let info = library.merchants[e.merchantKey]
             let unchecked = info?.isUnconfirmedGuess ?? true
             var category = e.override ?? info?.category ?? .unsorted
@@ -253,7 +287,7 @@ final class BudgetStore {
             // otherwise the payment is the only record of the spending, and has to count.
             if tie.covered[e.id] == false { category = .uncoveredCards }
             list.append(Transaction(
-                id: e.id, date: date, month: Month(date: date), description: e.description, amount: e.amount,
+                id: e.id, date: date, month: Month(isoDay: e.date) ?? Month(date: date), description: e.description, amount: e.amount,
                 merchant: info?.name ?? KeywordExtractor.displayName(for: e.description), merchantKey: e.merchantKey,
                 category: category,
                 account: accountNames[e.accountID] ?? "", accountID: e.accountID,
@@ -262,7 +296,7 @@ final class BudgetStore {
             if let note = e.note, !note.isEmpty { list[list.count - 1].note = note }
             if apartAccounts.contains(e.accountID) { apartList.append(list.removeLast()) }
         }
-        setApart = apartList.sorted { $0.date < $1.date }
+        setApart = apartList
         for issuer in coverage.keys {
             coverage[issuer]?.statementSpend = cardSpend[issuer] ?? 0
             coverage[issuer]?.accounts = library.accounts.filter { cardAccount[$0.id] == issuer }.map(\.name)
@@ -271,8 +305,10 @@ final class BudgetStore {
         var domains: [String: String] = [:]
         for info in library.merchants.values { if let d = info.domain, !d.isEmpty { domains[info.name] = d } }
         domainByName = domains
-        list.sort { $0.date < $1.date }
         transactions = list
+        indexByID = nil
+        orderChargeCache = nil
+        insightCache = [:]; awardCache = [:]; reportCache = [:]
         months = Array(Set(list.map(\.month))).sorted()
         spendingByMonth = Dictionary(grouping: list.filter(\.countsAsSpending), by: \.month)
 

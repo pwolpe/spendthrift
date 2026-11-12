@@ -8,6 +8,13 @@ struct SpendthriftApp: App {
     var body: some Scene {
         Window("Spendthrift", id: "main") {
             ContentView()
+                .onAppear {
+                    Launch.mark("window appears")
+                    // The first frame is on the glass one turn of the run loop later.
+                    DispatchQueue.main.async { Launch.mark("first frame drawn") }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Launch.mark("one second later (idle)") }
+                    if Launch.enabled { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { Launch.mark("quitting"); NSApp.terminate(nil) } }
+                }
                 .environment(BudgetStore.shared)
                 .frame(minWidth: 920, minHeight: 620)
         }

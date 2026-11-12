@@ -213,6 +213,35 @@ enum DebugHooks {
             try? await Task.sleep(for: .seconds(2))
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_BENCH=1: how long the things pages do over and over take, then quit.
+        if env["SPENDTHRIFT_BENCH"] != nil {
+            func time(_ name: String, _ work: () -> Void) {
+                let began = Date.now
+                for _ in 0..<5 { work() }
+                print(String(format: "BENCH %6.1f ms  %@", Date.now.timeIntervalSince(began) * 200, name))
+            }
+            if let month = store.months.dropLast().last, let period = ReportData.periods(for: store).first {
+                time("a change (rebuild everything derived)") { store.changed() }
+                time("money in and out, year") { _ = CashFlowData(store: store, period: period) }
+                time("money in and out, month") { _ = CashFlowData(store: store, month: month) }
+                time("year report") { _ = ReportData(store: store, period: period) }
+                time("insights for a month, first time") { store.insightCache = [:]; _ = store.insights(for: month) }
+                time("insights for a month, again") { _ = store.insights(for: month) }
+                time("awards for a month, again") { _ = store.awards(for: month) }
+                time("year report, again") { _ = store.report(for: period) }
+                time("subscriptions") { _ = store.subscriptions() }
+                time("things noticed, year") { _ = store.noticed(in: .last12) }
+                time("on this day") { _ = store.onThisDay() }
+                time("recent highlights") { _ = store.recentHighlights() }
+                time("trip highlights") { _ = store.tripHighlights() }
+                time("category totals + top payees, month") { _ = store.categoryTotals(in: month); _ = store.topMerchants(in: month) }
+                time("charges for one category") { _ = store.transactions(matching: TransactionFilter(category: .dining)) }
+                time("stories") { _ = store.stories }
+                time("categories summary") { _ = store.categorySummary() }
+                time("review items / missing statements") { _ = store.reviewItems.count; _ = store.missingStatements.count }
+            }
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_CLEANUP=1: re-key lines the app now reads better, print what changed, then quit.
         if env["SPENDTHRIFT_CLEANUP"] != nil {
             for line in store.cleanUpPayees() { print("CLEANUP \(line)") }

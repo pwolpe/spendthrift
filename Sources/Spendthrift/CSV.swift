@@ -182,7 +182,36 @@ enum DateParsing {
         return v
     }
 
+    /// The start of a day written yyyy-MM-dd, worked out by arithmetic. A formatter takes about
+    /// twenty times as long, and the app reads tens of thousands of these every time it opens.
+    /// Nil for anything unusual (including a day whose midnight a clock change skips), which the
+    /// formatter then handles.
+    static func isoDay(_ s: String) -> Date? {
+        let b = Array(s.utf8)
+        guard b.count == 10, b[4] == 45, b[7] == 45 else { return nil }
+        func number(_ range: Range<Int>) -> Int? {
+            var n = 0
+            for i in range { guard b[i] >= 48, b[i] <= 57 else { return nil }; n = n * 10 + Int(b[i] - 48) }
+            return n
+        }
+        guard let year = number(0..<4), let month = number(5..<7), let day = number(8..<10), (1...12).contains(month), year >= 1900 else { return nil }
+        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+        guard day >= 1, day <= [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] else { return nil }
+        // Days since 1970-01-01 in the proleptic Gregorian calendar.
+        let y = month <= 2 ? year - 1 : year
+        let era = (y >= 0 ? y : y - 399) / 400
+        let yearOfEra = y - era * 400
+        let dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1
+        let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+        let utcMidnight = Double(era * 146_097 + dayOfEra - 719_468) * 86_400
+        let zone = TimeZone.current
+        let offset = zone.secondsFromGMT(for: Date(timeIntervalSince1970: utcMidnight))
+        let local = Date(timeIntervalSince1970: utcMidnight - Double(offset))
+        return zone.secondsFromGMT(for: local) == offset ? local : nil
+    }
+
     static func parse(_ s: String, format: String) -> Date? {
+        if format == "yyyy-MM-dd", let fast = isoDay(s) { return fast }
         let v = clean(s)
         if let d = formatter(format).date(from: v) { return d }
         // Strip trailing time like "09/02/2026 12:00:00 AM".

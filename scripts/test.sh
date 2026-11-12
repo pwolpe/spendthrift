@@ -47,4 +47,14 @@ if [[ -n $LIBRARY ]]; then
   for f in library.json orders.json; do [[ -f "$LIBRARY/$f" ]] && cp "$LIBRARY/$f" "$WORK/library-home/"; done
   run "a copy of the library" "$WORK/library-home" ""
 fi
+
+# How long the app takes to open, for the record (the second of two runs: the first pays one-off costs).
+# Not a pass or fail: machines differ. It is here so a slow start is noticed the day it appears.
+home="$WORK/fixtures-home"; [[ -d "$WORK/library-home" ]] && home="$WORK/library-home"
+for i in 1 2; do
+  SPENDTHRIFT_HOME="$home" SPENDTHRIFT_TIMING=1 SPENDTHRIFT_NO_CLOUD=1 "$APP" > "$WORK/timing.log" 2>&1
+done
+frame=$(grep "first frame drawn" "$WORK/timing.log" | awk '{print $2}')
+settled=$(grep -E "orders rematched|one second later" "$WORK/timing.log" | head -1 | awk '{print $2}')
+echo "opening: first frame at ${frame:-?} ms, settled at ${settled:-?} ms"
 exit $bad
