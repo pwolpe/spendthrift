@@ -248,6 +248,13 @@ enum DebugHooks {
             for line in CloudSpend.shared.lines(days: 1) where line.job == "Benchmark" { print("DECISION cost \(line)") }
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_TIDY=1: compare payees, act where the model is sure, print every pair and what was done, then quit.
+        if env["SPENDTHRIFT_TIDY"] != nil {
+            for _ in 0..<100 where store.isSuggesting || store.isTidying { try? await Task.sleep(for: .milliseconds(200)) }
+            await store.tidyIfNeeded()
+            store.saveNow()
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_BENCH=1: how long the things pages do over and over take, then quit.
         if env["SPENDTHRIFT_BENCH"] != nil {
             func time(_ name: String, _ work: () -> Void) {

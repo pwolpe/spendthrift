@@ -69,6 +69,8 @@ struct Library: Codable {
     /// Ways of writing a line that the person said are a payee of their own ("PARAMOUNT HOTEL NEW YORK NY"
     /// is not Paramount+): the spelling, to that payee's key. These win over every other way of telling.
     var spellings: [String: String]?
+    /// What the app tidied by itself, and every pair of payees it has already asked a model about.
+    var tidy: TidyBook?
     /// Trips and events the app noticed, and which data they were worked out from.
     var stories: [Story]?
     var storiesBasis: String?
@@ -106,6 +108,7 @@ struct Library: Codable {
         dismissedInsights = (try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedInsights)) ?? []
         customCategories = (try? c.decodeIfPresent(Lossy<CustomCategory>.self, forKey: .customCategories))?.values
         spellings = try? c.decodeIfPresent([String: String].self, forKey: .spellings)
+        tidy = try? c.decodeIfPresent(TidyBook.self, forKey: .tidy)
         stories = (try? c.decodeIfPresent(Lossy<Story>.self, forKey: .stories))?.values
         storiesBasis = try? c.decodeIfPresent(String.self, forKey: .storiesBasis)
         storyYears = try? c.decodeIfPresent([String: String].self, forKey: .storyYears)

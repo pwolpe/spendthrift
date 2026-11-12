@@ -17,9 +17,16 @@ extension BudgetStore {
         var section: SidebarItem
         var detail: OverviewDetail?
         var route: [Route] = []
+        /// On the Amazon page: the one order on show, and the search. Back puts them back.
+        var orderOnly: String?
+        var orderSearch = ""
     }
 
-    var location: Location { Location(section: selection ?? .overview, detail: overviewDetail, route: route) }
+    var location: Location {
+        let onOrders = selection == .orders
+        return Location(section: selection ?? .overview, detail: overviewDetail, route: route,
+                        orderOnly: onOrders ? orderOnly : nil, orderSearch: onOrders ? orderSearch : "")
+    }
     var canGoBack: Bool { !history.isEmpty }
 
     /// Makes a move and remembers where it started.
@@ -40,6 +47,7 @@ extension BudgetStore {
             selection = to.section
             overviewDetail = to.detail
             route = to.route
+            if to.section == .orders { orderOnly = to.orderOnly; orderSearch = to.orderSearch }
         }
         isNavigating = false
     }

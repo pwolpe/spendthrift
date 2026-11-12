@@ -98,6 +98,7 @@ extension BudgetStore {
         }
         orderCoverage = coverage
         orderChargeList = list
+        DerivedCache.shared.ordersChanged()
     }
 
     /// Charges on accounts kept apart: not the person's own, so not part of this tie-out either.

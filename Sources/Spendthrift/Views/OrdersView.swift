@@ -46,7 +46,7 @@ struct OrderItemsList: View {
 struct OrdersView: View {
     private var store: BudgetStore { .shared }
     @FocusState private var searching: Bool
-    @State private var open: String?
+    @State private var open: String? = PageMemory.shared.ordersOpen
     @State private var read: String?
     /// False when rendered for a test snapshot.
     var scrolls = true
@@ -64,25 +64,10 @@ struct OrdersView: View {
         var charges: [UUID] { var seen: Set<UUID> = []; return rows.compactMap(\.charge).filter { seen.insert($0).inserted } }
     }
 
-    private func inStretch(_ month: Month) -> Bool {
-        switch store.orderScope {
-        case .all: true
-        case .year(let year): month.year == year
-        case .month(let m): month == m
-        }
-    }
+    private func inStretch(_ month: Month) -> Bool { store.orderInStretch(month) }
 
     /// Everything on screen follows from these: the stretch, the person, the search, and the category clicked.
-    private func rows(ignoringCategory: Bool = false) -> [Row] {
-        if let only = store.orderOnly { return store.orderRows.filter { $0.item.orderID == only && $0.item.cents > 0 } }
-        let query = PlacesView.squeeze(store.orderSearch)
-        return store.orderRows.filter { row in
-            guard row.item.cents > 0, inStretch(row.month) else { return false }
-            if let who = store.orderWho, row.item.who != who { return false }
-            if !ignoringCategory, let kind = store.orderKind, row.kind != kind { return false }
-            return query.isEmpty || row.haystack.contains(query)
-        }
-    }
+    private func rows(ignoringCategory: Bool = false) -> [Row] { store.shownOrderRows(ignoringCategory: ignoringCategory) }
 
     private var scopeTitle: String {
         switch store.orderScope {
@@ -114,7 +99,7 @@ struct OrdersView: View {
                 if let only = store.orderOnly {
                     HStack(spacing: 10) {
                         Label("Showing one order: \(only)", systemImage: "shippingbox.fill").font(.callout.weight(.medium))
-                        Button("Show Everything") { withAnimation(.snappy(duration: 0.2)) { store.orderOnly = nil } }
+                        Button("Show Everything") { store.navigate { store.orderOnly = nil } }
                     }
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(Theme.accent.opacity(0.08), in: .rect(cornerRadius: 10, style: .continuous))
@@ -129,6 +114,7 @@ struct OrdersView: View {
                         if finding {
                             Button { store.orderSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
                                 .buttonStyle(.plain).foregroundStyle(.tertiary)
+                                .help("Clear the search").accessibilityLabel("Clear search")
                         }
                     }
                     .padding(.horizontal, 14).padding(.vertical, 10)
@@ -159,6 +145,7 @@ struct OrdersView: View {
         }
         .navigationTitle("Amazon")
         .navigationSubtitle(store.orderOnly == nil ? scopeTitle : "One order")
+        .onChange(of: open) { PageMemory.shared.ordersOpen = open }
     }
 
     // MARK: The stretch and the person
@@ -235,12 +222,6 @@ struct OrdersView: View {
             lines.append("Order history runs from \(list.map(\.date).min().map { $0.formatted(.dateTime.year()) } ?? "") to \(through.formatted(Self.day))")
         }
         return lines.joined(separator: "\n")
-    }
-
-    /// For tests: the few sentences for the stretch on show, written now.
-    func shortVersionForTest() async -> String? {
-        let list = rows()
-        return await store.orderRead(key: scopeTitle, basis: "\(list.count)|\(list.reduce(0) { $0 + $1.net })", facts: facts(list))
     }
 
     @ViewBuilder private func shortVersion(_ list: [Row]) -> some View {
@@ -442,7 +423,7 @@ struct OrdersView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("BOUGHT AGAIN AND AGAIN").font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
                         ForEach(Array(again), id: \.name) { item in
-                            Button { store.orderSearch = item.name } label: {
+                            Button { store.navigate { store.orderSearch = item.name } } label: {
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                                     Text("\(item.times)×").font(Theme.mono(12, .bold)).foregroundStyle(Theme.accent).frame(width: 34, alignment: .trailing)
                                     Text(item.name).font(.callout).lineLimit(1)
@@ -460,7 +441,7 @@ struct OrdersView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("THE BIGGEST THINGS").font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
                     ForEach(Array(biggest)) { row in
-                        Button { store.orderOnly = row.item.orderID } label: {
+                        Button { store.navigate { store.orderOnly = row.item.orderID } } label: {
                             HStack(alignment: .center, spacing: 8) {
                                 ProductThumb(asin: row.item.asin, kind: row.kind, size: 26)
                                 Text(row.name).font(.callout).lineLimit(1)
@@ -482,10 +463,7 @@ struct OrdersView: View {
     /// Order totals and card charges are two sets of books. This says, without fuss, how far they
     /// agree for the stretch on screen and what the gap is made of; it narrows as more history is added.
     @ViewBuilder private func tieOut() -> some View {
-        let charges = store.orderChargeList.filter { charge in
-            guard let date = DateParsing.parse(charge.date, format: "yyyy-MM-dd") else { return false }
-            return inStretch(Month(date: date))
-        }
+        let charges = store.orderChargesInStretch()
         if !charges.isEmpty {
             let total = charges.reduce(0) { $0 + $1.amount }
             let open = charges.filter { !$0.itemized }
@@ -622,7 +600,7 @@ private struct ChargeLine: View {
     let id: UUID
 
     var body: some View {
-        if let charge = store.transactions.first(where: { $0.id == id }) {
+        if let charge = store.transactions(withIDs: [id]).first {
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Charged \(Money.format(charge.amount)) to \(charge.account) on \(charge.date.formatted(.dateTime.month(.abbreviated).day().year()))")
@@ -711,7 +689,7 @@ private struct OrderRowView: View {
                             Text(Money.format(Double(row.item.cents) / 100)).font(Theme.mono(12, .medium)).frame(minWidth: 70, alignment: .trailing)
                             if let url = row.item.productURL {
                                 Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.forward.square") }
-                                    .buttonStyle(.borderless).help("See this product on Amazon")
+                                    .buttonStyle(.borderless).help("See this product on Amazon").accessibilityLabel("See this product on Amazon")
                             }
                         }
                     }
@@ -768,7 +746,7 @@ private struct ItemRowView: View {
                     }
                     HStack(spacing: 8) {
                         ShopLink(title: "See It on Amazon", url: row.item.productURL)
-                        Button("The Whole Order", systemImage: "shippingbox") { store.orderOnly = row.item.orderID }
+                        Button("The Whole Order", systemImage: "shippingbox") { store.navigate { store.orderOnly = row.item.orderID } }
                             .help("Everything that was ordered with it")
                     }
                     .controlSize(.small)
@@ -781,5 +759,14 @@ private struct ItemRowView: View {
         }
         .background(hovering || isOpen ? Theme.accent.opacity(0.06) : .clear, in: .rect(cornerRadius: 9, style: .continuous))
         .onHover { hovering = $0 }
+    }
+}
+
+/// Only the debug hooks and tests call this.
+extension OrdersView {
+    /// The few sentences for the stretch on show, written now.
+    func shortVersionForTest() async -> String? {
+        let list = rows()
+        return await store.orderRead(key: scopeTitle, basis: "\(list.count)|\(list.reduce(0) { $0 + $1.net })", facts: facts(list))
     }
 }

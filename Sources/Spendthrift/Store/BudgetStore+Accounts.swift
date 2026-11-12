@@ -51,17 +51,15 @@ extension BudgetStore {
     }
 
     func transactionCount(for account: Account) -> Int {
-        transactions.filter { $0.accountID == account.id }.count
+        summary(of: account).count
     }
 
     func spent(in account: Account) -> Double {
-        transactions.filter { $0.accountID == account.id && $0.countsAsSpending }.reduce(0) { $0 + $1.amount }
+        summary(of: account).spent
     }
 
     func dateRange(for account: Account) -> ClosedRange<Date>? {
-        let dates = transactions.filter { $0.accountID == account.id }.map(\.date)
-        guard let lo = dates.min(), let hi = dates.max() else { return nil }
-        return lo...hi
+        summary(of: account).range
     }
 
     // MARK: - Downloads folder

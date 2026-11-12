@@ -107,7 +107,7 @@ private struct ReviewRow: View {
     private var hunch: String { item.info.hunch ?? "" }
     /// How many charges a row lists before "See all".
     private let shown = 3
-    private var charges: [Transaction] { store.transactions.filter { $0.merchantKey == item.key }.sorted { $0.date > $1.date } }
+    private var charges: [Transaction] { store.charges(withKey: item.key) }
 
     /// ", Mar 2024 to Oct 2026" when the charges span more than one month.
     private func span(_ charges: [Transaction]) -> String {
@@ -183,6 +183,7 @@ private struct ReviewRow: View {
                             Button { separating = t.id } label: { Image(systemName: "pencil.line") }
                                 .buttonStyle(.borderless)
                                 .help("This one is something else: name just this line")
+                                .accessibilityLabel("Name just this line")
                                 .padding(.trailing, 26)
                                 .popover(isPresented: Binding(get: { separating == t.id }, set: { if !$0 { separating = nil } }), arrowEdge: .bottom) {
                                     PayeeEditor(charges: [t]) { separating = nil }

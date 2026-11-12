@@ -15,7 +15,7 @@ struct PlaceView: View {
     @State private var separating: String?
 
     private var charges: [Transaction] {
-        store.transactions.filter { $0.merchant == name }.sorted { $0.date > $1.date }
+        store.charges(at: name)
     }
 
     var body: some View {
@@ -127,7 +127,7 @@ struct PlaceView: View {
         }
         let mine = words(name)
         guard let lead = mine.first else { return [] }
-        let names = Set(store.transactions.map(\.merchant)).subtracting([name])
+        let names = store.allPayeeNames.subtracting([name])
         return names.filter { other in
             let theirs = words(other)
             return theirs.first == lead || !Set(theirs).intersection(mine).isEmpty && (other.localizedCaseInsensitiveContains(name) || name.localizedCaseInsensitiveContains(other))
@@ -396,7 +396,7 @@ struct SetupView: View {
         @Bindable var store = store
         VStack(spacing: 0) {
             Picker("Show", selection: Binding(get: { store.selection == .categories ? SidebarItem.categories : .accounts },
-                                              set: { store.selection = $0 })) {
+                                              set: { tab in if tab != store.selection { store.go(to: tab) } })) {
                 Text("Accounts").tag(SidebarItem.accounts)
                 Text("Categories").tag(SidebarItem.categories)
             }
@@ -430,5 +430,6 @@ struct OriginalButton: View {
             .buttonStyle(.borderless)
             .foregroundStyle(.tertiary)
             .help("Show this charge in its original statement")
+            .accessibilityLabel("Show in original statement")
     }
 }

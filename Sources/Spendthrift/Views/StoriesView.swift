@@ -144,6 +144,7 @@ struct StoryCard: View {
                                 Button { rename() } label: { Image(systemName: "pencil").font(.caption.weight(.semibold)) }
                                     .buttonStyle(.borderless)
                                     .help("Rename this \(story.kind == .trip ? "trip" : "event")")
+                                    .accessibilityLabel("Rename")
                             }
                         }
                         Text(Self.dates(story))
@@ -177,6 +178,7 @@ struct StoryCard: View {
         // where it is there when wanted and out of the way when not.
         .contentShape(Rectangle())
         .onTapGesture { open() }
+        .accessibilityAddTraits(.isButton)
         .onHover { hovering = $0 }
         .scaleEffect(hovering ? 1.012 : 1)
         .animation(.snappy(duration: 0.18), value: hovering)

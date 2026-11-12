@@ -113,6 +113,7 @@ struct PlacesView: View {
                     .fixedSize()
                 }
 
+                if !finding { TidyCard() }
                 if list.isEmpty {
                     EmptyState(title: "No payee by that name",
                              message: "Nothing matches “\(store.placeSearch)”\(store.placeSpan == .all ? "" : " in \(store.placeSpan.rawValue.lowercased())"). Try part of the name, or how it's spelled on your statement.",

@@ -572,7 +572,7 @@ extension BudgetStore {
     // MARK: - Originals
 
     /// Every kept statement, newest period first.
-    var sourceFiles: [SourceFile] { (library.sources ?? []).sorted { ($0.lastDate ?? "", $0.name) > ($1.lastDate ?? "", $1.name) } }
+    var sourceFiles: [SourceFile] { sourceFilesSorted }
     func sourceURL(_ source: SourceFile) -> URL { paths.statementFile(source) }
     /// Charges that came into the app before originals were kept, and have nothing to show yet.
     var chargesWithoutOriginal: Int {
@@ -587,7 +587,7 @@ extension BudgetStore {
         }.count
     }
     func entry(_ id: UUID) -> LedgerEntry? { library.entries.first { $0.id == id } }
-    func entries(in source: SourceFile) -> [LedgerEntry] { library.entries.filter { $0.sourceID == source.id } }
+    func entries(in source: SourceFile) -> [LedgerEntry] { cachedEntries(in: source) }
 
     /// The originals a charge might be in: the one it was read from, else every statement of its
     /// account that spans its date (the finder then looks for the charge in each).

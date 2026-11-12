@@ -76,6 +76,7 @@ private struct AccountCard: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
+                    .help("More for this account").accessibilityLabel("More for \(account.name)")
                 }
                 Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
                     GridRow {
@@ -139,9 +140,8 @@ struct CoverageCard: View {
     }
 
     private var rows: [Row] {
-        let byAccount = Dictionary(grouping: store.transactions, by: \.accountID)
         var rows = store.accounts.map { account -> Row in
-            let have = Set((byAccount[account.id] ?? []).map(\.month)).union((account.statementMonths ?? []).compactMap { Month(key: $0) })
+            let have = store.summary(of: account).months.union((account.statementMonths ?? []).compactMap { Month(key: $0) })
             var missing = Set(store.missingStatements.first { $0.accountID == account.id }?.months ?? [])
             // A stretch the tie-out proves a statement is missing for (a payment was made for it).
             if let card = store.cardCoverage.first(where: { $0.accounts.contains(account.name) }) {

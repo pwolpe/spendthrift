@@ -8,32 +8,12 @@ struct TransactionsView: View {
     @State private var showInspector = true
 
     private var rows: [Transaction] {
-        let f = store.transactionFilter
-        var list = store.transactions
-        if let c = f.category { list = list.filter { $0.category == c } }
-        if let m = f.month { list = list.filter { $0.month == m } }
-        if let a = f.accountID { list = list.filter { $0.accountID == a } }
-        if let k = f.merchantKey { list = list.filter { $0.merchantKey == k } }
-        if let name = f.merchant { list = list.filter { $0.merchant == name } }
-        if let s = f.storyID, let story = store.stories.first(where: { $0.id == s }) {
-            let ids = Set(story.entryIDs)
-            list = list.filter { ids.contains($0.id) }
-        }
-        if f.needsCheck { list = list.filter(\.needsCheck) }
-        if !store.transactionSearch.isEmpty {
-            list = list.filter {
-                $0.merchant.localizedCaseInsensitiveContains(store.transactionSearch)
-                    || $0.description.localizedCaseInsensitiveContains(store.transactionSearch)
-                    || $0.category.displayName.localizedCaseInsensitiveContains(store.transactionSearch)
-                    || ($0.note?.localizedCaseInsensitiveContains(store.transactionSearch) ?? false)
-            }
-        }
-        return list.sorted(using: sortOrder)
+        store.sortedTransactions(store.transactionFilter, search: store.transactionSearch, by: sortOrder)
     }
 
     private var selected: Transaction? {
         guard selection.count == 1, let id = selection.first else { return nil }
-        return store.transactions.first { $0.id == id }
+        return store.transactions(withIDs: [id]).first
     }
 
     var body: some View {
@@ -122,7 +102,7 @@ struct TransactionsView: View {
             .width(min: 80, ideal: 100)
         }
         .contextMenu(forSelectionType: Transaction.ID.self) { ids in
-            let chosen = store.transactions.filter { ids.contains($0.id) }
+            let chosen = store.transactions(withIDs: ids)
             if let first = chosen.first {
                 let places = Set(chosen.map(\.merchantKey))
                 Menu(places.count == 1 ? "Change Category for \(first.merchant)" : "Change Category for \(places.count) Payees") {
@@ -230,6 +210,7 @@ private struct FilterBar: View {
             Image(systemName: symbol)
             Text(title).lineLimit(1)
             Button(action: remove) { Image(systemName: "xmark.circle.fill") }
+                .help("Remove this filter").accessibilityLabel("Remove filter \(title)")
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
         }
@@ -251,7 +232,7 @@ struct TransactionInspector: View {
     @State private var note = ""
     @State private var separating = false
 
-    private var sameplace: [Transaction] { store.transactions.filter { $0.merchantKey == transaction.merchantKey } }
+    private var sameplace: [Transaction] { store.charges(withKey: transaction.merchantKey) }
 
     private var reason: (text: String, symbol: String) {
         if transaction.isOverride { return ("You chose this for just this charge.", "hand.point.up.left.fill") }
@@ -383,16 +364,17 @@ struct TransactionInspector: View {
                 }
 
                 if !store.stories.isEmpty {
+                    let trip = store.story(containing: t.id)
                     group("Trip or event") {
                         Menu {
                             StoryChoices(ids: [t.id])
                         } label: {
-                            Label(store.story(containing: t.id)?.name ?? "Not part of one",
-                                  systemImage: store.story(containing: t.id) == nil ? "minus.circle" : "airplane.departure")
+                            Label(trip?.name ?? "Not part of one",
+                                  systemImage: trip == nil ? "minus.circle" : "airplane.departure")
                         }
                         .menuStyle(.borderlessButton)
                         .fixedSize()
-                        if store.story(containing: t.id) == nil {
+                        if trip == nil {
                             Text("If this belongs to a trip, choose it here and it will count toward that trip.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)

@@ -180,8 +180,6 @@ struct ReportData {
     }
 }
 
-// MARK: - Screen
-
 // MARK: - Content (also rendered straight into the PDF)
 
 struct ReportContent: View {
@@ -435,6 +433,7 @@ private struct CategoryLineRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = open != nil && $0 }
         .onTapGesture { open?(line.category) }
+        .accessibilityAddTraits(open != nil ? .isButton : [])
     }
 }
 
@@ -538,8 +537,6 @@ private struct BiggestCard: View {
     }
 }
 
-// MARK: - Recurring & money in
-
 enum Gold {
     static let gradient = LinearGradient(colors: [Color(red: 0.98, green: 0.82, blue: 0.36), Color(red: 0.78, green: 0.56, blue: 0.13)],
                                          startPoint: .top, endPoint: .bottom)
@@ -564,6 +561,11 @@ private struct TaxTimeCard: View {
     }
 
     private var lines: [Line] {
+        let key = "tax-lines|" + months.sorted().map(\.key).joined(separator: ",")
+        return store.cached(key) { makeLines() }
+    }
+
+    private func makeLines() -> [Line] {
         let txns = store.transactions.filter { months.contains($0.month) }
         func gather(_ title: String, _ note: String, _ symbol: String, _ color: Color, _ keep: (Transaction) -> Bool) -> Line? {
             let list = txns.filter(keep)

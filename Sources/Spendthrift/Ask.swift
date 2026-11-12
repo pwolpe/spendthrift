@@ -142,6 +142,22 @@ struct Answer: Identifiable, Hashable {
     var chart: [ChatAnalyst.ChartBar] = []
     var chartIsLine = false
     var understood: String?
+    /// The headline with every payee in it made a link, and where each row and bar leads: worked
+    /// out once, when the answer is built (`prepared()`), not each time the bubble is drawn.
+    private(set) var linkedHeadline: AttributedString?
+    private(set) var targets: [String: Drill.Target] = [:]
+
+    @MainActor
+    func prepared() -> Answer {
+        var copy = self
+        copy.linkedHeadline = PlaceLinker.link(headline)
+        var found: [String: Drill.Target] = [:]
+        for label in rows.map(\.label) + chart.map(\.label) {
+            if found[label] == nil, let target = Drill.target(label, in: self) { found[label] = target }
+        }
+        copy.targets = found
+        return copy
+    }
 
     static func == (a: Answer, b: Answer) -> Bool { a.id == b.id }
     func hash(into h: inout Hasher) { h.combine(id) }
@@ -267,6 +283,7 @@ struct AskView: View {
                     .buttonStyle(.borderless)
                     .foregroundStyle(.secondary)
                     .help("Close (⌘K)")
+                    .accessibilityLabel("Close")
             }
             .padding(.horizontal, 18)
             .padding(.top, 14)
@@ -375,12 +392,12 @@ struct AskView: View {
             // With the cloud model this is a conversation; otherwise one question at a time, on the Mac.
             if let (answer, turn) = await ChatAnalyst.answer(q, history: turns, store: store) {
                 turns.append(turn)
-                withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) { answers.append(answer); pending = nil }
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) { answers.append(answer.prepared()); pending = nil }
                 return
             }
             let query = await QueryParser.parse(q, months: store.months)
             let answer = AnswerEngine.answer(q, query: query, store: store)
-            withAnimation(.snappy) { answers.append(answer); pending = nil }
+            withAnimation(.snappy) { answers.append(answer.prepared()); pending = nil }
         }
     }
 }
@@ -388,16 +405,9 @@ struct AskView: View {
 /// Turns every place named in an answer into a link to that place's page.
 @MainActor
 enum PlaceLinker {
-    private static var cache: (count: Int, names: [String])?
-
     /// Every place name, longest first, so "Westside Market NYC" wins over "Westside Market".
-    static func names() -> [String] {
-        let store = BudgetStore.shared
-        if let cache, cache.count == store.transactions.count { return cache.names }
-        let names = Set(store.transactions.map(\.merchant)).filter { $0.count >= 4 }.sorted { $0.count > $1.count }
-        cache = (store.transactions.count, names)
-        return names
-    }
+    /// Kept per revision of the library, so a rename is seen at once.
+    static func names() -> [String] { BudgetStore.shared.linkablePayeeNames }
 
     static func url(for name: String) -> URL? {
         var parts = URLComponents()
@@ -477,7 +487,7 @@ enum Drill {
 
     static func open(_ label: String, in answer: Answer) {
         let store = BudgetStore.shared
-        switch target(label, in: answer) {
+        switch answer.targets[label] ?? target(label, in: answer) {
         case .place(let name): store.showPlace(name)
         // One plain page of charges, not the full table with its filters and inspector.
         case .story(let story): store.showCharges(TransactionFilter(storyID: story.id))
@@ -531,6 +541,9 @@ struct ThinkingDots: View {
 struct AnswerBubble: View {
     let answer: Answer
 
+    /// An answer made anywhere else than the question box is prepared here, once.
+    init(answer: Answer) { self.answer = answer.linkedHeadline == nil ? answer.prepared() : answer }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // The question: quiet, in the person's own words, set to the right like a note in the margin.
@@ -538,7 +551,7 @@ struct AnswerBubble: View {
             ReceiptPaper(padding: 16) {
                 VStack(alignment: .leading, spacing: 12) {
                     // Any place named in the answer is a link to everything spent there.
-                    Text(PlaceLinker.link(answer.headline))
+                    Text(answer.linkedHeadline ?? AttributedString(answer.headline))
                         .font(.system(size: 16, weight: .semibold, design: .serif))
                         .lineSpacing(2)
                         .tint(Theme.accent)
@@ -551,7 +564,7 @@ struct AnswerBubble: View {
                         })
                     if answer.chart.count >= 2 {
                         AnswerChart(bars: answer.chart, isLine: answer.chartIsLine) { Drill.open($0, in: answer) }
-                        if answer.chart.contains(where: { Drill.target($0.label, in: answer) != nil }) {
+                        if answer.chart.contains(where: { answer.targets[$0.label] != nil }) {
                             Text("Click a bar to see the charges behind it.").font(.caption).foregroundStyle(.tertiary)
                         }
                     }
@@ -563,7 +576,7 @@ struct AnswerBubble: View {
                                     HStack(spacing: 8) {
                                         if let c = row.category { CategoryIcon(category: c, size: 20) }
                                         VStack(alignment: .leading, spacing: 0) {
-                                            if Drill.target(row.label, in: answer) != nil {
+                                            if answer.targets[row.label] != nil {
                                                 Button(row.label) { Drill.open(row.label, in: answer) }
                                                     .buttonStyle(.plain)
                                                     .foregroundStyle(Theme.accent)

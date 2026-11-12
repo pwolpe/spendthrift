@@ -398,6 +398,7 @@ private struct StatementCard: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { if let category { open?(category) } }
+        .accessibilityAddTraits(open != nil && category != nil ? .isButton : [])
     }
 
     private func total(_ title: String, _ amount: Double, note: String?, invested: Bool = false) -> some View {
@@ -615,6 +616,7 @@ private struct InvestmentsCard: View {
                         .padding(.vertical, 7)
                         .contentShape(Rectangle())
                         .onTapGesture { open?(line.key) }
+                        .accessibilityAddTraits(open != nil ? .isButton : [])
                     }
                 }
             }

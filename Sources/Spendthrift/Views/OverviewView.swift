@@ -50,6 +50,7 @@ struct OverviewView: View {
         DownloadsBanner()
         if !store.reviewItems.isEmpty, !store.isSuggesting { reviewBanner }
         if !store.missingStatements.isEmpty, !store.isImporting { missingBanner }
+        TidyNotice()
         if store.months.count > 1 { scopePicker }
         if let data = flowData {
             // The judgment that matters most comes first: did living stay within income?

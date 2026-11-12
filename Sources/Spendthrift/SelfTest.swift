@@ -91,6 +91,33 @@ enum SelfTest {
               && DateParsing.isoDay("2026-02-30") == nil && DateParsing.isoDay("2026-13-01") == nil && DateParsing.isoDay("11/03/2026") == nil
               && DateParsing.isoDay("2024-02-29") != nil && Month(isoDay: "2026-03-09") == Month(year: 2026, month: 3))
 
+        // Tidying payees: what counts as one name, and what the app may do unasked.
+        check("tidy: one name written two ways", TidyEngine.namesAgree("Buon Italia", "Buon'Italia") && TidyEngine.namesAgree("Chopt", "Chopt Creative Salad")
+              && TidyEngine.namesAgree("The President Hotel", "President Hotel") && TidyEngine.namesAgree("Jake's Saloon", "Jakes Saloon"))
+        check("tidy: two places of one chain are two names", !TidyEngine.namesAgree("Aloft Orlando", "Aloft Miami Doral") && !TidyEngine.namesAgree("Westside Market", "Westside Tavern"))
+        check("tidy: a name fits the line it is written on, or does not", TidyEngine.nameFits("Kindle Unlimited", spelling: "KINDLE UNLTD -- WA")
+              && TidyEngine.nameFits("Westside Market", spelling: "WESTSIDE MARKET NEW YORK NY") && !TidyEngine.nameFits("Mobil", spelling: "AMTRAK WASHINGTON DC"))
+        do {
+            func spelled(_ payee: String, _ text: String, _ category: Category = .dining, byHand: Bool = false) -> TidyEngine.Spelling {
+                TidyEngine.Spelling(payee: payee, text: text, count: 3, typical: 20, category: category, byHand: byHand, sample: text)
+            }
+            let twin = TidyEngine.Pair(kind: .combine, a: spelled("Jakes Saloon", "JAKES SALOON NEW YORK NY"), b: spelled("Jake's Saloon", "JAKES SALOON - NY"))
+            let hotels = TidyEngine.Pair(kind: .combine, a: spelled("Aloft Orlando", "ALOFT ORLANDO FL", .travel), b: spelled("Aloft Miami", "ALOFT MIAMI FL", .travel))
+            let mixed = TidyEngine.Pair(kind: .separate, a: spelled("Westside Market", "WESTSIDE MARKET NEW YORK NY", .groceries), b: spelled("Westside Market", "WESTSIDE TAVERN NEW YORK NY", .groceries))
+            let wrong = TidyEngine.Pair(kind: .combine, a: spelled("Gym on 23rd", "CHELSEA WINE COUNTRY NEW YORK NY", .health), b: spelled("Chelsea Wine Country", "APLPAY CHELSEA WINE COUNTRY - NY", .wine))
+            let plan = TidyEngine.Pair(kind: .combine, a: spelled("Kindle Unlimited", "KINDLE UNLTD -- WA", .subscriptions), b: spelled("Kindle", "KINDLE SVCS -- WA", .shopping))
+            check("tidy: sure and agreeing names are combined; unsure is left", TidyEngine.verdict(for: twin, probabilitySame: 0.97) == .combine && TidyEngine.verdict(for: twin, probabilitySame: 0.8) == .leave)
+            check("tidy: two hotels of one chain are left alone however sure the model is", TidyEngine.verdict(for: hotels, probabilitySame: 0.99) == .leave)
+            check("tidy: a mixed payee is separated only when the model is sure", TidyEngine.verdict(for: mixed, probabilitySame: 0.02) == .separate && TidyEngine.verdict(for: mixed, probabilitySame: 0.3) == .leave)
+            check("tidy: charges under a name that does not describe them go where they belong", TidyEngine.verdict(for: wrong, probabilitySame: 0.99) == .rehome)
+            check("tidy: a subscription and its maker's other charges are only offered", TidyEngine.verdict(for: plan, probabilitySame: 0.95, recurring: ["Kindle Unlimited"]) == .suggest)
+            let found = TidyEngine.pairs(in: ["Westside Market": [mixed.a, mixed.b], "Jakes Saloon": [twin.a], "Jake's Saloon": [twin.b]], alreadyJudged: [])
+            check("tidy: pairs worth asking about are found, and never asked about twice", Set(found.map(\.kind)) == [.combine, .separate]
+                  && TidyEngine.pairs(in: ["Westside Market": [mixed.a, mixed.b]], alreadyJudged: [mixed.id]).isEmpty)
+            check("tidy: a payee named by hand is not second-guessed",
+                  TidyEngine.pairs(in: ["Westside Market": [spelled("Westside Market", "WESTSIDE MARKET NEW YORK NY", byHand: true), mixed.b]], alreadyJudged: []).isEmpty)
+        }
+
         // Orders against card charges.
         func item(_ order: String, _ cents: Int, _ date: String, gift: Bool = false) -> OrderItem {
             var item = OrderItem(orderID: order, shop: .store, date: date, shipment: date + "T10:00", name: "Thing from \(order)", cents: cents, quantity: 1)
@@ -398,7 +425,7 @@ enum SelfTest {
         check("library: two accounts with one id become one", lib?.accounts.filter { $0.id.uuidString == a }.count == 1 && lib?.accounts.count == 2)
         let doubled = lib.map { Dictionary($0.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }) }
         check("library: looking accounts up by id cannot fail", doubled?.count == lib?.accounts.count)
-        check("library: a new stored field must be added to the decoder (21 today)", Mirror(reflecting: Library()).children.count == 21)
+        check("library: a new stored field must be added to the decoder (22 today)", Mirror(reflecting: Library()).children.count == 22)
 
         // Saving says whether it worked.
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SpendthriftTest-\(UUID().uuidString)", isDirectory: true)
@@ -479,6 +506,22 @@ enum SelfTest {
         let store = BudgetStore.shared
         logic()
         books(store)
+        // Tidying acts, records what it did, and puts it back exactly on Undo.
+        do {
+            let byName = TidyEngine.spellings(of: store.transactions, byHand: [])
+            if let (payee, list) = byName.first(where: { $0.value.count > 1 }), let main = list.first, let odd = list.last {
+                let before = store.transactions.filter { $0.merchant == payee }.map(\.id)
+                let done = await store.applyTidy([(TidyEngine.Pair(kind: .separate, a: main, b: odd), 0.01)])
+                let after = store.transactions.filter { $0.merchant == payee }.count
+                check("tidy: a sure split moves only the odd spelling, and says so", done.count == 1 && done[0].charges == odd.count && after == before.count - odd.count
+                      && store.tidyChanges.count == 1 && store.newTidyChanges.count == 1)
+                if let change = store.tidyChanges.first { store.undo(change) }
+                let restored = store.transactions.filter { $0.merchant == payee }.map(\.id)
+                if restored != before { print("SELFTEST NOTE tidy undo: \(payee) had \(before.count), has \(restored.count); same set \(Set(restored) == Set(before)); changes left \(store.tidyChanges.count); odd \(odd.text) x\(odd.count), main \(main.text)") }
+                check("tidy: undo puts every charge back and is remembered", Set(restored) == Set(before)
+                      && store.tidyChanges.isEmpty && store.library.tidy?.judged.values.contains(-1) == true)
+            } else { print("SELFTEST SKIP tidy split (no payee here is written two ways)") }
+        }
         // One way a payee is written can be made a payee of its own; the rest stay, and the choice is kept.
         let bySpelling = Dictionary(grouping: store.transactions, by: \.merchant)
             .mapValues { Dictionary(grouping: $0) { MerchantResolver.spelling($0.description) } }

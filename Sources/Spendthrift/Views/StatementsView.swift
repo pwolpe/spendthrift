@@ -7,9 +7,10 @@ import AppKit
 struct StatementsView: View {
     @Environment(BudgetStore.self) private var store
     /// The account whose statements are open; nil shows every account to choose from.
-    @State private var account: AccountChoice?
-    @State private var selected: String?
-    @State private var search = ""
+    /// Kept in `PageMemory`, so going to a charge and coming Back lands where you were.
+    @State private var account: AccountChoice? = PageMemory.shared.statementsAccount
+    @State private var selected: String? = PageMemory.shared.statementsSelected
+    @State private var search = PageMemory.shared.statementsSearch
     /// False when rendered for a test snapshot.
     var scrolls = true
 
@@ -44,6 +45,9 @@ struct StatementsView: View {
         .navigationSubtitle(all.isEmpty ? "" : (all.count == 1 ? "1 original" : "\(all.count) originals"))
         .onAppear { follow() }
         .onChange(of: store.statementFocus) { follow() }
+        .onChange(of: account) { PageMemory.shared.statementsAccount = account }
+        .onChange(of: selected) { PageMemory.shared.statementsSelected = selected }
+        .onChange(of: search) { PageMemory.shared.statementsSearch = search }
     }
 
     /// Goes to the file that was asked for ("Open in Statements" on a charge).
@@ -129,6 +133,7 @@ struct StatementsView: View {
                             TextField("Month, year or file name", text: $search).textFieldStyle(.plain)
                             if !search.isEmpty {
                                 Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.tertiary)
+                                    .help("Clear the search").accessibilityLabel("Clear search")
                             }
                         }
                         .padding(.horizontal, 10).padding(.vertical, 6)
@@ -423,15 +428,16 @@ struct OriginalViewer: View {
             if !inSheet {
                 ControlGroup {
                     Button { older?() } label: { Image(systemName: "chevron.left") }
-                        .disabled(older == nil).help("The statement before this one")
+                        .disabled(older == nil).help("The statement before this one").accessibilityLabel("Previous statement")
                     Button { newer?() } label: { Image(systemName: "chevron.right") }
-                        .disabled(newer == nil).help("The statement after this one")
+                        .disabled(newer == nil).help("The statement after this one").accessibilityLabel("Next statement")
                 }
                 .fixedSize()
-                let count = store.entries(in: source).count
+                let charges = store.entries(in: source)
+                let count = charges.count
                 if count > 0 {
                     Button("\(count) \(count == 1 ? "Charge" : "Charges")") {
-                        store.showCharges(TransactionFilter(ids: Set(store.entries(in: source).map(\.id)), title: "From \(source.period)"))
+                        store.showCharges(TransactionFilter(ids: Set(charges.map(\.id)), title: "From \(source.period)"))
                     }
                     .help("The charges read from this statement")
                 }
@@ -441,6 +447,7 @@ struct OriginalViewer: View {
                 Button("Show the Kept Copy in Finder") { NSWorkspace.shared.activateFileViewerSelecting([store.sourceURL(source)]) }
             } label: { Image(systemName: "ellipsis.circle") }
             .menuStyle(.borderlessButton).fixedSize()
+            .help("More ways to open this statement").accessibilityLabel("More")
             if inSheet {
                 Button("Open in Statements") { store.browse(source, charge: entry?.id) }
                 Button("Done") { store.originalPeek = nil }.keyboardShortcut(.defaultAction)
@@ -470,7 +477,7 @@ struct OriginalViewer: View {
             Text(Money.format(abs(entry.amount))).fontWeight(.semibold).monospacedDigit()
             Button { pulse += 1 } label: { Image(systemName: "arrow.uturn.backward.circle") }
                 .buttonStyle(.borderless)
-                .help("Jump back to the line")
+                .help("Jump back to the line").accessibilityLabel("Jump back to the line")
         }
         .font(.callout)
         .padding(.horizontal, 16).padding(.vertical, 8)

@@ -96,6 +96,7 @@ private struct CategoryManageRow: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .help("Edit or delete this category").accessibilityLabel("More for this category")
             } else {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
@@ -113,6 +114,8 @@ private struct CategoryManageRow: View {
             guard count > 0 else { return }
             store.showCharges(TransactionFilter(category: category))
         }
+        .accessibilityAddTraits(count > 0 ? .isButton : [])
+        .accessibilityAction(named: "Show transactions") { if count > 0 { store.showCharges(TransactionFilter(category: category)) } }
         .confirmationDialog("Delete \(category.displayName)?", isPresented: $confirmDelete) {
             Button("Delete Category", role: .destructive) { if let custom { store.deleteCategory(custom) } }
         } message: {
@@ -163,14 +166,16 @@ struct CategoryEditorSheet: View {
                 Text("Color").font(.headline)
                 HStack(spacing: 10) {
                     ForEach(CustomCategory.palette, id: \.name) { item in
-                        Circle()
-                            .fill(item.color.gradient)
-                            .frame(width: 26, height: 26)
-                            .overlay { if draft.color == item.name { Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(.white) } }
-                            .overlay { Circle().strokeBorder(Color.primary.opacity(draft.color == item.name ? 0.35 : 0), lineWidth: 2).padding(-3) }
-                            .contentShape(Circle())
-                            .onTapGesture { draft.color = item.name }
-                            .accessibilityLabel(item.name)
+                        Button { draft.color = item.name } label: {
+                            Circle()
+                                .fill(item.color.gradient)
+                                .frame(width: 26, height: 26)
+                                .overlay { if draft.color == item.name { Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(.white) } }
+                                .overlay { Circle().strokeBorder(Color.primary.opacity(draft.color == item.name ? 0.35 : 0), lineWidth: 2).padding(-3) }
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(item.name)
                     }
                 }
             }
@@ -179,14 +184,17 @@ struct CategoryEditorSheet: View {
                 Text("Icon").font(.headline)
                 LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 8), count: 11), spacing: 8) {
                     ForEach(CustomCategory.symbols, id: \.self) { symbol in
-                        Image(systemName: symbol)
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(draft.symbol == symbol ? Color.white : Color.primary)
-                            .frame(width: 34, height: 34)
-                            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(draft.symbol == symbol ? AnyShapeStyle(draft.swiftUIColor.gradient) : AnyShapeStyle(Color.primary.opacity(0.06))))
-                            .contentShape(Rectangle())
-                            .onTapGesture { draft.symbol = symbol }
+                        Button { draft.symbol = symbol } label: {
+                            Image(systemName: symbol)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(draft.symbol == symbol ? Color.white : Color.primary)
+                                .frame(width: 34, height: 34)
+                                .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(draft.symbol == symbol ? AnyShapeStyle(draft.swiftUIColor.gradient) : AnyShapeStyle(Color.primary.opacity(0.06))))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(symbol.replacingOccurrences(of: ".", with: " "))
                     }
                 }
             }

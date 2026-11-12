@@ -167,6 +167,8 @@ final class BudgetStore {
     @ObservationIgnored var isFindingLogos = false
     var isFindingStories = false
     var isLookingUp = false
+    /// True while payees are being compared for tidying.
+    var isTidying = false
     @ObservationIgnored var isGuessing = false
     var isFindingDiscoveries = false
     /// Calendar years being read right now.

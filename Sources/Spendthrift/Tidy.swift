@@ -74,13 +74,13 @@ enum TidyEngine {
         // Or written with a different leading word altogether: perhaps gathered by mistake.
         for (_, list) in spellings where list.count > 1 {
             guard let main = list.first, !main.byHand else { continue }
-            let mainWords = Set(words(main.text))
+            // Only the first two words: what follows is a city, a store number, a processor.
+            let mainWords = Set(words(main.text).prefix(2))
             for other in list.dropFirst().prefix(6) {
-                let otherWords = Set(words(other.text))
+                let otherWords = Set(words(other.text).prefix(2))
                 let shared = mainWords.intersection(otherWords).count
-                let overlap = Double(shared) / Double(max(1, min(mainWords.count, otherWords.count)))
-                // Mostly the same words is just a store number or a city apart: not worth asking.
-                if overlap < 0.67 { out.append(Pair(kind: .separate, a: main, b: other)) }
+                // The same two words is just a branch or a store number apart: not worth asking.
+                if shared < max(mainWords.count, otherWords.count) { out.append(Pair(kind: .separate, a: main, b: other)) }
             }
         }
         // Two payees whose statements lead with the same word: perhaps one business under two names.
@@ -118,13 +118,90 @@ enum TidyEngine {
     static let sureSame = 0.92
     static let sureDifferent = 0.08
 
-    enum Verdict { case combine, separate, leave }
+    enum Verdict {
+        /// Two payees are one: fold one into the other.
+        case combine
+        /// The first payee's name does not describe its own charges, which belong with the second: move them there.
+        case rehome
+        /// One payee is two: the odd spelling becomes a payee of its own.
+        case separate
+        /// Probably one business, but the names say otherwise (two hotels of one chain, a store and
+        /// its subscription): worth offering, not worth doing unasked.
+        case suggest
+        case leave
+    }
 
-    static func verdict(for pair: Pair, probabilitySame p: Double) -> Verdict {
+    /// What to do about a pair, given how likely the model says "the same business" is.
+    /// `recurring` holds the payees that bill on a schedule: a subscription is never folded into
+    /// its maker's one-off purchases, or the other way round, without asking.
+    static func verdict(for pair: Pair, probabilitySame p: Double, recurring: Set<String> = []) -> Verdict {
         switch pair.kind {
-        case .combine: return p >= sureSame ? .combine : .leave
         case .separate: return p <= sureDifferent ? .separate : .leave
+        case .combine:
+            guard p >= sureSame else { return .leave }
+            let aFits = nameFits(pair.a.payee, spelling: pair.a.text), bFits = nameFits(pair.b.payee, spelling: pair.b.text)
+            // A payee named for something other than what its statements say was gathered wrongly:
+            // its charges go to the payee that is named for them.
+            if !aFits, bFits { return .rehome }
+            if !bFits || !aFits { return .suggest }
+            if recurring.contains(pair.a.payee) != recurring.contains(pair.b.payee) { return .suggest }
+            if namesAgree(pair.a.payee, pair.b.payee) { return .combine }
+            // Two hotels or two branches of one chain are two places someone went: not worth even asking.
+            return pair.a.category == .travel || pair.b.category == .travel ? .leave : .suggest
         }
+    }
+
+    private static let filler: Set<String> = ["THE", "AND", "OF", "INC", "LLC", "CO", "COMPANY", "CORP", "LTD", "NEW", "YORK", "NY"]
+
+    /// A payee's name as bare words: no punctuation, no possessive, no filler.
+    static func nameWords(_ name: String) -> [String] {
+        name.uppercased().folding(options: .diacriticInsensitive, locale: nil)
+            .replacingOccurrences(of: "'S ", with: "S ").replacingOccurrences(of: "'", with: "")
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+            .filter { !filler.contains($0) }
+    }
+
+    /// Whether two names are one name written two ways: the same words give or take a few
+    /// ("Chopt" and "Chopt Creative Salad"), or the same letters give or take one or two
+    /// ("Buon Italia" and "Buon'Italia"). "Aloft Orlando" and "Aloft Miami" are not.
+    static func namesAgree(_ a: String, _ b: String) -> Bool {
+        let wa = nameWords(a), wb = nameWords(b)
+        guard !wa.isEmpty, !wb.isEmpty else { return false }
+        let ja = wa.joined(), jb = wb.joined()
+        if ja == jb || distance(ja, jb, limit: 2) <= 2 && min(ja.count, jb.count) >= 6 { return true }
+        func stem(_ w: String) -> String { w.count > 4 && w.hasSuffix("S") ? String(w.dropLast()) : w }
+        let sa = Set(wa.map(stem)), sb = Set(wb.map(stem))
+        return sa.isSubset(of: sb) || sb.isSubset(of: sa)
+    }
+
+    /// Whether a payee's name describes a statement line: at least half its words appear there
+    /// (statements cut words short, so the first four letters are enough).
+    static func nameFits(_ name: String, spelling: String) -> Bool {
+        let wanted = nameWords(name), line = words(spelling) + nameWords(spelling)
+        guard !wanted.isEmpty else { return false }
+        let joined = line.joined()
+        let hits = wanted.filter { word in
+            let head = String(word.prefix(4))
+            return line.contains { $0.hasPrefix(head) || word.hasPrefix($0) && $0.count >= 4 } || joined.contains(word)
+        }.count
+        return hits * 2 >= wanted.count
+    }
+
+    /// How many single-letter edits turn one word into the other, giving up past `limit`.
+    static func distance(_ a: String, _ b: String, limit: Int) -> Int {
+        let x = Array(a), y = Array(b)
+        if abs(x.count - y.count) > limit { return limit + 1 }
+        var row = Array(0...y.count)
+        for i in 1...max(x.count, 1) where !x.isEmpty {
+            var previous = row[0]
+            row[0] = i
+            for j in 1...max(y.count, 1) where !y.isEmpty {
+                let old = row[j]
+                row[j] = min(row[j] + 1, row[j - 1] + 1, previous + (x[i - 1] == y[j - 1] ? 0 : 1))
+                previous = old
+            }
+        }
+        return row[y.count]
     }
 }
 
@@ -141,6 +218,10 @@ struct TidyChange: Codable, Identifiable, Hashable {
     var charges: Int
     /// The pair this came from, so undoing it also means "never again".
     var pairID: String
+    /// Further pairs settled by the same change (several spellings moved to the one new payee).
+    var morePairIDs: [String]?
+    /// The key of the payee created or moved to, so it is shown under whatever it is called now.
+    var otherKey: String?
     /// Combine: each payee key that was renamed, with what it was called and filed under before.
     var renamed: [String: Before]?
     /// Separate: the charges that moved, with the key each had before; and the spelling rule added.
@@ -156,13 +237,6 @@ struct TidyChange: Codable, Identifiable, Hashable {
         var confirmed: Bool
         var domain: String?
     }
-
-    var sentence: String {
-        switch kind {
-        case .combine: "Combined \(other) into \(from)"
-        case .separate: "Separated \(other) from \(from)"
-        }
-    }
 }
 
 /// Everything remembered about tidying: what was asked (so nothing is asked twice) and what was done.
@@ -170,4 +244,14 @@ struct TidyBook: Codable, Hashable {
     /// Pair id to how likely the model said "the same business" was. Declined pairs are stored as -1.
     var judged: [String: Double] = [:]
     var changes: [TidyChange] = []
+    /// Pairs that are probably one business but were not combined unasked.
+    var suggestions: [TidySuggestion]?
+}
+
+/// "These might be the same": offered, with a button, where the app was not sure enough to act.
+struct TidySuggestion: Codable, Identifiable, Hashable {
+    var id: String { pairID }
+    var pairID: String
+    var a: String
+    var b: String
 }
