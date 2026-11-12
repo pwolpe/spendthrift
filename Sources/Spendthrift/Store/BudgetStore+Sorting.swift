@@ -149,6 +149,7 @@ extension BudgetStore {
             Task { await findLogosIfNeeded() }
             Task { await findDiscoveriesIfNeeded() }
             Task { await tidyIfNeeded() }
+            Task { await learnFactsIfNeeded() }
             announceNewFindings()
         }
         // With a cloud key, the powerful model decides everything the built-in list doesn't know.

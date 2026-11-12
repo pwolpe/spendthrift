@@ -130,6 +130,12 @@ enum ChatAnalyst {
         Today is \(Date.now.formatted(.dateTime.year().month(.wide).day())). The data covers \(first) to \(last). \
         "This year" is \(Month(date: .now).year). Accounts: \(store.accounts.map { Redactor.accountLabel($0.name) }.joined(separator: "; ")).
         Trips and events on record: \(trips.isEmpty ? "none" : trips).
+
+        If the person is not asking anything but telling you to CHANGE how something is filed or named, reply with \
+        an action instead of queries, as JSON only: {"action": {"type": "file", "payee": "...", "category": "..."}} to put a \
+        payee in a category; {"action": {"type": "rename", "payee": "...", "name": "..."}} to rename a payee; \
+        {"action": {"type": "combine", "payee": "...", "into": "..."}} when they say two payees are the same. Use the payee's \
+        name as the person wrote it; the app finds the match. Only these three. Anything else is a question.
         """ + itemsPrompt(store: store) + screenPrompt(store: store)
     }
 
@@ -321,8 +327,16 @@ enum ChatAnalyst {
         let planReply = await Timeout.run(45) {
             try? await CloudAI.complete(job: "Answering questions", system: system, user: ask, json: true, maxTokens: 6_000, timeout: 40)
         }
-        guard let planReply, let plan = CloudAI.object(from: planReply),
-              let wanted = plan["queries"] as? [[String: Any]], !wanted.isEmpty else { return nil }
+        guard let planReply, let plan = CloudAI.object(from: planReply) else { return nil }
+        // Not a question but an instruction ("file Blue Door under Dining"): say what would change and offer to do it.
+        if let raw = plan["action"] as? [String: Any] {
+            let action = ChatAction(raw, store: store)
+            var answer = Answer(question: question, query: SpendingQuery(from: first, to: last),
+                                headline: action?.proposal ?? "I couldn't work out which payee you meant. Try its name as it appears on the Payees page.", rows: [])
+            answer.action = action
+            return (answer, Turn(question: question, plan: String(planReply.prefix(600)), answer: answer.headline))
+        }
+        guard let wanted = plan["queries"] as? [[String: Any]], !wanted.isEmpty else { return nil }
         let queries = wanted.prefix(6).map(Query.init)
         let results = queries.map { compute($0, store: store) }
         let shownName = plan["show"] as? String
@@ -389,4 +403,89 @@ enum ChatAnalyst {
         guard let re = try? NSRegularExpression(pattern: #"\$[\d,]*\d(?:\.\d{2})?"#) else { return [] }
         return re.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { Range($0.range, in: text).map { String(text[$0]) } }
     }
+}
+
+
+/// A change the person asked for in words. The app says what it would do and waits for a yes:
+/// nothing is altered by a sentence alone.
+enum ChatAction: Hashable {
+    case file(payee: String, category: Category, was: Category?)
+    case rename(payee: String, to: String)
+    case combine(payee: String, into: String)
+
+    @MainActor
+    init?(_ raw: [String: Any], store: BudgetStore) {
+        func text(_ key: String) -> String? { (raw[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+        guard let payee = text("payee").flatMap({ Self.payee(matching: $0, in: store) }) else { return nil }
+        switch text("type") {
+        case "file":
+            guard let wanted = text("category"),
+                  let category = Category.pickable.first(where: { $0.rawValue.caseInsensitiveCompare(wanted) == .orderedSame || $0.displayName.caseInsensitiveCompare(wanted) == .orderedSame })
+                    ?? Category.pickable.first(where: { $0.rawValue.localizedCaseInsensitiveContains(wanted) }) else { return nil }
+            self = .file(payee: payee, category: category, was: store.charges(at: payee).first?.category)
+        case "rename":
+            guard let name = text("name") else { return nil }
+            self = .rename(payee: payee, to: name)
+        case "combine":
+            guard let into = text("into").flatMap({ Self.payee(matching: $0, in: store) }), into != payee else { return nil }
+            self = .combine(payee: payee, into: into)
+        default: return nil
+        }
+    }
+
+    /// The payee the person most likely meant: the same letters, or the shortest name containing them.
+    @MainActor
+    static func payee(matching typed: String, in store: BudgetStore) -> String? {
+        let wanted = PlacesView.squeeze(typed)
+        guard wanted.count >= 3 else { return nil }
+        let names = store.allPayeeNames
+        if let exact = names.first(where: { PlacesView.squeeze($0) == wanted }) { return exact }
+        return names.filter { PlacesView.squeeze($0).contains(wanted) }.min { ($0.count, $0) < ($1.count, $1) }
+    }
+
+    /// What would happen, said before it does.
+    @MainActor
+    var proposal: String {
+        let store = BudgetStore.shared
+        func charges(_ payee: String) -> String { let n = store.charges(at: payee).count; return n == 1 ? "its one charge" : "all \(n) of its charges" }
+        switch self {
+        case .file(let payee, let category, let was):
+            return "File \(payee) under \(category.displayName)? That moves \(charges(payee))\(was.map { " from \($0.displayName)" } ?? "")."
+        case .rename(let payee, let name): return "Rename \(payee) to \(name)? It keeps \(charges(payee))."
+        case .combine(let payee, let into): return "Treat \(payee) and \(into) as one payee, called \(into)? \(payee) brings \(charges(payee))."
+        }
+    }
+
+    /// Does it, and says what was done.
+    @MainActor
+    func perform() -> String {
+        let store = BudgetStore.shared
+        switch self {
+        case .file(let payee, let category, _):
+            for key in Set(store.charges(at: payee).map(\.merchantKey)) { store.setCategory(category, forPlace: key) }
+            return "Done. \(payee) is filed under \(category.displayName)."
+        case .rename(let payee, let name):
+            for key in Set(store.charges(at: payee).map(\.merchantKey)) { store.renamePlace(key, to: name) }
+            return "Done. \(payee) is now \(name)."
+        case .combine(let payee, let into):
+            store.combinePlaces(payee, into: into)
+            return "Done. \(payee) is part of \(into)."
+        }
+    }
+
+    /// Puts it back, where that is possible.
+    @MainActor
+    var undo: (() -> String)? {
+        switch self {
+        case .file(let payee, _, let was?):
+            return { for key in Set(BudgetStore.shared.charges(at: payee).map(\.merchantKey)) { BudgetStore.shared.setCategory(was, forPlace: key) }; return "Put back under \(was.displayName)." }
+        case .rename(let payee, let name):
+            return { for key in Set(BudgetStore.shared.charges(at: name).map(\.merchantKey)) { BudgetStore.shared.renamePlace(key, to: payee) }; return "It is \(payee) again." }
+        default: return nil
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

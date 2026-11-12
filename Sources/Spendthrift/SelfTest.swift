@@ -64,6 +64,7 @@ enum SelfTest {
 
     private static func logic() {
         recurringRules()
+        changeAndBudgetRules()
         // Who a line belongs to.
         check("a known name needs its whole name", KnownMerchants.match("PARAMOUNT+ 888-274-5343 CA", generic: false)?.name == "Paramount+"
               && KnownMerchants.match("PARAMOUNT HOTEL NEW YORK NY", generic: false) == nil)
@@ -117,6 +118,14 @@ enum SelfTest {
             check("tidy: a payee named by hand is not second-guessed",
                   TidyEngine.pairs(in: ["Westside Market": [spelled("Westside Market", "WESTSIDE MARKET NEW YORK NY", byHand: true), mixed.b]], alreadyJudged: []).isEmpty)
         }
+
+        // Looking a charge up in the mail: the amount as mail writes it, in the days around it.
+        check("mail: an amount is searched with and without its comma", MailSearch.amounts(87383) == ["87,383.00", "87383.00"] && MailSearch.amounts(-12.5) == ["12.50"])
+        check("mail: the search covers a week either side", { () -> Bool in
+            let q = MailSearch.query(amount: 1234.56, date: DateParsing.isoDay("2026-03-10")!, provider: .gmail)
+            return q == "(\"1,234.56\" OR \"1234.56\") after:2026/03/03 before:2026/03/18"
+                && MailSearch.url(amount: 1234.56, date: DateParsing.isoDay("2026-03-10")!, provider: .gmail)?.absoluteString.hasPrefix("https://mail.google.com/mail/u/0/#search/") == true
+        }())
 
         // Orders against card charges.
         func item(_ order: String, _ cents: Int, _ date: String, gift: Bool = false) -> OrderItem {
@@ -352,6 +361,76 @@ enum SelfTest {
         check("insights ignore transfers and unsorted deposits", InsightEngine.insights(for: nov, in: [tx("2026-11-02", 5000, "Brokerage", .transfer), tx("2026-11-03", -900, "Mystery", .unsorted)]).isEmpty)
     }
 
+    // MARK: What changed, and budgets
+
+    private static func changeAndBudgetRules() {
+        let near = { (a: Double, b: Double) in abs(a - b) < 0.005 }
+        // Three ordinary months, then a November with a trip in it.
+        func ordinary(_ months: [String], groceries: Double = 400, dining: Double = 200) -> [Transaction] {
+            months.flatMap { m in [tx("\(m)-03", groceries, "Market", .groceries), tx("\(m)-10", dining, "Bistro", .dining)] }
+        }
+        let hotel = tx("2026-11-15", 500, "Hotel Lisboa", .travel), airline = tx("2026-11-20", 300, "Airline", .travel)
+        let lisbon = Story(kind: .trip, name: "Lisbon", place: "Lisbon", start: "2026-11-15", end: "2026-11-20", summary: "", entryIDs: [hotel.id, airline.id])
+        let trip = ordinary(["2026-08", "2026-09", "2026-10"]) + [tx("2026-11-10", 510, "Bistro", .dining), hotel, airline, tx("2026-11-28", 400, "Market", .groceries)]
+        let withTrip = ChangeEngine.explain(month: nov, in: trip, stories: [lisbon], recurring: [])
+        check("changes: usual is the middle of the last three months, the delta is the difference", withTrip.map { near($0.usual, 600) && near($0.total, 1710) && near($0.delta, 1110) } == true)
+        check("changes: the drivers add up to the difference to the cent", withTrip.map { near($0.drivers.reduce(0) { $0 + $1.amount }, $0.delta) } == true)
+        check("changes: a trip is named first and its charges are not also counted under Travel",
+              withTrip?.drivers.first?.kind == .story && withTrip?.drivers.contains { $0.title == "Travel" } == false
+              && withTrip.map { near($0.drivers.first { $0.kind == .story }?.amount ?? 0, 800) } == true)
+        check("changes: what is left over is named by category", withTrip?.drivers.contains { $0.kind == .categoryUp && $0.title == "Dining" && near($0.amount, 310) } == true)
+        check("changes: every driver has a sentence written in code", withTrip?.drivers.allSatisfy { !$0.sentence.isEmpty && $0.sentence == $0.fallback } == true
+              && withTrip?.drivers.first?.sentence == "Lisbon added $800")
+        let usualMonth = ChangeEngine.explain(month: nov, in: ordinary(["2026-08", "2026-09", "2026-10"]) + [tx("2026-11-03", 400, "Market", .groceries), tx("2026-11-28", 200, "Bistro", .dining)], stories: [], recurring: [])
+        check("changes: a month equal to its usual is about usual, with no drivers", usualMonth?.isAboutUsual == true && usualMonth?.drivers.isEmpty == true && usualMonth?.headline.contains("about what you usually spend") == true)
+        let skewed = [tx("2026-08-05", 100, "Market", .groceries), tx("2026-09-05", 200, "Market", .groceries), tx("2026-10-05", 900, "Market", .groceries), tx("2026-11-28", 500, "Market", .groceries)]
+        check("changes: usual is the median, not the mean", ChangeEngine.explain(month: nov, in: skewed, stories: [], recurring: []).map { near($0.usual, 200) && near($0.delta, 300) } == true)
+        let two = [tx("2026-09-05", 100, "Market", .groceries), tx("2026-10-05", 300, "Market", .groceries), tx("2026-11-28", 500, "Market", .groceries)]
+        check("changes: with only two earlier months the mean is used", ChangeEngine.explain(month: nov, in: two, stories: [], recurring: []).map { near($0.usual, 200) } == true)
+        check("changes: one earlier month is too little history", ChangeEngine.explain(month: nov, in: Array(two.dropFirst()), stories: [], recurring: []) == nil)
+        check("changes: a month still being read is not explained", ChangeEngine.explain(month: nov, in: Array(two.dropLast()) + [tx("2026-11-09", 500, "Market", .groceries)], stories: [], recurring: []) == nil)
+        let big = ordinary(["2026-08", "2026-09", "2026-10"]) + [tx("2026-11-03", 400, "Market", .groceries), tx("2026-11-10", 200, "Bistro", .dining), tx("2026-11-12", 900, "Gadget Shop", .shopping), tx("2026-11-28", 30, "Market", .groceries)]
+        let one = ChangeEngine.explain(month: nov, in: big, stories: [], recurring: [])
+        check("changes: one big charge is a driver of its own and the sum still holds", one?.drivers.first?.kind == .oneOff && one.map { near($0.drivers.reduce(0) { $0 + $1.amount }, $0.delta) } == true)
+        let tv = monthly("Streamly", [10, 10, 10, 10, 12], count: 5).map { t in Transaction(id: t.id, date: t.date, month: t.month, description: t.description, amount: t.amount, merchant: t.merchant, merchantKey: t.merchantKey, category: .subscriptions, account: "Card", accountID: t.accountID, source: .user, needsCheck: false, isOverride: false) }
+        let rises = RecurringEngine.find(in: tv, asOf: DateParsing.isoDay("2024-05-20") ?? .now)
+        let may = Month(year: 2024, month: 5)
+        let base = tv + [charge("Cafe", 700, day: 120, category: .dining), charge("Cafe", 700, day: 121, category: .dining), charge("Late", 1, day: 135, category: .dining)]
+        let rise = ChangeEngine.explain(month: may, in: base, stories: [], recurring: rises)
+        check("changes: a price rise is named by the amount it went up", rise?.drivers.contains { $0.kind == .priceRise && near($0.amount, 2) && $0.sentence == "Streamly went up $2.00" } == true
+              || rise?.drivers.contains { $0.kind == .priceRise } == false && rise.map { near($0.drivers.reduce(0) { $0 + $1.amount }, $0.delta) } == true)
+
+        // Budgets.
+        func months(_ keys: [String], dining: Double) -> [Transaction] { keys.map { tx("\($0)-05", dining, "Bistro", .dining) } }
+        let six = ["2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"]
+        let history = months(six, dining: 300) + six.map { tx("\($0)-06", 10, "Cafe", .personal) } + [tx("2026-09-07", 90, "Spa", .health), tx("2026-10-07", 90, "Spa", .health)]
+        let targets = BudgetEngine.targets(before: nov, in: history, stories: [])
+        check("budgets: six identical months give that amount as the target", near(targets[.dining] ?? 0, 300))
+        check("budgets: a category with fewer than three months, or a target under $25, is skipped", targets[.health] == nil && targets[.personal] == nil)
+        check("budgets: a target is rounded to the nearest $10", near(BudgetEngine.targets(before: nov, in: months(six, dining: 304), stories: [])[.dining] ?? 0, 300)
+              && near(BudgetEngine.targets(before: nov, in: months(six, dining: 306), stories: [])[.dining] ?? 0, 310))
+        let mid = DateParsing.isoDay("2026-11-15") ?? .now
+        let midMonth = history + [tx("2026-11-12", 150, "Bistro", .dining)]
+        let half = BudgetEngine.summary(for: nov, in: midMonth, stories: [], overrides: [:], asOf: mid)
+        check("budgets: halfway through the month, half the target spent is on pace", half.isInProgress && half.lines.first?.pace == .onPace && half.onPace == 1 && half.over == 0)
+        check("budgets: the projection appears only after day 10", near(half.lines.first?.projected ?? 0, 300)
+              && BudgetEngine.summary(for: nov, in: history + [tx("2026-11-04", 150, "Bistro", .dining)], stories: [], overrides: [:], asOf: DateParsing.isoDay("2026-11-08") ?? .now).lines.first?.projected == nil)
+        let fast = BudgetEngine.summary(for: nov, in: history + [tx("2026-11-12", 280, "Bistro", .dining)], stories: [], overrides: [:], asOf: mid)
+        check("budgets: spending far ahead of the month is over", fast.lines.first?.pace == .over && fast.over == 1)
+        let done = BudgetEngine.summary(for: Month(year: 2026, month: 10), in: history, stories: [], overrides: [:], asOf: mid)
+        check("budgets: a finished month is judged against the whole target", !done.isInProgress && done.lines.isEmpty == false && done.lines.first?.pace == .onPace)
+        let own = BudgetEngine.summary(for: nov, in: midMonth, stories: [], overrides: ["Dining": 500], asOf: mid)
+        check("budgets: an override wins, and removing it restores the computed target",
+              own.lines.first.map { near($0.target, 500) && $0.isOverride && near($0.computed ?? 0, 300) } == true
+              && near(half.lines.first?.target ?? 0, 300) && half.lines.first?.isOverride == false)
+        let tripCharges = ["2026-05", "2026-06", "2026-07", "2026-08"].map { tx("\($0)-20", 1000, "Hotel", .dining) }
+        let tripStory = Story(kind: .trip, name: "Trips", place: nil, start: "2026-05-20", end: "2026-08-20", summary: "", entryIDs: tripCharges.map(\.id))
+        check("budgets: a trip does not move a target, and without the trip it would",
+              near(BudgetEngine.targets(before: nov, in: history + tripCharges, stories: [tripStory])[.dining] ?? 0, 300)
+              && (BudgetEngine.targets(before: nov, in: history + tripCharges, stories: [])[.dining] ?? 0) > 1000)
+        check("budgets: the card's total is the sum of its rows", near(half.target, half.lines.reduce(0) { $0 + $1.target }) && near(half.spent, half.lines.reduce(0) { $0 + $1.spent }))
+    }
+
     private static func orderChecks() {
         func item(_ order: String, _ cents: Int, _ date: String) -> OrderItem {
             OrderItem(orderID: order, shop: .store, date: date, shipment: date + "T10:00", name: "Thing from \(order)", cents: cents, quantity: 1)
@@ -425,7 +504,7 @@ enum SelfTest {
         check("library: two accounts with one id become one", lib?.accounts.filter { $0.id.uuidString == a }.count == 1 && lib?.accounts.count == 2)
         let doubled = lib.map { Dictionary($0.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }) }
         check("library: looking accounts up by id cannot fail", doubled?.count == lib?.accounts.count)
-        check("library: a new stored field must be added to the decoder (22 today)", Mirror(reflecting: Library()).children.count == 22)
+        check("library: a new stored field must be added to the decoder (23 today)", Mirror(reflecting: Library()).children.count == 23)
 
         // Saving says whether it worked.
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SpendthriftTest-\(UUID().uuidString)", isDirectory: true)
@@ -495,6 +574,26 @@ enum SelfTest {
         check("every order match points at real items and a real charge", store.orders.matches.allSatisfy { key, match in
             ids.contains(key) && !match.items.isEmpty && match.items.allSatisfy { store.orders.items.indices.contains($0) }
         })
+        // What changed: for every month of the latest year, the drivers add up to the difference.
+        let latestYear = Array(store.months.suffix(12))
+        let explained = latestYear.compactMap { store.changes(in: $0) }
+        check("what changed: for every month of the latest year the drivers add up to the difference to the cent",
+              explained.allSatisfy { e in near(e.drivers.reduce(0) { $0 + $1.amount }, e.delta) && (e.isAboutUsual ? e.drivers.isEmpty : !e.drivers.isEmpty && e.drivers.count <= 5) })
+        check("what changed: the kept answer equals a fresh one", latestYear.allSatisfy { m in
+            store.changes(in: m) == ChangeEngine.explain(month: m, in: store.transactions, stories: store.stories, recurring: store.recurring()) })
+        if let year = store.changes(in: .last12) {
+            check("what changed: the year's drivers add up to its difference", near(year.drivers.reduce(0) { $0 + $1.amount }, year.delta))
+        }
+        // The Budget card is its rows; each row is its charges.
+        if let latest = store.months.last {
+            let card = store.budget(for: latest)
+            let inTrip = Set(store.stories.flatMap(\.entryIDs))
+            check("the Budget card's totals equal the sum of its rows", near(card.spent, card.lines.reduce(0) { $0 + $1.spent }) && near(card.target, card.lines.reduce(0) { $0 + $1.target })
+                  && card.onPace + card.over == card.lines.count)
+            check("each Budget row is exactly its category's charges for the month, trips and events left out", card.lines.allSatisfy { line in
+                near(line.spent, store.transactions(withIDs: line.chargeIDs).reduce(0) { $0 + $1.amount })
+                && near(line.spent, store.spending(in: latest).filter { $0.category == line.category && !inTrip.contains($0.id) }.reduce(0) { $0 + $1.amount }) })
+        }
         if let latest = store.months.last {
             check("everything worth knowing leads somewhere", store.insights(for: latest).allSatisfy { $0.target != nil })
         }
@@ -506,6 +605,38 @@ enum SelfTest {
         let store = BudgetStore.shared
         logic()
         books(store)
+        // Needs and wants, where to trim, ways to save: sums of real charges, never more than was spent.
+        if let period = ReportData.periods(for: store).first {
+            let flow = CashFlowData(store: store, period: period)
+            let months = Set(flow.months)
+            let stretch = store.transactions.filter { months.contains($0.month) }
+            let byPayee = TrimEngine.lines(stretch, byPayee: true, optional: store.isOptional)
+            let byCategory = TrimEngine.lines(stretch, byPayee: false, optional: store.isOptional)
+            check("every ranked line is worth something, by payee and by category", (byPayee + byCategory).allSatisfy { $0.total > 0 && (0...1).contains($0.optionalShare) })
+            check("what was chosen is part of what was spent", flow.optionalSpending >= -0.01 && flow.optionalSpending <= flow.spending + 0.01)
+            check("the ranking is largest first and every line is its charges", zip(byPayee, byPayee.dropFirst()).allSatisfy { $0.total >= $1.total }
+                  && byPayee.prefix(20).allSatisfy { line in abs(store.transactions(withIDs: line.chargeIDs).reduce(0) { $0 + $1.amount } - line.total) < 0.01 })
+            let ideas = store.savingsIdeas()
+            check("ways to save: each is worth something, none twice, largest first", ideas.allSatisfy { $0.yearly > 0 } && Set(ideas.map(\.id)).count == ideas.count
+                  && zip(ideas, ideas.dropFirst()).allSatisfy { $0.yearly >= $1.yearly })
+            if let idea = ideas.first {
+                store.dismiss(idea)
+                check("an idea waved away stays away", !store.savingsIdeas().contains { $0.id == idea.id })
+            }
+        }
+        // A change asked for in words finds its payee, says what it would do, does it, and can put it back.
+        if let t = store.transactions.first(where: { $0.countsAsSpending && $0.category != .gifts && $0.merchant.count >= 5 }) {
+            let action = ChatAction(["type": "file", "payee": t.merchant.lowercased(), "category": "gifts"], store: store)
+            check("chat: an instruction finds its payee and its category", action == .file(payee: t.merchant, category: .gifts, was: t.category))
+            check("chat: nothing changes until asked", store.charges(at: t.merchant).allSatisfy { $0.category != .gifts || $0.isOverride })
+            _ = action?.perform()
+            check("chat: the change is made", !store.charges(at: t.merchant).isEmpty && store.charges(at: t.merchant).allSatisfy { $0.category == .gifts })
+            _ = action?.undo?()
+            check("chat: and can be put back", store.charges(at: t.merchant).allSatisfy { $0.category == t.category })
+            check("chat: an unknown payee or category is refused", ChatAction(["type": "file", "payee": "zzqqxx nowhere", "category": "gifts"], store: store) == nil
+                  && ChatAction(["type": "file", "payee": t.merchant, "category": "no such thing"], store: store) == nil)
+        }
+
         // What pages keep between redraws must equal what they would work out afresh.
         for f in [TransactionFilter(category: .travel), TransactionFilter(month: store.months.last), TransactionFilter(needsCheck: true)] {
             let fresh = store.transactions.filter { (f.category == nil || $0.category == f.category!) && (f.month == nil || $0.month == f.month!) && (!f.needsCheck || $0.needsCheck) }.map(\.id)
@@ -536,15 +667,17 @@ enum SelfTest {
             let byName = TidyEngine.spellings(of: store.transactions, byHand: [])
             if let (payee, list) = byName.first(where: { $0.value.count > 1 }), let main = list.first, let odd = list.last {
                 let before = store.transactions.filter { $0.merchant == payee }.map(\.id)
+                let tidiedBefore = store.tidyChanges.count
                 let done = await store.applyTidy([(TidyEngine.Pair(kind: .separate, a: main, b: odd), 0.01)])
                 let after = store.transactions.filter { $0.merchant == payee }.count
                 check("tidy: a sure split moves only the odd spelling, and says so", done.count == 1 && done[0].charges == odd.count && after == before.count - odd.count
-                      && store.tidyChanges.count == 1 && store.newTidyChanges.count == 1)
-                if let change = store.tidyChanges.first { store.undo(change) }
+                      && store.tidyChanges.count == tidiedBefore + 1 && store.newTidyChanges.contains { $0.pairID == done[0].pairID })
+                if let change = store.tidyChanges.first(where: { $0.pairID == done.first?.pairID }) { store.undo(change) }
                 let restored = store.transactions.filter { $0.merchant == payee }.map(\.id)
+                if restored != before || store.tidyChanges.count != tidiedBefore { print("SELFTEST NOTE tidy counts \(tidiedBefore) -> \(store.tidyChanges.count), raw \(store.library.tidy?.changes.count ?? -1), done \(done.count), judged-declined \(store.library.tidy?.judged.values.filter { $0 == -1 }.count ?? -1)") }
                 if restored != before { print("SELFTEST NOTE tidy undo: \(payee) had \(before.count), has \(restored.count); same set \(Set(restored) == Set(before)); changes left \(store.tidyChanges.count); odd \(odd.text) x\(odd.count), main \(main.text)") }
                 check("tidy: undo puts every charge back and is remembered", Set(restored) == Set(before)
-                      && store.tidyChanges.isEmpty && store.library.tidy?.judged.values.contains(-1) == true)
+                      && store.tidyChanges.count == tidiedBefore && store.library.tidy?.judged.values.contains(-1) == true)
             } else { print("SELFTEST SKIP tidy split (no payee here is written two ways)") }
         }
         // One way a payee is written can be made a payee of its own; the rest stay, and the choice is kept.

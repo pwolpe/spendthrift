@@ -94,6 +94,8 @@ struct Library: Codable {
     var adopted: Set<String>?
     /// The original statement files that were kept (see `BudgetPaths.statementsFolder`).
     var sources: [SourceFile]?
+    /// Monthly amounts the person set for a category (its rawValue) in place of the one worked out. Missing: all automatic.
+    var budgetOverrides: [String: Double]?
 
     init() {}
 
@@ -121,6 +123,7 @@ struct Library: Codable {
         sources = (try? c.decodeIfPresent(Lossy<SourceFile>.self, forKey: .sources))?.values
         discoveriesByYear = try? c.decodeIfPresent([String: YearFindings].self, forKey: .discoveriesByYear)
         adopted = try? c.decodeIfPresent(Set<String>.self, forKey: .adopted)
+        budgetOverrides = try? c.decodeIfPresent([String: Double].self, forKey: .budgetOverrides)
         // Two accounts with one id (a hand-merged or damaged file) would make every lookup by id trap.
         var seen: Set<UUID> = []
         accounts = accounts.filter { seen.insert($0.id).inserted }

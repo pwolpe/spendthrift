@@ -25,6 +25,8 @@ struct CashFlowData {
     let months: [Month]
     let income: Double
     let spending: Double
+    /// Part of `spending`: what was chosen rather than needed (dinners out, trips, things for pleasure).
+    let optionalSpending: Double
     /// Part of `spending`: payments to cards whose statements aren't added.
     let uncoveredCards: Double
     let taxes: Double
@@ -108,6 +110,7 @@ struct CashFlowData {
         let txns = store.transactions.filter { inPeriod($0.month) }
         months = Array(Set(txns.map(\.month))).sorted()
 
+        var optional = 0.0
         var income = 0.0, spending = 0.0, uncovered = 0.0, taxes = 0.0, invIn = 0.0, invOut = 0.0, hidden = 0.0, unsortedIn = 0.0
         var perMonth: [Month: [Double]] = [:]
         for t in txns {
@@ -126,11 +129,13 @@ struct CashFlowData {
                     unsortedIn -= t.amount; row[0] -= t.amount
                 } else {
                     spending += t.amount; row[1] -= t.amount
+                    if store.isOptional(t) { optional += t.amount }
                     if t.category == .uncoveredCards { uncovered += t.amount }
                 }
             }
             perMonth[t.month] = row
         }
+        optionalSpending = max(0, optional)
         self.income = income; self.spending = spending; uncoveredCards = uncovered; self.taxes = taxes
         investmentIn = invIn; investmentOut = invOut; transfersHidden = hidden; self.unsortedIn = unsortedIn
         var bars: [MonthBar] = []

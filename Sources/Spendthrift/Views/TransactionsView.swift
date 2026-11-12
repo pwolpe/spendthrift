@@ -387,6 +387,23 @@ struct TransactionInspector: View {
                         .lineLimit(2...5)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { store.setNote(note, for: t.id) }
+                    // The receipt is usually in the mail: one click runs the search for this amount around this day.
+                    HStack(spacing: 6) {
+                        Button { MailSearch.open(amount: t.amount, date: t.date) } label: {
+                            Label("Find This in My Mail", systemImage: "envelope.badge")
+                        }
+                        .buttonStyle(.borderless).font(.callout)
+                        .help("Opens \(MailSearch.provider.rawValue) in your browser, searching for \(Money.format(abs(t.amount))) in the days around \(t.date.formatted(.dateTime.month(.abbreviated).day().year())). Then say here what it was.")
+                        Spacer()
+                        Menu {
+                            ForEach(MailSearch.Provider.allCases) { p in
+                                Button(p.rawValue) { MailSearch.provider = p; MailSearch.open(amount: t.amount, date: t.date) }
+                            }
+                        } label: { Image(systemName: "chevron.down").font(.caption) }
+                        .menuStyle(.borderlessButton).fixedSize()
+                        .help("Choose where your mail is")
+                        .accessibilityLabel("Choose where your mail is")
+                    }
                     Text("Anything you remember helps: who it was for, what trip, why. I use it when sorting, finding trips and answering questions.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

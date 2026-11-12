@@ -195,6 +195,12 @@ struct ReportContent: View {
                 Text("No spending in this period.").foregroundStyle(.secondary)
             } else {
                 MonthlyChartCard(data: data)
+                if interactive {
+                    let months = Set(data.months)
+                    TrimCard(transactions: store.cached("stretch|\(data.period.id)") { store.transactions.filter { months.contains($0.month) } },
+                             stretch: data.period == .last12 ? "the last 12 months" : data.period.title)
+                    if data.period == .last12 { SavingsCard() }
+                }
                 CategoryTableCard(data: data, open: interactive ? open : nil)
                 HStack(alignment: .top, spacing: 22) {
                     PlacesCard(places: data.places)

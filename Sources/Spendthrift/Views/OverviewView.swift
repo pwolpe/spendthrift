@@ -55,6 +55,9 @@ struct OverviewView: View {
         if let data = flowData {
             // The judgment that matters most comes first: did living stay within income?
             if !DebugHooks.off("hero") { FlowHero(data: data) { store.stepInto(.flow) } }
+            // Why it differs from usual. A month is cheap to explain; the year waits for the first frame.
+            if !store.overviewShowsYear, let m = currentMonth, let why = store.changes(in: m) { ChangeCard(explanation: why) }
+            if store.overviewShowsYear, let period = currentPeriod { AfterFirstFrame { yearChanges(period) } }
             let figures = Figures(store: store, data: data, month: store.overviewShowsYear ? nil : currentMonth)
             HStack(alignment: .top, spacing: 16) {
                 SummaryCard(title: "Spending", symbol: "creditcard.fill", color: Theme.spent,
@@ -77,11 +80,24 @@ struct OverviewView: View {
             HStack(alignment: .top, spacing: 16) {
                 if !DebugHooks.off("noticed") { AfterFirstFrame { noticed } }
                 if !DebugHooks.off("coming") { recurringCard }
+                if !store.overviewShowsYear, let m = currentMonth { budgetCard(m) }
             }
+            AfterFirstFrame { SavingsStrip() }
             if !store.overviewShowsYear, let m = currentMonth, !DebugHooks.off("stories") { storiesThisMonth(m) }
         } else {
             EmptyState(title: "Nothing here yet", message: "Drop a statement into this window and it all gets added up.", art: "welcome")
         }
+    }
+
+    @ViewBuilder
+    private func yearChanges(_ period: ReportPeriod) -> some View {
+        if let why = store.changes(in: period) { ChangeCard(explanation: why) }
+    }
+
+    @ViewBuilder
+    private func budgetCard(_ month: Month) -> some View {
+        let summary = store.budget(for: month)
+        if !summary.lines.isEmpty { BudgetCard(summary: summary) }
     }
 
     @ViewBuilder
@@ -159,6 +175,17 @@ struct OverviewView: View {
         if let data = flowData {
             switch detail {
             case .recurring: RecurringView()
+            case .budgets:
+                if !store.overviewShowsYear, let m = currentMonth {
+                    BudgetView(month: m)
+                } else {
+                    Card {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("A budget is set one month at a time.").font(.body)
+                            Button("Look at One Month") { store.overviewShowsYear = false }
+                        }
+                    }
+                }
             case .flow: CashFlowContent(data: data, interactive: true)
             case .income: IncomeDetail(data: data)
             case .investing: InvestingDetail(data: data)
@@ -180,11 +207,11 @@ struct OverviewView: View {
                 }
                 VStack(spacing: 20) {
                     if !DebugHooks.off("trend") { trendCard(m) }
-                    topPlacesCard(m)
-                    ForecastCard()
                 }
                 .frame(minWidth: 300, maxWidth: 420)
             }
+            // Every payee and category of the month, ranked: where a cut would count for most.
+            TrimCard(transactions: store.spending(in: m), stretch: m.name, month: m)
             if !DebugHooks.off("ceremony") { CeremonyCard(month: m) }
         }
     }
@@ -481,19 +508,6 @@ struct OverviewView: View {
 
     // MARK: Top places
 
-    private func topPlacesCard(_ m: Month) -> some View {
-        let top = store.topMerchants(in: m)
-        return Card {
-            VStack(alignment: .leading, spacing: 14) {
-                SectionHeader(title: "Top payees")
-                ForEach(Array(top.enumerated()), id: \.offset) { _, item in
-                    PayeeLine(name: item.name, category: item.category, detail: item.count == 1 ? "1 visit" : "\(item.count) visits",
-                              amount: item.total) { store.showPlace(item.name) }
-                }
-                if top.isEmpty { Text("Nothing yet.").foregroundStyle(.secondary) }
-            }
-        }
-    }
 }
 
 private struct CategoryRow: View {
@@ -538,56 +552,6 @@ private struct CategoryRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-    }
-}
-
-/// "Next month, about $38,000": an estimate from the history, what repeats, and the person's notes.
-struct ForecastCard: View {
-    private var store: BudgetStore { .shared }
-    @State private var estimate = Forecaster.cached
-
-    private var next: Month? { store.months.last?.adding(1) }
-    /// Changes when there is a new month of data or a new note, which is when to think again.
-    private var basis: String {
-        "\(store.months.last?.key ?? "")|\(store.transactions.count)|\(store.allNotes(limit: 60).joined().hashValue)"
-    }
-
-    var body: some View {
-        Group {
-            if let estimate, let next, CloudAI.isEnabled, store.months.count >= 3 {
-                Card {
-                    VStack(alignment: .leading, spacing: 8) {
-                        SectionHeader(title: "Looking ahead", subtitle: "An estimate for \(next.name), not a promise")
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("About \(Money.format(estimate.amount, cents: false))")
-                                .font(.system(size: 26, weight: .bold, design: .rounded))
-                                .monospacedDigit()
-                            Text("likely \(Money.format(estimate.low, cents: false))–\(Money.format(estimate.high, cents: false))")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                        if !estimate.because.isEmpty {
-                            Text(estimate.because).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        }
-                        Label("Notes you leave on payees and charges make this sharper.", systemImage: "text.bubble")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-        }
-        .task(id: basis) {
-            guard CloudAI.isEnabled, !store.isImporting, !store.isSuggesting, store.months.count >= 3, let next else { return }
-            let recent = store.months.suffix(12)
-            let history = recent.map { m -> String in
-                let top = store.categoryTotals(in: m).prefix(6).map { "\($0.category.displayName) \(Int($0.total))" }.joined(separator: ", ")
-                return "\(m.title): total \(Int(store.totalSpent(in: m))) (\(top))"
-            }
-            let repeating = store.subscriptions().map { "\($0.merchant): \(Money.format($0.monthlyAmount)) a month" }
-            let result = await Forecaster.estimate(month: next.title, history: history, repeating: repeating,
-                                                   notes: store.allNotes(), basis: basis)
-            if let result { withAnimation(.snappy) { estimate = result } }
-        }
     }
 }
 

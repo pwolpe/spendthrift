@@ -71,6 +71,11 @@ an import still finishes on the on-device paths and a banner says what happened.
   counted once. A **Bills & Subscriptions** card shows what repeats and what it costs a year, with the
   next four due; it opens a page listing every bill by how often it comes, what crept up in price, what
   may have been forgotten, and what has stopped.
+  A **What changed** card under the verdict says why the month (or the last twelve months) differs
+  from usual: a trip, one large charge, a new repeating charge, a price rise, or a category, each
+  opening the charges behind it. A **Budget** card sets a target for each category from the middle of
+  your last six months (trips left out); step in to see each row, and click a target to type your own
+  or return to automatic.
 - **Back**: every link inside a page (a category, a month, a trip, a payee, an order, a statement) goes
   through one history, so **Back** (or ⌘[) returns to where you came from. Choosing a section in the
   sidebar starts fresh.

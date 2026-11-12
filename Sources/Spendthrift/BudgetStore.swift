@@ -32,6 +32,8 @@ final class BudgetStore {
     @ObservationIgnored var insightCache: [Month: [Insight]] = [:]
     @ObservationIgnored var recurringCache: [RecurringEngine.Recurring]?
     @ObservationIgnored var awardCache: [Month: [Award]] = [:]
+    @ObservationIgnored var changeCache: [String: ChangeEngine.Explanation?] = [:]
+    @ObservationIgnored var budgetCache: [Month: BudgetEngine.Summary] = [:]
     @ObservationIgnored var reportCache: [ReportPeriod: ReportData] = [:]
     /// Goes up by one every time the library changes and everything derived from it is rebuilt.
     /// Anything worked out from transactions can be kept alongside the revision it was made at.
@@ -65,7 +67,7 @@ final class BudgetStore {
     var overviewPeriod: ReportPeriod?
     /// Which of the Overview's cards has been stepped into, if any. Nil is the summary itself.
     var overviewDetail: OverviewDetail?
-    enum OverviewDetail: String { case flow, spending, income, investing, recurring }
+    enum OverviewDetail: String { case flow, spending, income, investing, recurring, budgets }
     /// What is typed in the box on the Places page, and the stretch of time it looks at (kept while a place is open).
     var placeSearch = ""
     var placeSpan = PlacesView.Span.all
@@ -169,6 +171,7 @@ final class BudgetStore {
     var isLookingUp = false
     /// True while payees are being compared for tidying.
     var isTidying = false
+    @ObservationIgnored var isLearningFacts = false
     @ObservationIgnored var isGuessing = false
     var isFindingDiscoveries = false
     /// Calendar years being read right now.
@@ -342,6 +345,7 @@ final class BudgetStore {
         revision += 1
         orderChargeCache = nil
         insightCache = [:]; recurringCache = nil; awardCache = [:]; reportCache = [:]
+        changeCache = [:]; budgetCache = [:]
         months = Array(Set(list.map(\.month))).sorted()
         spendingByMonth = Dictionary(grouping: list.filter(\.countsAsSpending), by: \.month)
 

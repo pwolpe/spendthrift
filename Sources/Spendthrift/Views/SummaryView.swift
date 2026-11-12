@@ -146,18 +146,25 @@ struct FlowHero: View {
                     Text(kept >= 0 ? "\(Self.percent(kept / pay)) of your pay kept" : "\(Self.percent(-kept / pay)) over your pay")
                         .font(.callout.weight(.semibold)).foregroundStyle(kept >= 0 ? Theme.good : Theme.spent)
                 }
+                // Pay is the track; what was needed fills it first, then what was chosen.
+                let needed = max(0, lived - data.optionalSpending), chosen = min(lived, data.optionalSpending)
                 GeometryReader { geo in
                     let width = geo.size.width, scale = max(pay, lived)
                     ZStack(alignment: .leading) {
                         Capsule().fill(Theme.good.opacity(0.18)).frame(width: width * pay / scale)
-                        Capsule().fill(Theme.spent.gradient).frame(width: max(4, width * lived / scale))
+                        HStack(spacing: 2) {
+                            Rectangle().fill(Theme.spent.opacity(0.55)).frame(width: max(2, width * needed / scale))
+                            Rectangle().fill(Theme.spent.gradient).frame(width: max(2, width * chosen / scale))
+                        }
+                        .clipShape(Capsule())
                         if lived > pay { Rectangle().fill(Color.primary).frame(width: 2, height: 16).offset(x: width * pay / scale - 1) }
                     }
                 }
                 .frame(height: 8)
-                Text(kept >= 0
-                     ? "Your pay was \(Money.format(pay, cents: false)) and you lived on \(Money.format(lived, cents: false)), \(Self.percent(share)) of it. \(Money.format(kept, cents: false)) of your pay was left to save."
-                     : "Your pay was \(Money.format(pay, cents: false)) and you lived on \(Money.format(lived, cents: false)). The other \(Money.format(-kept, cents: false)) came from what your investments paid out, or from savings.")
+                Text((kept >= 0
+                      ? "Your pay was \(Money.format(pay, cents: false)) and you lived on \(Money.format(lived, cents: false)), \(Self.percent(share)) of it. \(Money.format(kept, cents: false)) of your pay was left to save."
+                      : "Your pay was \(Money.format(pay, cents: false)) and you lived on \(Money.format(lived, cents: false)). The other \(Money.format(-kept, cents: false)) came from what your investments paid out, or from savings.")
+                     + (chosen > 0.5 ? " \(Money.format(chosen, cents: false)) of what you lived on was chosen, not needed: dinners out, trips, things bought for pleasure. That is \(Self.percent(chosen / pay)) of your pay." : ""))
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }

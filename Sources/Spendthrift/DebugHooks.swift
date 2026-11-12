@@ -252,6 +252,7 @@ enum DebugHooks {
         if env["SPENDTHRIFT_TIDY"] != nil {
             for _ in 0..<100 where store.isSuggesting || store.isTidying { try? await Task.sleep(for: .milliseconds(200)) }
             await store.tidyIfNeeded()
+            await store.learnFactsIfNeeded()
             // Payees split off by the tidy-up get a proper name and category before quitting.
             for _ in 0..<10 where store.isSuggesting { try? await Task.sleep(for: .milliseconds(300)) }
             await store.sortRemaining()
@@ -441,7 +442,7 @@ enum DebugHooks {
         await snap("04-overview", outDir) { OverviewView(scrolls: false) }
         store.overviewShowsYear = false
         await snap("04-overview-month", outDir) { OverviewView(scrolls: false) }
-        for detail in [BudgetStore.OverviewDetail.spending, .income, .investing, .flow, .recurring] {
+        for detail in [BudgetStore.OverviewDetail.spending, .income, .investing, .flow, .recurring, .budgets] {
             store.overviewDetail = detail
             await snap("04-overview-\(detail.rawValue)", outDir) { OverviewView(scrolls: false) }
         }

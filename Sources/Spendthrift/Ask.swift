@@ -142,6 +142,8 @@ struct Answer: Identifiable, Hashable {
     var chart: [ChatAnalyst.ChartBar] = []
     var chartIsLine = false
     var understood: String?
+    /// A change the person asked for, waiting for a yes.
+    var action: ChatAction?
     /// The headline with every payee in it made a link, and where each row and bar leads: worked
     /// out once, when the answer is built (`prepared()`), not each time the bubble is drawn.
     private(set) var linkedHeadline: AttributedString?
@@ -538,6 +540,30 @@ struct ThinkingDots: View {
     }
 }
 
+/// "Do it" for a change asked for in the chat, then what happened and a way back.
+struct ActionButtons: View {
+    let action: ChatAction
+    @State private var outcome: String?
+    @State private var undone = false
+
+    var body: some View {
+        if let outcome {
+            HStack(spacing: 10) {
+                Label(outcome, systemImage: undone ? "arrow.uturn.backward.circle" : "checkmark.circle.fill")
+                    .font(.callout).foregroundStyle(undone ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.good))
+                if !undone, let undo = action.undo {
+                    Button("Undo") { withAnimation(.snappy) { self.outcome = undo(); undone = true } }.buttonStyle(.borderless).font(.callout)
+                }
+            }
+        } else {
+            HStack(spacing: 10) {
+                Button("Do It") { withAnimation(.snappy) { outcome = action.perform() } }.buttonStyle(.borderedProminent)
+                Button("Never Mind") { withAnimation(.snappy) { outcome = "Left as it was."; undone = true } }.buttonStyle(.bordered)
+            }
+        }
+    }
+}
+
 struct AnswerBubble: View {
     let answer: Answer
 
@@ -562,6 +588,7 @@ struct AnswerBubble: View {
                             BudgetStore.shared.showPlace(name)
                             return .handled
                         })
+                    if let action = answer.action { ActionButtons(action: action) }
                     if answer.chart.count >= 2 {
                         AnswerChart(bars: answer.chart, isLine: answer.chartIsLine) { Drill.open($0, in: answer) }
                         if answer.chart.contains(where: { answer.targets[$0.label] != nil }) {
