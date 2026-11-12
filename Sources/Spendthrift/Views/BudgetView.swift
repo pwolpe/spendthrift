@@ -93,7 +93,11 @@ private struct BudgetRow: View {
     @State private var text = ""
 
     private var note: (String, Color) {
-        if line.spent > line.target { return ("over by \(Money.format(line.spent - line.target, cents: false))", Theme.caution) }
+        if line.spent > line.target {
+            // Whole dollars: a few cents over is not "over by $0".
+            let over = line.spent - line.target
+            return (over >= 0.5 ? "over by \(Money.format(over, cents: false))" : "just over", Theme.caution)
+        }
         var words = "left \(Money.format(line.left, cents: false))"
         if let projected = line.projected { words += " · heading for \(Money.format(projected, cents: false))" }
         return (words, line.pace == .over ? Theme.caution : .secondary)

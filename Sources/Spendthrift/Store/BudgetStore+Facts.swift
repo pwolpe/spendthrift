@@ -25,6 +25,12 @@ extension BudgetStore {
 
     /// Whether spending at a payee counts as chosen: what the person said, else what the model judged,
     /// else what its category usually is.
+    /// The Trim card's lines, worked out once per stretch, ranking and switch until the library changes.
+    func trimmed(_ transactions: [Transaction], stretch: String, month: Month?, byPayee: Bool, chosenOnly: Bool) -> TrimEngine.Ranked {
+        let key = "trim|\(stretch)|\(month?.key ?? "-")|\(transactions.count)|\(transactions.last?.id.uuidString ?? "-")|\(byPayee)|\(chosenOnly)"
+        return cached(key) { TrimEngine.ranked(transactions, byPayee: byPayee, chosenOnly: chosenOnly, optional: isOptional) }
+    }
+
     func isOptional(payee keys: Set<String>, category: Category) -> Bool {
         let judged = keys.compactMap { library.merchants[$0]?.optional }
         return judged.isEmpty ? Self.usuallyOptional(category) : judged.reduce(0, +) / Double(judged.count) >= 0.5
@@ -36,6 +42,37 @@ extension BudgetStore {
         withAnimation(.snappy) { changed() }
     }
 
+    /// What the model is told about a payee: names, like statement lines, can be typed by a person, so both are scrubbed.
+    static func optionalState(name: String, sample: String, category: Category, typical: Double, count: Int) -> String {
+        "Payee: \(Redactor.scrub(name)). Statement line: \(Redactor.scrub(sample)). Filed under: \(category.rawValue). "
+            + "Typical amount $\(String(format: "%.2f", typical)). Appears \(count) time\(count == 1 ? "" : "s")."
+    }
+
+    /// Puts a model's answers on the payees that are still unanswered. The person may have said "a need"
+    /// while the request was out: their word is never overwritten. Returns how many were filled in.
+    @discardableResult
+    func applyOptional(_ answers: [String: Double]) -> Int {
+        var learned = 0
+        for (key, p) in answers where library.merchants[key] != nil && library.merchants[key]?.optional == nil {
+            library.merchants[key]?.optional = p
+            learned += 1
+        }
+        return learned
+    }
+
+    /// Payee records that share a name are one payee: those not yet judged take the answer given for the
+    /// others (the person's word above all). Returns whether anything changed.
+    func inheritOptionalByName() -> Bool {
+        let counts = Dictionary(grouping: library.entries, by: \.merchantKey).mapValues(\.count)
+        var any = false
+        for keys in Dictionary(grouping: library.merchants.keys, by: { library.merchants[$0]?.name ?? "" }).values where keys.count > 1 {
+            let known = keys.compactMap { key in library.merchants[key]?.optional.map { (key: key, value: $0, charges: counts[key] ?? 0) } }
+            guard known.count < keys.count, let value = TrimEngine.inherited(known) else { continue }
+            for key in keys where library.merchants[key]?.optional == nil { library.merchants[key]?.optional = value; any = true }
+        }
+        return any
+    }
+
     static let optionalQuestion = Decisions.Question.yesNo(
         "Is money spent at this payee a lifestyle choice rather than a necessity?",
         yes: "Chosen for enjoyment or convenience and could be cut without hardship: restaurants, bars, takeaway, travel, hotels, entertainment, hobbies, gifts, clothes and things bought for pleasure, streaming and other subscriptions, wine and spirits, rides taken for comfort.",
@@ -44,7 +81,10 @@ extension BudgetStore {
     /// Asks about every payee not yet judged. One short question each, a dozen at a time; a library
     /// of a few thousand payees takes under a minute the first time and nothing after.
     func learnFactsIfNeeded() async {
-        guard CloudAI.isEnabled, !isLearningFacts, !isImporting, !isSuggesting else { return }
+        guard !isLearningFacts, !isImporting, !isSuggesting else { return }
+        // A payee record made since the person (or the model) answered for its name takes that answer, before anything is asked.
+        if inheritOptionalByName() { changed() }
+        guard CloudAI.isEnabled else { return }
         var seen: [String: (count: Int, total: Double)] = [:]
         for t in transactions where t.countsAsSpending && !t.isUnknown {
             let old = seen[t.merchantKey] ?? (0, 0)
@@ -53,19 +93,13 @@ extension BudgetStore {
         var states: [String: String] = [:]
         for (key, sums) in seen {
             guard let info = library.merchants[key], info.optional == nil, let category = info.category else { continue }
-            states[key] = "Payee: \(info.name). Statement line: \(Redactor.scrub(info.sample)). Filed under: \(category.rawValue). "
-                + "Typical amount $\(String(format: "%.2f", sums.total / Double(sums.count))). Appears \(sums.count) time\(sums.count == 1 ? "" : "s")."
+            states[key] = Self.optionalState(name: info.name, sample: info.sample, category: category, typical: sums.total / Double(sums.count), count: sums.count)
         }
         guard !states.isEmpty else { return }
         isLearningFacts = true
         defer { isLearningFacts = false }
         let answers = await Decisions.askAll(job: "Needs and wants", model: Self.factsModel, states: states, questions: ["optional": Self.optionalQuestion])
-        var learned = 0
-        for (key, answer) in answers {
-            guard let p = answer["optional"]?.yes, library.merchants[key] != nil else { continue }
-            library.merchants[key]?.optional = p
-            learned += 1
-        }
+        let learned = applyOptional(answers.compactMapValues { $0["optional"]?.yes })
         if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("FACTS asked about \(states.count) payees, learned \(learned)") }
         if learned > 0 { changed() }
     }
@@ -79,9 +113,44 @@ enum TrimEngine {
         let category: Category
         let total: Double
         let count: Int
-        /// The share of this line that was a choice rather than a necessity (0 to 1).
-        let optionalShare: Double
+        /// How much of this line was a choice rather than a necessity (the sum of its chosen charges).
+        let chosen: Double
         let chargeIDs: [UUID]
+        /// The share of this line that was chosen (0 to 1).
+        var optionalShare: Double { min(1, max(0, chosen / total)) }
+        /// Most of the line was chosen.
+        var isMostlyChosen: Bool { chosen > 0 && chosen * 2 >= total }
+    }
+
+    /// What was chosen in a stretch: the one figure that "$X of $Y was chosen" and the Spending card both show.
+    static func chosenTotal(_ transactions: [Transaction], optional: (Transaction) -> Bool) -> Double {
+        max(0, transactions.filter { $0.countsAsSpending && optional($0) }.reduce(0) { $0 + $1.amount })
+    }
+
+    /// The answer a payee record without one takes from records of the same name: the person's (exactly
+    /// 0 or 1) over a model's, then the record with most charges, then the smallest key.
+    static func inherited(_ known: [(key: String, value: Double, charges: Int)]) -> Double? {
+        known.sorted { l, r in
+            let lp = l.value == 0 || l.value == 1, rp = r.value == 0 || r.value == 1
+            if lp != rp { return lp }
+            return l.charges != r.charges ? l.charges > r.charges : l.key < r.key
+        }.first?.value
+    }
+
+    /// What the Trim card shows for a stretch, ranking and switch.
+    struct Ranked {
+        let lines: [Line]
+        /// The stretch's own total, refunds and all, so it is the same figure the page gives above.
+        let total: Double
+        /// The sum of what was chosen: the figure the Spending card gives for the same stretch.
+        let chosen: Double
+    }
+
+    static func ranked(_ transactions: [Transaction], byPayee: Bool, chosenOnly: Bool, optional: (Transaction) -> Bool) -> Ranked {
+        let all = lines(transactions, byPayee: byPayee, optional: optional)
+        let shown = chosenOnly ? all.filter(\.isMostlyChosen).sorted { ($0.chosen, $1.name) > ($1.chosen, $0.name) } : all
+        return Ranked(lines: shown, total: transactions.filter(\.countsAsSpending).reduce(0) { $0 + $1.amount },
+                      chosen: chosenTotal(transactions, optional: optional))
     }
 
     /// Spending by payee or by category, largest first. Refunds come off where they belong; a line
@@ -98,7 +167,7 @@ enum TrimEngine {
         }
         return groups.compactMap { name, g in
             g.total > 0.005 ? Line(name: name, category: g.category, total: g.total, count: g.ids.count,
-                                   optionalShare: min(1, max(0, g.wanted / g.total)), chargeIDs: g.ids) : nil
+                                   chosen: g.wanted, chargeIDs: g.ids) : nil
         }.sorted { ($0.total, $1.name) > ($1.total, $0.name) }
     }
 }

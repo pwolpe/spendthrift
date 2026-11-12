@@ -119,7 +119,7 @@ struct FlowHero: View {
 
     /// The sum, in words: what came in, less tax, against what was lived on.
     private func sentence(_ verdict: Verdict) -> String {
-        guard verdict != .unknown else { return "No income has shown up for \(data.title) yet, so there is nothing to measure it against." }
+        guard verdict != .unknown else { return "No income has shown up for \(data.period == .last12 ? "the last 12 months" : data.title) yet, so there is nothing to measure it against." }
         let money = { (v: Double) in Money.format(v, cents: false) }
         let takeHome = data.totalIncome - data.taxes
         var text = data.taxes > 0.5 ? "After \(money(data.taxes)) in income taxes, \(money(takeHome)) was yours. "
@@ -166,7 +166,7 @@ struct FlowHero: View {
                 }
                 .frame(height: 8)
                 Text((kept >= 0
-                      ? "Your pay was \(Money.format(pay, cents: false)) and you lived on \(Money.format(lived, cents: false)), \(Self.percent(share)) of it. \(Money.format(kept, cents: false)) of your pay was left to save."
+                      ? "Your pay was \(Money.format(pay, cents: false)) and you lived on \(Money.format(lived, cents: false)), \(Self.percent(share)) of it. \(kept >= 0.5 ? "\(Money.format(kept, cents: false)) of your pay was left to save." : "None of your pay was left to save.")"
                       : "Your pay was \(Money.format(pay, cents: false)) and you lived on \(Money.format(lived, cents: false)). The other \(Money.format(-kept, cents: false)) came from what your investments paid out, or from savings.")
                      + (chosen > 0.5 ? " \(Money.format(chosen, cents: false)) of what you lived on was chosen, not needed: dinners out, trips, things bought for pleasure. That is \(Self.percent(chosen / pay)) of your pay." : ""))
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

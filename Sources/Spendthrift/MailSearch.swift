@@ -40,6 +40,15 @@ enum MailSearch {
         }
     }
 
+    /// What the search does, for each provider, in words (Yahoo cannot be asked for a range of days).
+    static func explanation(amount: Double, date: Date, provider: Provider = provider) -> String {
+        let day = date.formatted(.dateTime.month(.abbreviated).day().year())
+        switch provider {
+        case .gmail, .outlook: return "Opens \(provider.rawValue) in your browser, searching for \(Money.format(abs(amount))) in the week either side of \(day). Then say here what it was."
+        case .yahoo: return "Opens \(provider.rawValue) in your browser, searching for \(Money.format(abs(amount))). It cannot be limited to dates, so look near \(day). Then say here what it was."
+        }
+    }
+
     static func url(amount: Double, date: Date, provider: Provider = provider) -> URL? {
         let q = query(amount: amount, date: date, provider: provider)
         var allowed = CharacterSet.urlQueryAllowed

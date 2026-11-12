@@ -6,6 +6,8 @@ import Foundation
 /// beyond "one fewer a month".
 enum SavingsEngine {
     struct Idea: Identifiable, Hashable {
+        // The id names what the idea is about, never an amount or a count: those change with every charge,
+        // and a dismissed idea has to stay dismissed.
         enum Kind: String { case creep, forgotten, fees, habit }
         let id: String
         let kind: Kind
@@ -40,12 +42,12 @@ enum SavingsEngine {
 
         for r in recurring where r.isActive {
             if r.extraPerYear >= 12 {
-                out.append(Idea(id: "creep|\(r.merchant)|\(Int(r.amount * 100))", kind: .creep, title: "\(r.merchant) has crept up",
+                out.append(Idea(id: "creep|\(r.merchant)", kind: .creep, title: "\(r.merchant) has crept up",
                                 detail: "\(Money.format(r.amount)) \(r.cadence.every), up \(Money.format(r.creep)) since \(r.first.formatted(.dateTime.month(.wide).year())). Worth asking for the old price, or a cheaper plan.",
                                 yearly: r.extraPerYear, payee: r.merchant, chargeIDs: r.chargeIDs))
                 taken.insert(r.merchant)
             } else if r.isForgotten {
-                out.append(Idea(id: "forgotten|\(r.merchant)|\(Int(r.amount * 100))", kind: .forgotten, title: "Still using \(r.merchant)?",
+                out.append(Idea(id: "forgotten|\(r.merchant)", kind: .forgotten, title: "Still using \(r.merchant)?",
                                 detail: "It has charged you \(r.count) times since \(r.first.formatted(.dateTime.month(.wide).year())), \(money(r.yearly)) a year. If it has gone quiet in your life, it is still loud on your card.",
                                 yearly: r.yearly, payee: r.merchant, chargeIDs: r.chargeIDs))
                 taken.insert(r.merchant)
@@ -59,7 +61,7 @@ enum SavingsEngine {
             let byPayee = Dictionary(grouping: fees, by: \.merchant).mapValues { $0.reduce(0) { $0 + $1.amount } }.filter { $0.value > 0 }
                 .sorted { $0.value > $1.value }
             let worst = byPayee.prefix(2).map { "\($0.key) \(money($0.value))" }.joined(separator: ", ")
-            out.append(Idea(id: "fees|\(Int(feeTotal))", kind: .fees, title: "\(money(feeTotal)) went on fees and interest",
+            out.append(Idea(id: "fees", kind: .fees, title: "\(money(feeTotal)) went on fees and interest",
                             detail: "In the last twelve months, across \(fees.count) charges\(worst.isEmpty ? "" : " (\(worst))"). Annual fees, late fees and interest are the easiest money to get back: one call, or one autopay.",
                             yearly: feeTotal, payee: nil, chargeIDs: fees.map(\.id)))
         }
@@ -77,10 +79,17 @@ enum SavingsEngine {
         habits.sort { ($0.total, $1.name) > ($1.total, $0.name) }
         for habit in habits.prefix(3) {
             let each = habit.total / Double(habit.charges.count)
-            out.append(Idea(id: "habit|\(habit.name)|\(habit.charges.count)", kind: .habit, title: "\(habit.name), \(habit.charges.count) times",
+            out.append(Idea(id: "habit|\(habit.name)", kind: .habit, title: "\(habit.name), \(habit.charges.count) times",
                             detail: "\(money(habit.total)) in the last twelve months, about \(Money.format(each)) a time. One fewer a month would keep \(money(each * 12)) a year.",
                             yearly: each * 12, payee: habit.name, chargeIDs: habit.charges.map(\.id)))
         }
         return Array(out.sorted { ($0.yearly, $1.id) > ($1.yearly, $0.id) }.prefix(limit))
+    }
+}
+
+extension SavingsEngine {
+    /// Whether an idea was waved away. Ideas dismissed before their ids were made stable ("creep|Netflix|1599") still count.
+    static func isDismissed(_ id: String, in dismissed: Set<String>) -> Bool {
+        dismissed.contains(id) || dismissed.contains { $0.hasPrefix(id + "|") }
     }
 }

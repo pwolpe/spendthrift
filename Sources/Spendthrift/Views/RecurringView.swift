@@ -56,7 +56,7 @@ struct RecurringView: View {
                     Card {
                         VStack(alignment: .leading, spacing: 12) {
                             SectionHeader(title: cadence.title,
-                                          subtitle: "\(group.count) \(group.count == 1 ? "charge" : "charges") · \(Money.format(group.reduce(0) { $0 + $1.yearly }, cents: false)) a year")
+                                          subtitle: "\(group.count) \(group.count == 1 ? "payee" : "payees") · \(Money.format(group.reduce(0) { $0 + $1.yearly }, cents: false)) a year")
                             ForEach(Array(group.enumerated()), id: \.element.id) { index, item in
                                 if index > 0 { Divider() }
                                 row(item, detail: "\(Money.format(item.amount)) \(cadence.every)" + (item.next.map { " · next due \(dayMonth($0))" } ?? ""),

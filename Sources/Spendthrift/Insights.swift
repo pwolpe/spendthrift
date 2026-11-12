@@ -67,7 +67,7 @@ enum InsightEngine {
         guard let firstDataMonth = spending.map({ $0.month }).min(),
               let lastDate = spending.map(\.date).max() else { return [] }
         let thisMonth = spending.filter { $0.month == month }
-        let monthIsComplete = Month(date: lastDate) > month || Calendar.current.component(.day, from: lastDate) >= 25
+        let monthIsComplete = !month.isInProgress(newestCharge: lastDate)
         var out: [Insight] = []
 
         // New subscriptions & price increases

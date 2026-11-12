@@ -7,7 +7,7 @@ struct TidyCard: View {
     @State private var showsAll = false
 
     var body: some View {
-        let changes = store.tidyChanges, offers = Array((store.library.tidy?.suggestions ?? []).prefix(6))
+        let changes = store.tidyChanges, allOffers = store.library.tidy?.suggestions ?? [], offers = Array(allOffers.prefix(6))
         if !changes.isEmpty || !offers.isEmpty {
             Card {
                 VStack(alignment: .leading, spacing: 12) {
@@ -54,6 +54,9 @@ struct TidyCard: View {
                                 Button("Combine") { store.accept(offer) }.buttonStyle(.borderless)
                                 Button("Not the Same") { store.decline(offer) }.buttonStyle(.borderless).foregroundStyle(.secondary)
                             }
+                        }
+                        if allOffers.count > offers.count {
+                            Text("and \(allOffers.count - offers.count) more, once these are settled").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }

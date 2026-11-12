@@ -143,6 +143,9 @@ extension BudgetStore {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, library.merchants[key] != nil, library.merchants[key]?.name != trimmed else { return }
         library.merchants[key]?.name = trimmed
+        // A name the person chose is theirs: nothing automatic renames, re-files or folds this payee afterwards.
+        // (One with no category yet is left for the sorter, which only files what the person has not.)
+        if library.merchants[key]?.category != nil { library.merchants[key]?.source = .user; library.merchants[key]?.confirmed = true }
         changed()
     }
 

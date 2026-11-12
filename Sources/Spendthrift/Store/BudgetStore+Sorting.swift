@@ -141,6 +141,9 @@ extension BudgetStore {
 
     func sortRemaining() async {
         guard !isSuggesting else { return }
+        // Payees are being compared for tidying: the sorter's verdicts would rewrite the names it is combining.
+        // Wait for it to end, and run then (the tidy-up lets a waiting sort go).
+        if isTidying { sortAfterTidy = true; return }
         isSuggesting = true
         defer {
             isSuggesting = false

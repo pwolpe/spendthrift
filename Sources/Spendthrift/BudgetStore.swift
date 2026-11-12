@@ -171,6 +171,8 @@ final class BudgetStore {
     var isLookingUp = false
     /// True while payees are being compared for tidying.
     var isTidying = false
+    /// A sort asked for while payees were being tidied waits for the tidy-up to end, then runs once.
+    @ObservationIgnored var sortAfterTidy = false
     @ObservationIgnored var isLearningFacts = false
     /// True once "since you last looked" has been put away for this sitting.
     var sinceDismissed = false
@@ -183,6 +185,7 @@ final class BudgetStore {
 
     private init() {
         Launch.mark("store begins")
+        _ = Self.launchedAt   // a static is only set when first read: read it now, so it is the moment of launch
         let (loaded, result) = Library.load(paths: paths)
         library = loaded
         Launch.mark("library read (\(loaded.entries.count) entries)")
@@ -219,6 +222,14 @@ final class BudgetStore {
 
     func changed() {
         rebuild()
+        scheduleSave()
+    }
+
+    /// For a change that alters nothing any page works out from the charges (a kept sentence, a
+    /// note of what was asked): written to disk, but nothing is rebuilt.
+    func savedOnly() { scheduleSave() }
+
+    private func scheduleSave() {
         saveTask?.cancel()
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(300))

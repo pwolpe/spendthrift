@@ -6,7 +6,7 @@ extension BudgetStore {
         let all: [SavingsEngine.Idea] = cached("savings") {
             SavingsEngine.ideas(in: transactions, recurring: recurring(), asOf: transactions.last?.date ?? .now, optional: isOptional)
         }
-        return all.filter { !library.dismissedInsights.contains($0.id) }
+        return all.filter { !SavingsEngine.isDismissed($0.id, in: library.dismissedInsights) }
     }
 
     func show(_ idea: SavingsEngine.Idea) {
@@ -30,7 +30,7 @@ struct SavingsCard: View {
             Card {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline) {
-                        SectionHeader(title: "Ways to save", subtitle: "Found by reading every charge. Worth about \(Money.format(ideas.reduce(0) { $0 + $1.yearly }, cents: false)) a year between them.")
+                        SectionHeader(title: "Ways to save", subtitle: "Found by reading every charge of the last twelve months, whatever stretch is on screen. Worth about \(Money.format(ideas.reduce(0) { $0 + $1.yearly }, cents: false)) a year between them.")
                         Spacer()
                     }
                     ForEach(Array(ideas.enumerated()), id: \.element.id) { index, idea in

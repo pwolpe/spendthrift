@@ -65,6 +65,7 @@ enum SelfTest {
     private static func logic() {
         recurringRules()
         changeAndBudgetRules()
+        reviewRules()
         // Who a line belongs to.
         check("a known name needs its whole name", KnownMerchants.match("PARAMOUNT+ 888-274-5343 CA", generic: false)?.name == "Paramount+"
               && KnownMerchants.match("PARAMOUNT HOTEL NEW YORK NY", generic: false) == nil)
@@ -347,6 +348,89 @@ enum SelfTest {
         check("unpacked zip folders are removed, unless a file in one waits for its columns", keptForPicker && !FileManager.default.fileExists(atPath: folder.path))
     }
 
+
+    // MARK: Rules from the review of the newest code
+
+    private static func reviewRules() {
+        func spelled(_ payee: String, _ text: String, _ category: Category = .dining, byHand: Bool = false) -> TidyEngine.Spelling {
+            TidyEngine.Spelling(payee: payee, text: text, count: 3, typical: 20, category: category, byHand: byHand, sample: text)
+        }
+        // Tidy: what the person named, renamed, filed or confirmed is never moved, split or folded unasked.
+        let dads = spelled("Dad's Dinners", "WESTSIDE TAVERN NEW YORK NY", .dining, byHand: true), tavern = spelled("Westside Tavern", "WESTSIDE TAVERN - NY")
+        check("tidy: charges are not moved out of a payee the person named, only offered",
+              TidyEngine.verdict(for: .init(kind: .combine, a: dads, b: tavern), probabilitySame: 0.99) == .suggest
+              && TidyEngine.verdict(for: .init(kind: .combine, a: dads.marked(byHand: false), b: tavern), probabilitySame: 0.99) == .rehome)
+        let main = spelled("Westside Market", "WESTSIDE MARKET NEW YORK NY", .groceries, byHand: true), odd = spelled("Westside Market", "WESTSIDE TAVERN NEW YORK NY", .groceries)
+        check("tidy: a payee the person named is not taken apart, and two they made are not folded together",
+              TidyEngine.verdict(for: .init(kind: .separate, a: main, b: odd), probabilitySame: 0.01) == .leave
+              && TidyEngine.verdict(for: .init(kind: .separate, a: main.marked(byHand: false), b: odd), probabilitySame: 0.01) == .separate
+              && TidyEngine.verdict(for: .init(kind: .combine, a: spelled("Jakes Saloon", "JAKES SALOON NY", byHand: true), b: spelled("Jake's Saloon", "JAKES SALOON - NY", byHand: true)), probabilitySame: 0.99) == .leave)
+        // One id for a pair of spellings whatever the kind; answers saved under the old, kind-prefixed ids still count.
+        let twinA = spelled("Jakes Saloon", "JAKES SALOON NEW YORK NY"), twinB = spelled("Jake's Saloon", "JAKES SALOON - NY")
+        let asCombine = TidyEngine.Pair(kind: .combine, a: twinA, b: twinB), asSeparate = TidyEngine.Pair(kind: .separate, a: twinB, b: twinA)
+        check("tidy: a pair has one id whatever the kind, so it is asked about once", asCombine.id == asSeparate.id && asCombine.id != "combine|" + asCombine.id)
+        check("tidy: an answer saved under the old kind-prefixed id still covers the pair",
+              TidyEngine.pairs(in: ["Jakes Saloon": [twinA], "Jake's Saloon": [twinB]], alreadyJudged: [asCombine.legacyIDs[0]]).isEmpty
+              && TidyEngine.pairs(in: ["Jakes Saloon": [twinA], "Jake's Saloon": [twinB]], alreadyJudged: [asCombine.legacyIDs[1]]).isEmpty
+              && !TidyEngine.pairs(in: ["Jakes Saloon": [twinA], "Jake's Saloon": [twinB]], alreadyJudged: []).isEmpty)
+        check("tidy: a pair the model did not answer is asked once more, then left alone",
+              !TidyBook(judged: ["a": -2]).settled.contains("a") && TidyBook(judged: ["a": -3, "b": -1, "c": 0.5]).settled == ["a", "b", "c"])
+        check("tidy: of several records of one name, the person's, then the busiest, then the smallest key speaks",
+              TidyEngine.bestKey(among: [("b", false, 9), ("a", true, 2), ("c", false, 9)]) == "a"
+              && TidyEngine.bestKey(among: [("c", false, 9), ("b", false, 9), ("d", false, 3)]) == "b"
+              && TidyEngine.bestKey(among: [("x", false, 1), ("y", false, 7)]) == "y" && TidyEngine.bestKey(among: []) == nil)
+
+        // Needs and wants.
+        check("needs and wants: a record made later takes the person's word first, then the busiest record's",
+              TrimEngine.inherited([("k1", 0, 1), ("k2", 0.9, 50)]) == 0 && TrimEngine.inherited([("k1", 0.7, 1), ("k2", 0.2, 5)]) == 0.2 && TrimEngine.inherited([]) == nil)
+        let bar = tx("2026-11-02", 60, "Bar", .dining), barToo = tx("2026-11-03", 40, "Bar", .dining), rent = tx("2026-11-01", 1000, "Landlord", .home)
+        let chosenCharge: (Transaction) -> Bool = { $0.id == bar.id }
+        let byPayee = TrimEngine.ranked([bar, barToo, rent], byPayee: true, chosenOnly: false, optional: chosenCharge)
+        let chosenOnly = TrimEngine.ranked([bar, barToo, rent], byPayee: true, chosenOnly: true, optional: chosenCharge)
+        check("trim: a line carries what was chosen in it, and the figure is the sum of those amounts",
+              byPayee.lines.first { $0.name == "Bar" }.map { abs($0.chosen - 60) < 0.01 && abs($0.total - 100) < 0.01 } == true && abs(byPayee.chosen - 60) < 0.01
+              && abs(chosenOnly.chosen - 60) < 0.01 && abs(chosenOnly.total - 1100) < 0.01)
+        check("trim: the chosen-only list holds lines that are mostly chosen, ranked by what was chosen",
+              chosenOnly.lines.map(\.name) == ["Bar"] && TrimEngine.ranked([bar, barToo, rent], byPayee: false, chosenOnly: true, optional: chosenCharge).lines.map(\.name) == ["Dining"])
+        check("needs and wants: the model is told a scrubbed payee name",
+              !BudgetStore.optionalState(name: "Jo Smith jo@example.com 212-555-0101", sample: "ZELLE TO JO", category: .gifts, typical: 20, count: 3).contains("@")
+              && !BudgetStore.optionalState(name: "Jo Smith jo@example.com 212-555-0101", sample: "ZELLE TO JO", category: .gifts, typical: 20, count: 3).contains("555"))
+
+        // Ways to save keep one id however the figures move.
+        let start = DateParsing.isoDay("2024-06-01") ?? .now
+        let fees = (0..<3).map { charge("Big Bank", 60, day: 10 + $0 * 20, category: .fees) }
+        let first = SavingsEngine.ideas(in: fees, recurring: [], asOf: start, optional: { _ in false })
+        let more = SavingsEngine.ideas(in: fees + [charge("Big Bank", 35, day: 90, category: .fees)], recurring: [], asOf: start, optional: { _ in false })
+        check("ways to save: an idea keeps its id when the amount changes", first.map(\.id) == ["fees"] && more.map(\.id) == ["fees"])
+        check("ways to save: an idea waved away under an old id stays away",
+              SavingsEngine.isDismissed("fees", in: ["fees|180"]) && SavingsEngine.isDismissed("habit|Cafe", in: ["habit|Cafe|13"])
+              && !SavingsEngine.isDismissed("habit|Cafe", in: ["habit|Cafe X|13"]) && !SavingsEngine.isDismissed("fees", in: ["creep|X"]))
+
+        // One rule for a month in progress, for What Changed, Budget and Insights.
+        let day = { (s: String) in DateParsing.isoDay(s) ?? .now }
+        check("a month in progress: one rule, the last days count as done, an earlier month never is",
+              nov.isInProgress(newestCharge: day("2026-11-26")) && !nov.isInProgress(newestCharge: day("2026-11-27"))
+              && !Month(year: 2026, month: 10).isInProgress(newestCharge: day("2026-11-05")) && !nov.isInProgress(newestCharge: day("2026-12-02")))
+        // What was said about a year is about the same months of both years, and says so when the newest month is not finished.
+        func monthsOf(_ keys: [String], amount: Double) -> [Transaction] { keys.map { tx("\($0)-05", amount, "Market", .groceries) } }
+        let y25 = (1...12).map { String(format: "2025-%02d", $0) }, y26 = (1...10).map { String(format: "2026-%02d", $0) }
+        let young = ChangeEngine.explainYear(endingAt: Month(year: 2026, month: 12), label: "2026", in: monthsOf(y25, amount: 100) + monthsOf(y26, amount: 200), stories: [])
+        check("changes: a young year is compared with the same months of the year before, and its newest month is called so far",
+              young.map { $0.months == 10 && $0.soFar == "October" && abs($0.total - 2000) < 0.01 && abs($0.usual - 1000) < 0.01
+                  && $0.headline.contains("counting October so far") && $0.headline.contains("the same 10 months a year earlier") } == true)
+        check("changes: too few months in the year, or none a year earlier, explain nothing",
+              ChangeEngine.explainYear(endingAt: Month(year: 2026, month: 12), label: "2026", in: monthsOf(Array(y26.prefix(9)), amount: 200) + monthsOf(y25, amount: 100), stories: []) == nil
+              && ChangeEngine.explainYear(endingAt: Month(year: 2026, month: 12), label: "2026", in: monthsOf(y26, amount: 200), stories: []) == nil)
+
+        // Kept sentences go stale when any fact changes.
+        check("reads: a kept sentence is tied to every fact it was written from",
+              BudgetStore.basis(of: ["a $1", "b $2"]) == BudgetStore.basis(of: ["a $1", "b $2"]) && BudgetStore.basis(of: ["a $1", "b $2"]) != BudgetStore.basis(of: ["a $1", "b $3"]))
+        check("mail: the help says what each provider really does",
+              MailSearch.explanation(amount: 12, date: day("2026-03-10"), provider: .gmail).contains("week either side")
+              && !MailSearch.explanation(amount: 12, date: day("2026-03-10"), provider: .yahoo).contains("week either side")
+              && MailSearch.explanation(amount: 12, date: day("2026-03-10"), provider: .yahoo).contains("cannot be limited to dates"))
+    }
+
     // MARK: Findings
 
     private static let acct = UUID()
@@ -445,6 +529,18 @@ enum SelfTest {
               near(BudgetEngine.targets(before: nov, in: history + tripCharges, stories: [tripStory])[.dining] ?? 0, 300)
               && (BudgetEngine.targets(before: nov, in: history + tripCharges, stories: [])[.dining] ?? 0) > 1000)
         check("budgets: the card's total is the sum of its rows", near(half.target, half.lines.reduce(0) { $0 + $1.target }) && near(half.spent, half.lines.reduce(0) { $0 + $1.spent }))
+        // The first days of a month: an ordinary purchase is not "over" unless it is over the whole target.
+        let dayOne = DateParsing.isoDay("2026-11-01") ?? .now, dayTwo = DateParsing.isoDay("2026-11-02") ?? .now
+        check("budgets: on day one a normal purchase is not over, but one above the whole target is",
+              BudgetEngine.summary(for: nov, in: history + [tx("2026-11-01", 60, "Bistro", .dining)], stories: [], overrides: [:], asOf: dayOne).lines.first?.pace == .onPace
+              && BudgetEngine.summary(for: nov, in: history + [tx("2026-11-02", 350, "Bistro", .dining)], stories: [], overrides: [:], asOf: dayTwo).lines.first?.pace == .over)
+        // Budget and What Changed agree on when a month is still going.
+        let late = ordinary(["2026-08", "2026-09", "2026-10"]) + [tx("2026-11-03", 400, "Market", .groceries), tx("2026-11-26", 20, "Bistro", .dining)]
+        check("a month still going is the same month for What Changed and Budget",
+              ChangeEngine.explain(month: nov, in: late, stories: [], recurring: []) == nil
+              && BudgetEngine.summary(for: nov, in: history, stories: [], overrides: [:], asOf: DateParsing.isoDay("2026-11-26") ?? .now).isInProgress
+              && ChangeEngine.explain(month: nov, in: late.dropLast() + [tx("2026-11-28", 20, "Bistro", .dining)], stories: [], recurring: []) != nil
+              && !BudgetEngine.summary(for: nov, in: history, stories: [], overrides: [:], asOf: DateParsing.isoDay("2026-11-28") ?? .now).isInProgress)
     }
 
     private static func orderChecks() {
@@ -520,7 +616,7 @@ enum SelfTest {
         check("library: two accounts with one id become one", lib?.accounts.filter { $0.id.uuidString == a }.count == 1 && lib?.accounts.count == 2)
         let doubled = lib.map { Dictionary($0.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }) }
         check("library: looking accounts up by id cannot fail", doubled?.count == lib?.accounts.count)
-        check("library: a new stored field must be added to the decoder (24 today)", Mirror(reflecting: Library()).children.count == 24)
+        check("library: a new stored field must be added to the decoder (25 today)", Mirror(reflecting: Library()).children.count == 25)
 
         // Saving says whether it worked.
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SpendthriftTest-\(UUID().uuidString)", isDirectory: true)
@@ -574,7 +670,18 @@ enum SelfTest {
         check("the Spending card and the spending page agree", near(year.months.reduce(0) { $0 + store.totalSpent(in: $1) }, year.spending))
         check("the category ring adds up to spending", year.months.allSatisfy { m in near(store.categoryTotals(in: m).reduce(0) { $0 + $1.total }, max(store.totalSpent(in: m), store.categoryTotals(in: m).reduce(0) { $0 + $1.total })) })
         let run = CashFlowData.run(of: year.months, in: store)
-        check("the small bars add up to the big figures", near(run.reduce(0) { $0 + $1.income }, year.totalIncome) && near(run.reduce(0) { $0 + $1.invested }, year.investmentOut))
+        check("the small bars add up to the big figures", near(run.reduce(0) { $0 + $1.income }, year.totalIncome) && near(run.reduce(0) { $0 + $1.invested }, year.built))
+        // The Investing card's figure and its small bars are one definition: money put to work, loan interest apart.
+        check("the Investing card's bars add up to its figure, loan interest left out of both", near(run.reduce(0) { $0 + $1.invested }, year.investmentOut - year.loanInterest)
+              && near(year.loanInterest, store.transactions.filter { year.months.contains($0.month) && CashFlowData.isLoanInterest($0) }.reduce(0) { $0 + $1.amount }))
+        // "$X of $Y was chosen" is one figure: the same by payee and by category, and the one the Spending card gives.
+        let stretch = store.transactions.filter { Set(year.months).contains($0.month) }
+        let ranked = [true, false].map { store.trimmed(stretch, stretch: "books", month: nil, byPayee: $0, chosenOnly: true) }
+        check("what was chosen is one figure: the sum of chosen amounts, by payee and by category, equal to the Spending card's",
+              ranked.allSatisfy { near($0.chosen, year.optionalSpending) && near($0.total, year.spending) }
+              && ranked.allSatisfy { r in r.lines.allSatisfy { $0.chosen > 0 && $0.chosen * 2 >= $0.total - 0.005 } })
+        check("the Trim card's lines are kept, and equal a fresh ranking", store.trimmed(stretch, stretch: "books", month: nil, byPayee: true, chosenOnly: true).lines
+              == TrimEngine.ranked(stretch, byPayee: true, chosenOnly: true, optional: store.isOptional).lines)
         let verdict = FlowHero.verdict(for: year)
         check("the stamp matches the sum", year.totalIncome <= 0.5 ? verdict == .unknown
               : verdict == .even ? abs(year.surplus) < year.totalIncome * 0.01 : (verdict == .within) == (year.surplus > 0))
@@ -656,6 +763,59 @@ enum SelfTest {
                   && ChatAction(["type": "file", "payee": t.merchant, "category": "no such thing"], store: store) == nil)
         }
 
+        // More chat: undo changes only the records the action changed; an action says so when its payee is gone.
+        if let t = store.transactions.first(where: { $0.countsAsSpending && $0.merchant.count >= 5 }),
+           let u = store.transactions.first(where: { $0.countsAsSpending && $0.merchant != t.merchant && $0.merchantKey != t.merchantKey }) {
+            let mine = Set(store.charges(at: t.merchant).map(\.merchantKey)), theirs = Set(store.charges(at: u.merchant).map(\.merchantKey))
+            let record = { (key: String) in store.library.merchants[key].map { "\($0.name)|\($0.category?.rawValue ?? "-")|\($0.source.rawValue)|\($0.confirmed)" } }
+            let before = Dictionary(uniqueKeysWithValues: mine.union(theirs).map { ($0, record($0)) })
+            let rename = ChatAction.rename(payee: t.merchant, to: u.merchant)
+            _ = rename.perform()
+            check("chat: a rename to the name of another payee joins them", mine.allSatisfy { store.library.merchants[$0]?.name == u.merchant })
+            _ = rename.undo?()
+            check("chat: undoing a rename puts back only the payee that was renamed, as it was",
+                  mine.allSatisfy { record($0) == before[$0] } && theirs.allSatisfy { record($0) == before[$0] })
+            let file = ChatAction.file(payee: t.merchant, category: t.category == .gifts ? .travel : .gifts, was: t.category)
+            _ = file.perform()
+            _ = file.undo?()
+            check("chat: undoing a filing puts each payee record back as it was", mine.allSatisfy { record($0) == before[$0] })
+            let message = ChatAction.rename(payee: "Zzqq Nowhere At All", to: "Something").perform()
+            check("chat: an action on a payee that is gone says so and changes nothing", message.contains("can't find") && !message.hasPrefix("Done"))
+        }
+        // Naming a payee is the person's word, and a later answer from a model does not replace what they said.
+        if let t = store.transactions.first(where: { $0.countsAsSpending && $0.merchant.count >= 5 }), let before = store.library.merchants[t.merchantKey], before.category != nil {
+            let name = before.name
+            store.renamePlace(t.merchantKey, to: name + " Renamed")
+            check("a rename is the person's own word: filed by them and confirmed", store.library.merchants[t.merchantKey].map { $0.source == .user && $0.confirmed } == true && store.byHandNames().contains(name + " Renamed"))
+            store.renamePlace(t.merchantKey, to: name)
+            store.library.merchants[t.merchantKey]?.source = before.source
+            store.library.merchants[t.merchantKey]?.confirmed = before.confirmed
+            store.library.merchants[t.merchantKey]?.optional = nil
+            store.setOptional(false, payee: [t.merchantKey])
+            store.applyOptional([t.merchantKey: 0.9])
+            check("needs and wants: an answer that arrives later never overwrites the person's word", store.library.merchants[t.merchantKey]?.optional == 0)
+            // A record made later for the same payee takes that word before anything is asked.
+            let twin = "own:selftest-twin"
+            store.library.merchants[twin] = MerchantInfo(name: name, category: before.category, source: .ai, sample: "TWIN")
+            _ = store.inheritOptionalByName()
+            check("needs and wants: a new record of the same payee inherits what the person said", store.library.merchants[twin]?.optional == 0)
+            store.library.merchants[twin] = nil
+            store.library.merchants[t.merchantKey]?.optional = before.optional
+            store.changed()
+        }
+        // Saving one sentence is not a rebuild of everything.
+        let revision = store.revision
+        store.savedOnly()
+        check("saving alone rebuilds nothing", store.revision == revision)
+        // "Since you last looked" never counts what came in during this sitting.
+        if let late = store.arrived(since: .distantPast) {
+            let sources = Dictionary(uniqueKeysWithValues: (store.library.sources ?? []).map { ($0.id, $0.added) })
+            check("since you last looked: only statements added before this sitting began", late.statements <= (store.library.sources ?? []).count
+                  && store.library.entries.filter { late.charges.contains($0.id) }.allSatisfy { $0.sourceID.flatMap { sources[$0] }.map { $0 <= BudgetStore.launchedAt } == true })
+        }
+        check("since you last looked: a statement added after launch is not news",
+              !(store.library.sources ?? []).allSatisfy { $0.added > BudgetStore.launchedAt } || store.arrived(since: .distantPast) == nil)
+
         // A payee is tied to a trip by its charges in it, not by a monthly bill that happened to fall on a day away.
         for bill in store.recurring().filter({ $0.isActive && $0.cadence == .monthly && $0.count >= 12 }).prefix(3) {
             let charges = store.charges(at: bill.merchant)
@@ -665,7 +825,7 @@ enum SelfTest {
         // "Since you last looked" counts exactly the charges of statements added after that moment.
         if let newest = (store.library.sources ?? []).map(\.added).max() {
             check("nothing has arrived since the newest statement", store.arrived(since: newest) == nil)
-            if let all = store.arrived(since: .distantPast) {
+            if let all = store.arrived(since: .distantPast, until: .distantFuture) {
                 let fromStatements = Set(store.library.entries.filter { $0.sourceID != nil }.map(\.id))
                 check("everything from a statement has arrived since the beginning", Set(all.charges).isSubset(of: fromStatements) && all.statements == (store.library.sources ?? []).count
                       && abs(all.spent - store.transactions(withIDs: all.charges).filter { $0.countsAsSpending && $0.amount > 0 }.reduce(0) { $0 + $1.amount }) < 0.01)
@@ -718,6 +878,54 @@ enum SelfTest {
                 check("tidy: undo puts every charge back and is remembered", Set(restored) == Set(before)
                       && store.tidyChanges.count == tidiedBefore && store.library.tidy?.judged.values.contains(-1) == true)
             } else { print("SELFTEST SKIP tidy split (no payee here is written two ways)") }
+        }
+        // What the person named, filed or confirmed is not touched by tidying; a charge they filed alone stays; undo only moves back what is still where tidying put it.
+        do {
+            let byName = TidyEngine.spellings(of: store.transactions, byHand: [])
+            let candidate = byName.sorted { $0.key < $1.key }.first { name, list in
+                list.count > 1 && list.last.map { KeywordExtractor.displayName(for: $0.sample).caseInsensitiveCompare(name) != .orderedSame } == true
+            }
+            if let (payee, list) = candidate, let main = list.first, let odd = list.last {
+                let keys = store.library.merchants.filter { $0.value.name == payee }.map(\.key)
+                let pair = TidyEngine.Pair(kind: .separate, a: main, b: odd)
+                let onPayee = { store.transactions.filter { $0.merchant == payee }.count }
+                let before = onPayee()
+                // Confirmed by the person (the pair still says it is not, as it was when the model was asked): left alone.
+                let was = keys.map { ($0, store.library.merchants[$0]?.confirmed ?? false) }
+                for key in keys { store.library.merchants[key]?.confirmed = true }
+                let refused = await store.applyTidy([(pair, 0.01)])
+                check("tidy: a payee the person confirmed is not taken apart, whatever the pair said when it was asked", refused.isEmpty && onPayee() == before)
+                for (key, confirmed) in was { store.library.merchants[key]?.confirmed = confirmed }
+                // A charge the person filed by itself stays on its payee.
+                let spellingOf = { (e: LedgerEntry) in MerchantResolver.spelling(e.description).uppercased() }
+                if let own = store.library.entries.firstIndex(where: { keys.contains($0.merchantKey) && spellingOf($0) == odd.text }) {
+                    let id = store.library.entries[own].id
+                    store.library.entries[own].override = .gifts
+                    let done = await store.applyTidy([(pair, 0.01)])
+                    let kept = store.library.entries.first { $0.id == id }
+                    check("tidy: a charge the person filed alone is left where it is, with its own category",
+                          kept?.override == .gifts && keys.contains(kept?.merchantKey ?? "") && (done.first?.charges ?? 0) == odd.count - 1)
+                    // Moved by hand after tidying: undo leaves it where the person put it.
+                    if let change = store.library.tidy?.changes.last(where: { $0.pairID == done.first?.pairID }), let moved = change.moved?.keys.first(where: { $0 != id.uuidString }),
+                       let other = store.library.merchants.keys.first(where: { !keys.contains($0) && $0 != change.otherKey }),
+                       let i = store.library.entries.firstIndex(where: { $0.id.uuidString == moved }) {
+                        store.library.entries[i].merchantKey = other
+                        store.undo(change)
+                        check("tidy: undo puts back only the charges still where tidying put them", store.library.entries[i].merchantKey == other && onPayee() == before - 1)
+                        store.library.entries[i].merchantKey = keys.first ?? other
+                    } else if let change = store.library.tidy?.changes.last(where: { $0.pairID == done.first?.pairID }) { store.undo(change) }
+                    if let j = store.library.entries.firstIndex(where: { $0.id == id }) { store.library.entries[j].override = nil }
+                    store.changed()
+                } else { print("SELFTEST SKIP tidy override (no charge written the odd way)") }
+                // A pair the model did not answer is remembered, once, then again, and then it is settled.
+                let probe = "pair|selftest|selftest2"
+                _ = await store.applyTidy([], unanswered: [probe])
+                let once = store.library.tidy?.judged[probe]
+                _ = await store.applyTidy([], unanswered: [probe])
+                let twice = store.library.tidy?.judged[probe]
+                check("tidy: a pair left unanswered is asked once more and then let be", once == -2 && twice == -3 && store.library.tidy?.settled.contains(probe) == true)
+                store.library.tidy?.judged[probe] = nil
+            } else { print("SELFTEST SKIP tidy by hand (no payee here is written two ways)") }
         }
         // One way a payee is written can be made a payee of its own; the rest stay, and the choice is kept.
         let bySpelling = Dictionary(grouping: store.transactions, by: \.merchant)

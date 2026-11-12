@@ -57,12 +57,17 @@ enum ChangeEngine {
         let isAboutUsual: Bool
         /// The largest reasons, then "everything else". They always add up to `delta`.
         let drivers: [Driver]
+        /// A year: the newest month's name when that month is still in progress, so the headline says it is counted so far.
+        var soFar: String?
+        /// A year: how many months were compared (fewer than twelve when the stretch is a young calendar year).
+        var months = 12
 
         var headline: String {
-            let spent = Money.format(total, cents: false)
-            if isAboutUsual { return "\(label) came to \(spent), \(isYear ? "about the same as the twelve months before" : "about what you usually spend")" }
+            let spent = Money.format(total, cents: false) + (soFar.map { ", counting \($0) so far" } ?? "")
+            let before = months == 12 ? "the twelve months before" : "the same \(months) months a year earlier"
+            if isAboutUsual { return "\(label) came to \(spent), \(isYear ? "about the same as \(before)" : "about what you usually spend")" }
             let by = Money.format(abs(delta), cents: false)
-            return "\(label) came to \(spent), \(by) \(delta > 0 ? "more" : "less") than \(isYear ? "the twelve months before" : "usual")"
+            return "\(label) came to \(spent), \(by) \(delta > 0 ? "more" : "less") than \(isYear ? before : "usual")"
         }
     }
 
@@ -75,7 +80,7 @@ enum ChangeEngine {
         let present = Set(spending.map(\.month))
         guard present.contains(month), let lastDate = spending.last?.date ?? spending.map(\.date).max() else { return nil }
         // The newest month in the data is only partly there until late in it.
-        if Month(date: lastDate) == month, Calendar.current.component(.day, from: lastDate) < 25 { return nil }
+        if month.isInProgress(newestCharge: lastDate) { return nil }
         let reference = (1...3).map { month.adding(-$0) }.filter { present.contains($0) }
         guard reference.count >= 2 else { return nil }
 
@@ -170,18 +175,24 @@ enum ChangeEngine {
     // MARK: Year
 
     /// Why the twelve months ending at `end` differ from the twelve before, by trip and by category.
-    /// Nil unless both stretches have at least ten months of data.
+    /// Nil unless the stretch has at least ten months of data, each with the same month a year earlier
+    /// (a young calendar year is compared with the same months of the year before, not with a whole year).
+    /// When the newest month is still in progress the headline says it is counted so far.
     static func explainYear(endingAt end: Month, label: String = "The last twelve months", in all: [Transaction], stories: [Story]) -> Explanation? {
         let spending = all.filter(\.countsAsSpending)
         let present = Set(spending.map(\.month))
-        let now = Set((0..<12).map { end.adding(-$0) }), then = Set((12..<24).map { end.adding(-$0) })
-        guard now.intersection(present).count >= 10, then.intersection(present).count >= 10 else { return nil }
+        let window = Set((0..<12).map { end.adding(-$0) }).intersection(present)
+        let now = window, then = Set(window.map { $0.adding(-12) }).intersection(present)
+        guard now.count >= 10, then.count == now.count else { return nil }
+        let newest = spending.map(\.date).max().map { Month(date: $0) }
+        let soFar = newest.flatMap { month in now.contains(month) && month.isInProgress(newestCharge: spending.map(\.date).max() ?? .now) ? month.name : nil }
+        func year(_ e: Explanation) -> Explanation { var e = e; e.soFar = soFar; e.months = now.count; return e }
         let storyOf = storyIndex(stories)
         let nowCharges = spending.filter { now.contains($0.month) }, thenCharges = spending.filter { then.contains($0.month) }
         let total = nowCharges.reduce(0) { $0 + $1.amount }, usual = thenCharges.reduce(0) { $0 + $1.amount }
         let delta = cents(total - usual)
         if abs(delta) < max(75, usual * 0.08) {
-            return Explanation(label: label, isYear: true, month: nil, total: total, usual: usual, delta: delta, isAboutUsual: true, drivers: [])
+            return year(Explanation(label: label, isYear: true, month: nil, total: total, usual: usual, delta: delta, isAboutUsual: true, drivers: []))
         }
         var candidates: [Driver] = []
         let byStory = Dictionary(grouping: nowCharges.filter { storyOf[$0.id] != nil }, by: { storyOf[$0.id]! })
@@ -209,7 +220,7 @@ enum ChangeEngine {
                                      fallback: "\(c.displayName) ran \(whole(abs(diff))) \(diff > 0 ? "above" : "below") the year before"))
         }
         let drivers = choose(candidates, delta: delta, rest: .charges(Set(nowCharges.map(\.id)), title: "Spending, \(label.lowercased())"), restTitle: label)
-        return Explanation(label: label, isYear: true, month: nil, total: total, usual: usual, delta: delta, isAboutUsual: false, drivers: drivers)
+        return year(Explanation(label: label, isYear: true, month: nil, total: total, usual: usual, delta: delta, isAboutUsual: false, drivers: drivers))
     }
 
     // MARK: Shared
@@ -253,4 +264,16 @@ enum ChangeEngine {
     }
     private static func cents(_ v: Double) -> Double { (v * 100).rounded() / 100 }
     private static func whole(_ v: Double) -> String { Money.format(v, cents: false) }
+}
+
+extension Month {
+    /// Whether this month is still being filled in, given the date of the newest charge on file: it
+    /// holds that charge, and the charge is not yet in the last days of the month (statements run a
+    /// few days behind). One rule for What Changed, Budget and Insights, so the three never disagree.
+    func isInProgress(newestCharge: Date) -> Bool {
+        guard Month(date: newestCharge) == self else { return false }
+        let calendar = Calendar.current
+        let days = calendar.range(of: .day, in: .month, for: firstDay)?.count ?? 30
+        return calendar.component(.day, from: newestCharge) < days - 3
+    }
 }

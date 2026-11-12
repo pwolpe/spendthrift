@@ -16,6 +16,10 @@ extension BudgetStore {
     /// When the app was last quit, as it was when this sitting began.
     static let lastSeenAtLaunch: Date? = UserDefaults.standard.object(forKey: "lastSeen") as? Date
 
+    /// When this sitting began. Read once at launch (see the store's init): a statement added after this is the
+    /// person's own doing in this sitting, not something that arrived while the app was closed.
+    static let launchedAt = Date.now
+
     /// Called as the app quits.
     /// (Not in a test or snapshot run: those are not the person looking.)
     static func noteSeen() {
@@ -24,9 +28,10 @@ extension BudgetStore {
         UserDefaults.standard.set(Date.now, forKey: "lastSeen")
     }
 
-    /// What arrived since `when`. Nil when nothing did.
-    func arrived(since when: Date) -> Since? {
-        let sources = (library.sources ?? []).filter { $0.added > when }
+    /// What arrived after `when` and before `until` (this sitting's beginning, unless said otherwise). Nil when nothing did.
+    func arrived(since when: Date, until: Date? = nil) -> Since? {
+        let until = until ?? Self.launchedAt
+        let sources = (library.sources ?? []).filter { $0.added > when && $0.added <= until }
         guard !sources.isEmpty else { return nil }
         let ids = Set(sources.map(\.id))
         let entryIDs = library.entries.filter { $0.sourceID.map(ids.contains) == true }.map(\.id)
@@ -55,8 +60,9 @@ struct SinceCard: View {
                 Button { store.showCharges(TransactionFilter(ids: Set(since.charges), title: "Since you last looked")) } label: {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Since you last looked, \(since.when.formatted(.relative(presentation: .named)))").font(.callout.weight(.semibold))
-                        Text("\(since.statements == 1 ? "1 statement" : "\(since.statements) statements") arrived with \(since.charges.count == 1 ? "1 charge" : "\(since.charges.count) charges"): \(Money.format(since.spent, cents: false)) spent"
-                             + (since.biggest.isEmpty ? "." : ", most of it at \(since.biggest.joined(separator: ", "))."))
+                        Text("\(since.statements == 1 ? "1 statement" : "\(since.statements) statements") arrived with \(since.charges.count == 1 ? "1 charge" : "\(since.charges.count) charges")"
+                             + (since.spent < 0.5 ? ", none of it spending." : ": \(Money.format(since.spent, cents: false)) spent"
+                                + (since.biggest.isEmpty ? "." : ", most of it at \(since.biggest.joined(separator: ", ")).")))
                             .font(.callout).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
                     }
                     .contentShape(Rectangle())

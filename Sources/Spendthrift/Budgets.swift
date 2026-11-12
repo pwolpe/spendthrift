@@ -25,6 +25,7 @@ enum BudgetEngine {
     struct Summary: Hashable {
         let month: Month
         let lines: [Line]
+        // Only the budgeted categories, trips and events left out: so it is less than the month's Spending figure by design (`leftOut` is the trips; categories without a budget line are not counted).
         var spent: Double { lines.reduce(0) { $0 + $1.spent } }
         var target: Double { lines.reduce(0) { $0 + $1.target } }
         var onPace: Int { lines.filter { $0.pace != .over }.count }
@@ -71,7 +72,7 @@ enum BudgetEngine {
         let cal = Calendar.current
         let days = cal.range(of: .day, in: .month, for: month.firstDay)?.count ?? 30
         let day = cal.component(.day, from: asOf)
-        let inProgress = Month(date: asOf) == month && day < days
+        let inProgress = month.isInProgress(newestCharge: asOf)
         let elapsed = inProgress ? Double(day) / Double(days) : 1
 
         var spent: [Category: Double] = [:], ids: [Category: Set<UUID>] = [:]
@@ -88,7 +89,9 @@ enum BudgetEngine {
             guard let target = own ?? computed[category] else { return nil }
             let now = spent[category] ?? 0
             let expected = target * elapsed
-            let pace: Pace = now < expected * 0.9 ? .under : (now > expected * 1.1 ? .over : .onPace)
+            // In the first quarter of a month an ordinary purchase is far ahead of a prorated target: not "over" unless the whole target is spent.
+            let early = inProgress && elapsed < 0.25
+            let pace: Pace = now < expected * 0.9 ? .under : ((early ? now > target : now > expected * 1.1) ? .over : .onPace)
             let projected = inProgress && day > 10 ? now / elapsed : nil
             return Line(category: category, target: target, computed: computed[category], isOverride: own != nil, spent: now, pace: pace,
                         projected: projected, chargeIDs: ids[category] ?? [])

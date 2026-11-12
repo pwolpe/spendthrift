@@ -45,8 +45,10 @@ struct CashFlowData {
         byInvestmentCategory.first { $0.category == category }.map { ($0.moneyIn, $0.moneyOut) } ?? (0, 0)
     }
     /// Interest on a loan used for investing: a cost, not something built.
-    var loanInterest: Double {
-        investmentLines.filter { $0.category == .investmentLoan && $0.name.localizedCaseInsensitiveContains("interest") }.reduce(0) { $0 + $1.moneyOut }
+    let loanInterest: Double
+    /// Whether a charge is interest on the investment loan. One definition, for the card's figure and for its small bars.
+    static func isLoanInterest(_ t: Transaction) -> Bool {
+        t.lane == .investments && t.amount > 0 && t.category == .investmentLoan && t.merchant.localizedCaseInsensitiveContains("interest")
     }
     /// Money put to work: capital calls, purchases, and principal paid down on the investment loan.
     var built: Double { max(0, investmentOut - loanInterest) }
@@ -92,7 +94,7 @@ struct CashFlowData {
             switch t.lane {
             case .everyday: if t.isIncome || t.isUnsortedDeposit { run[i].income -= t.amount }
             case .investments:
-                if t.amount > 0 { run[i].invested += t.amount } else if t.category == .investmentIncome { run[i].income -= t.amount }
+                if t.amount > 0 { if !isLoanInterest(t) { run[i].invested += t.amount } } else if t.category == .investmentIncome { run[i].income -= t.amount }
             case .taxes, .transfers: break
             }
         }
@@ -111,6 +113,7 @@ struct CashFlowData {
         months = Array(Set(txns.map(\.month))).sorted()
 
         var optional = 0.0
+        var interest = 0.0
         var income = 0.0, spending = 0.0, uncovered = 0.0, taxes = 0.0, invIn = 0.0, invOut = 0.0, hidden = 0.0, unsortedIn = 0.0
         var perMonth: [Month: [Double]] = [:]
         for t in txns {
@@ -122,6 +125,7 @@ struct CashFlowData {
                 taxes += t.amount; row[2] -= t.amount
             case .investments:
                 if t.amount < 0 { invIn -= t.amount; row[3] -= t.amount } else { invOut += t.amount; row[4] -= t.amount }
+                if Self.isLoanInterest(t) { interest += t.amount }
             case .everyday:
                 if t.isIncome {
                     income -= t.amount; row[0] -= t.amount
@@ -136,6 +140,7 @@ struct CashFlowData {
             perMonth[t.month] = row
         }
         optionalSpending = max(0, optional)
+        loanInterest = interest
         self.income = income; self.spending = spending; uncoveredCards = uncovered; self.taxes = taxes
         investmentIn = invIn; investmentOut = invOut; transfersHidden = hidden; self.unsortedIn = unsortedIn
         var bars: [MonthBar] = []

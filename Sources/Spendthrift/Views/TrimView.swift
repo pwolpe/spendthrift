@@ -15,16 +15,14 @@ struct TrimCard: View {
     @State private var showsAll = false
 
     var body: some View {
-        let all = TrimEngine.lines(transactions, byPayee: byPayee, optional: store.isOptional)
-        let lines = chosenOnly ? all.filter { $0.optionalShare >= 0.5 } : all
-        // The stretch's own total, refunds and all, so it is the same figure the page gives above.
-        let total = transactions.filter(\.countsAsSpending).reduce(0) { $0 + $1.amount }
-        let shown = lines.reduce(0) { $0 + $1.total }
+        let ranked = store.trimmed(transactions, stretch: stretch, month: month, byPayee: byPayee, chosenOnly: chosenOnly)
+        let lines = ranked.lines, total = ranked.total
+        let shown = chosenOnly ? ranked.chosen : total
         Card {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
                     SectionHeader(title: "Where to trim",
-                                  subtitle: chosenOnly ? "\(Money.format(shown, cents: false)) of the \(Money.format(total, cents: false)) spent in \(stretch) was chosen, not needed. Largest first."
+                                  subtitle: chosenOnly ? "\(Money.format(ranked.chosen, cents: false)) of the \(Money.format(total, cents: false)) spent in \(stretch) was chosen, not needed. Largest first."
                                                        : "Everything spent in \(stretch), largest first.")
                     Spacer()
                     Picker("Rank", selection: $byPayee) {
@@ -38,7 +36,7 @@ struct TrimCard: View {
                 if lines.isEmpty {
                     Text("Nothing here for \(stretch).").foregroundStyle(.secondary)
                 }
-                let top = lines.first?.total ?? 1
+                let top = lines.first.map(amount) ?? 1
                 ForEach(Array(lines.prefix(showsAll ? 60 : 10).enumerated()), id: \.element.id) { index, line in
                     Button { open(line) } label: {
                         HStack(spacing: 12) {
@@ -48,19 +46,20 @@ struct TrimCard: View {
                                 HStack {
                                     Text(line.name).font(.body.weight(.medium)).lineLimit(1)
                                     Spacer()
-                                    Text(Money.format(line.total, cents: false)).monospacedDigit()
-                                    Text((line.total / max(shown, 1)).formatted(.percent.precision(.fractionLength(0))))
+                                    Text(Money.format(amount(line), cents: false)).monospacedDigit()
+                                    Text((amount(line) / max(shown, 1)).formatted(.percent.precision(.fractionLength(0))))
                                         .font(.callout).foregroundStyle(.secondary).frame(width: 40, alignment: .trailing)
                                 }
                                 GeometryReader { geo in
                                     ZStack(alignment: .leading) {
                                         Capsule().fill(Color.primary.opacity(0.06))
-                                        Capsule().fill(line.category.color.gradient).frame(width: max(4, geo.size.width * line.total / top))
+                                        Capsule().fill(line.category.color.gradient).frame(width: max(4, geo.size.width * amount(line) / top))
                                     }
                                 }
                                 .frame(height: 5)
                                 Text((byPayee ? "\(line.category.displayName) · " : "") + (line.count == 1 ? "1 charge" : "\(line.count) charges")
-                                     + (line.count > 1 ? " · \(Money.format(line.total / Double(line.count), cents: false)) each on average" : ""))
+                                     + (line.count > 1 ? " · \(Money.format(line.total / Double(line.count), cents: false)) each on average" : "")
+                                     + (chosenOnly && line.total - line.chosen > 0.5 ? " · \(Money.format(line.total, cents: false)) spent here in all" : ""))
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
@@ -76,6 +75,9 @@ struct TrimCard: View {
             }
         }
     }
+
+    /// What a row shows: what was chosen when only that is listed, else everything.
+    private func amount(_ line: TrimEngine.Line) -> Double { chosenOnly ? line.chosen : line.total }
 
     private func open(_ line: TrimEngine.Line) {
         if byPayee { store.showPlace(line.name) }

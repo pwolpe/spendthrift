@@ -199,7 +199,7 @@ struct ReportContent: View {
                     let months = Set(data.months)
                     TrimCard(transactions: store.cached("stretch|\(data.period.id)") { store.transactions.filter { months.contains($0.month) } },
                              stretch: data.period == .last12 ? "the last 12 months" : data.period.title)
-                    if data.period == .last12 { SavingsCard() }
+                    SavingsCard()
                 }
                 CategoryTableCard(data: data, open: interactive ? open : nil)
                 HStack(alignment: .top, spacing: 22) {

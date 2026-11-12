@@ -21,17 +21,28 @@ extension BudgetStore {
     func tidyIfNeeded() async {
         guard CloudAI.isEnabled, !isTidying, !isImporting, !isSuggesting else { return }
         isTidying = true
-        defer { isTidying = false }
-        let byHand = Set(library.merchants.values.filter { $0.source == .user }.map(\.name))
-        let spellings = TidyEngine.spellings(of: transactions, byHand: byHand)
-        let pairs = TidyEngine.pairs(in: spellings, alreadyJudged: Set((library.tidy?.judged ?? [:]).keys))
+        defer {
+            isTidying = false
+            // A sort that was asked for while payees were being compared runs now (and so does the one this tidy-up wants).
+            if sortAfterTidy { sortAfterTidy = false; Task { await sortRemaining() } }
+        }
+        let spellings = TidyEngine.spellings(of: transactions, byHand: byHandNames())
+        // A pair the model gave no answer to (-2) is asked once more; any other answer is final.
+        let skip = (library.tidy ?? TidyBook()).settled
+        let pairs = TidyEngine.pairs(in: spellings, alreadyJudged: skip)
         guard !pairs.isEmpty else { return }
         let states = Dictionary(pairs.map { ($0.id, TidyEngine.state(for: $0)) }, uniquingKeysWith: { first, _ in first })
         let answers = await Decisions.askAll(job: "Tidying payees", model: Self.tidyModel, states: states, questions: ["same": TidyEngine.sameBusiness])
-        guard !answers.isEmpty, !isImporting else { return }
+        // Nothing at all came back: the model was out of reach, which says nothing about the pairs.
+        guard !answers.isEmpty else { return }
+        // The answers took a while. If statements are being read or sorted meanwhile, wait for them
+        // (their results and these would otherwise rewrite the same payees); give up after a minute.
+        for _ in 0..<60 where isImporting || isSuggesting { try? await Task.sleep(for: .seconds(1)) }
+        guard !isImporting, !isSuggesting else { return }
 
         let ranked = pairs.compactMap { pair in answers[pair.id]?["same"]?.yes.map { (pair, $0) } }
-        let done = await applyTidy(ranked)
+        let unanswered = pairs.filter { answers[$0.id]?["same"]?.yes == nil }.map(\.id)
+        let done = await applyTidy(ranked, unanswered: unanswered)
         if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
             print("TIDY asked about \(pairs.count) pairs, \(answers.count) answered, \(done.count) acted on, \(library.tidy?.suggestions?.count ?? 0) offered")
             for change in done { print("TIDY DONE \(sentence(for: change)) (\(change.charges) charges)") }
@@ -41,20 +52,43 @@ extension BudgetStore {
         let charges = done.reduce(0) { $0 + $1.charges }
         showToast(done.count == 1 ? "\(sentence(for: done[0])). It can be undone on the Payees page."
                                   : "Tidied \(done.count) payees (\(charges) charges). See what changed on the Payees page.", symbol: "wand.and.stars")
-        // Payees that were split off have only the statement's words for a name: have them named and filed properly.
-        Task { await sortRemaining() }
+        // Payees that were split off have only the statement's words for a name: have them named and filed properly
+        // (once this tidy-up has ended, which is when a waiting sort is let go).
+        sortAfterTidy = true
+    }
+
+    /// The payees the person named, renamed, filed or confirmed: nothing automatic moves charges out
+    /// of them, renames them or folds them into another.
+    func byHandNames() -> Set<String> {
+        Set(library.merchants.values.filter { $0.source == .user || $0.confirmed }.map(\.name))
+    }
+
+    /// The record that speaks for a payee name when several share it: one the person set, then the
+    /// one with most charges, then the smallest key (so every run picks the same).
+    private func bestRecord(named name: String, caseInsensitive: Bool = false, counts: [String: Int]? = nil) -> (key: String, info: MerchantInfo)? {
+        let counts = counts ?? Dictionary(grouping: library.entries, by: \.merchantKey).mapValues(\.count)
+        let same = library.merchants.filter { caseInsensitive ? $0.value.name.caseInsensitiveCompare(name) == .orderedSame : $0.value.name == name }
+        let candidates = same.map { (key: $0.key, byPerson: $0.value.source == .user || $0.value.confirmed, charges: counts[$0.key] ?? 0) }
+        return TidyEngine.bestKey(among: candidates).flatMap { key in same[key].map { (key, $0) } }
     }
 
     /// Acts on pairs that have been judged: `probability` is how likely each is one business.
     /// Returns what was done. Separate from the asking so it can be checked without a model.
     @discardableResult
-    func applyTidy(_ judged: [(pair: TidyEngine.Pair, probability: Double)]) async -> [TidyChange] {
+    func applyTidy(_ judged: [(pair: TidyEngine.Pair, probability: Double)], unanswered: [String] = []) async -> [TidyChange] {
         var book = library.tidy ?? TidyBook()
         var done: [TidyChange] = []
         var offered = book.suggestions ?? []
         let recurring = Set(recurring().filter(\.isActive).map(\.merchant))
-        // The surest first, so a later, weaker pair never undoes what a stronger one settled.
-        let ranked = judged.sorted { abs($0.probability - 0.5) > abs($1.probability - 0.5) }
+        // The surest first, so a later, weaker pair never undoes what a stronger one settled; ties by id, so every run does the same.
+        let ranked = judged.sorted { l, r in
+            let x = abs(l.probability - 0.5), y = abs(r.probability - 0.5)
+            return x != y ? x > y : l.pair.id < r.pair.id
+        }
+        // Who counts as named by hand is worked out now: the answers may have taken minutes to arrive.
+        let hand = byHandNames()
+        // Pairs the model did not answer: asked once more, then left (-2, then -3).
+        for id in unanswered { book.judged[id] = book.judged[id] == -2 ? -3 : -2 }
         func record(_ change: TidyChange?) {
             guard let change else { return }
             // Several spellings moved to the one payee are one thing to tell the person about.
@@ -64,7 +98,8 @@ extension BudgetStore {
                 done[i].morePairIDs = (done[i].morePairIDs ?? []) + [change.pairID]
             } else { done.append(change) }
         }
-        for (pair, probability) in ranked {
+        for (given, probability) in ranked {
+            let pair = TidyEngine.Pair(kind: given.kind, a: given.a.marked(byHand: hand.contains(given.a.payee)), b: given.b.marked(byHand: hand.contains(given.b.payee)))
             book.judged[pair.id] = probability
             switch TidyEngine.verdict(for: pair, probabilitySame: probability, recurring: recurring) {
             case .combine: record(combine(pair))
@@ -85,6 +120,11 @@ extension BudgetStore {
         return done
     }
 
+    /// Whether any payee record called `name` is the person's own word (named, renamed, filed or confirmed).
+    private func isByHand(payee name: String) -> Bool {
+        library.merchants.values.contains { $0.name == name && ($0.source == .user || $0.confirmed) }
+    }
+
     /// What a change did, in words, with the payee called whatever it is called now.
     func sentence(for change: TidyChange) -> String {
         let other = change.otherKey.flatMap { library.merchants[$0]?.name } ?? change.other
@@ -97,8 +137,7 @@ extension BudgetStore {
     /// Combines two payees because the person said so, after the app had only suggested it.
     func accept(_ suggestion: TidySuggestion) {
         guard var book = library.tidy else { return }
-        let byHand = Set(library.merchants.values.filter { $0.source == .user }.map(\.name))
-        let spellings = TidyEngine.spellings(of: transactions, byHand: byHand)
+        let spellings = TidyEngine.spellings(of: transactions, byHand: byHandNames())
         book.suggestions?.removeAll { $0.pairID == suggestion.pairID }
         if let a = spellings[suggestion.a]?.first, let b = spellings[suggestion.b]?.first,
            let change = combine(TidyEngine.Pair(kind: .combine, a: a, b: b)) {
@@ -124,7 +163,7 @@ extension BudgetStore {
     /// A name the person gave by hand is the one that is kept.
     private func combine(_ pair: TidyEngine.Pair) -> TidyChange? {
         let (keep, fold) = pair.b.byHand && !pair.a.byHand ? (pair.b, pair.a) : (pair.a, pair.b)
-        guard keep.payee != fold.payee, let target = library.merchants.values.first(where: { $0.name == keep.payee }) else { return nil }
+        guard keep.payee != fold.payee, let target = bestRecord(named: keep.payee)?.info else { return nil }
         let keys = library.merchants.filter { $0.value.name == fold.payee }.map(\.key)
         guard !keys.isEmpty else { return nil }
         var before: [String: TidyChange.Before] = [:]
@@ -146,14 +185,19 @@ extension BudgetStore {
     private func separate(_ spelling: TidyEngine.Spelling, from payee: String, to target: String?, pairID: String) async -> TidyChange? {
         let name = target ?? KeywordExtractor.displayName(for: spelling.sample)
         guard !name.isEmpty, name.caseInsensitiveCompare(payee) != .orderedSame else { return nil }
-        let existing = library.merchants.first { $0.value.name.caseInsensitiveCompare(name) == .orderedSame }
+        // Looked at again now, not as it was when the question was asked: a payee the person has named since is theirs.
+        guard !isByHand(payee: payee) else { return nil }
+        let counts = Dictionary(grouping: library.entries, by: \.merchantKey).mapValues(\.count)
+        let existing = bestRecord(named: name, caseInsensitive: true, counts: counts).map { (key: $0.key, value: $0.info) }
         let keysOfPayee = Set(library.merchants.filter { $0.value.name == payee }.map(\.key))
         let indices = library.entries.indices.filter {
-            keysOfPayee.contains(library.entries[$0].merchantKey) && MerchantResolver.spelling(library.entries[$0].description).uppercased() == spelling.text
+            // A charge the person filed under a category of its own stays where it is.
+            library.entries[$0].override == nil && keysOfPayee.contains(library.entries[$0].merchantKey) && MerchantResolver.spelling(library.entries[$0].description).uppercased() == spelling.text
         }
         guard !indices.isEmpty else { return nil }
         // An "own:" payee made earlier for the same name takes these too; otherwise a new one is made.
-        let key = existing.flatMap { $0.key.hasPrefix("own:") ? $0.key : nil } ?? "own:" + UUID().uuidString
+        let ownKey = library.merchants.filter { $0.key.hasPrefix("own:") && $0.value.name.caseInsensitiveCompare(name) == .orderedSame }.keys.sorted().first
+        let key = ownKey ?? "own:" + UUID().uuidString
         if library.merchants[key] == nil {
             var info = MerchantInfo(name: existing?.value.name ?? name, category: existing?.value.category, source: existing == nil ? .ai : .cloud,
                                     confirmed: false, sample: spelling.sample)
@@ -171,7 +215,6 @@ extension BudgetStore {
                                     domain: info.domain, sample: info.sample)
             }
             library.entries[i].merchantKey = key
-            library.entries[i].override = nil
         }
         library.spellings = (library.spellings ?? [:]).merging([spelling.text: key]) { _, new in new }
         return TidyChange(kind: .separate, day: DateParsing.iso.string(from: .now), from: payee, other: library.merchants[key]?.name ?? name,
@@ -191,24 +234,27 @@ extension BudgetStore {
                 library.merchants[key]?.domain = before.domain
             }
         case .separate:
+            let back = change.moved ?? [:]
+            // (Changes made before the record above was kept: the payee they came from is the best account of what they were.)
+            let like = bestRecord(named: change.from)?.info
+            // Only charges still on the key the tidy-up gave them go back: one moved by hand since stays where the person put it.
+            let given = change.otherKey
+            let stillThere = Set(library.entries.filter { back[$0.id.uuidString] != nil && (given == nil || $0.merchantKey == given) }.compactMap { back[$0.id.uuidString] })
             // A payee record left with no charges may have been cleared away since: make it again as it was.
-            for (key, before) in change.renamed ?? [:] where library.merchants[key] == nil {
+            for (key, before) in change.renamed ?? [:] where library.merchants[key] == nil && stillThere.contains(key) {
                 var info = MerchantInfo(name: before.name, category: before.category.map { Category($0) },
                                         source: MerchantInfo.Source(rawValue: before.source) ?? .cloud, confirmed: before.confirmed, sample: before.sample ?? before.name)
                 info.domain = before.domain
                 library.merchants[key] = info
             }
-            let back = change.moved ?? [:]
-            // (Changes made before the record above was kept: the payee they came from is the best account of what they were.)
-            let like = library.merchants.values.first { $0.name == change.from }
-            for key in Set(back.values) where library.merchants[key] == nil {
+            for key in stillThere where library.merchants[key] == nil {
                 var info = MerchantInfo(name: change.from, category: like?.category, source: .cloud, confirmed: false, sample: change.spelling ?? change.from)
                 info.domain = like?.domain
                 library.merchants[key] = info
             }
             var emptied: Set<String> = []
             for i in library.entries.indices {
-                if let old = back[library.entries[i].id.uuidString] {
+                if let old = back[library.entries[i].id.uuidString], given == nil || library.entries[i].merchantKey == given {
                     emptied.insert(library.entries[i].merchantKey)
                     library.entries[i].merchantKey = old
                 }

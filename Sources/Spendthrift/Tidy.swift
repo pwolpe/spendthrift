@@ -18,6 +18,10 @@ enum TidyEngine {
         /// True when the person named or filed this payee by hand: their word is final.
         let byHand: Bool
         let sample: String
+
+        func marked(byHand: Bool) -> Spelling {
+            Spelling(payee: payee, text: text, count: count, typical: typical, category: category, byHand: byHand, sample: sample)
+        }
     }
 
     struct Pair: Hashable {
@@ -26,8 +30,22 @@ enum TidyEngine {
         /// For `combine`: two payees. For `separate`: the payee's main spelling, then the odd one out.
         let a: Spelling
         let b: Spelling
-        /// The same for a given pair however often it is found, so each is only ever asked about once.
-        var id: String { "\(kind.rawValue)|\([a.text, b.text].sorted().joined(separator: "|"))" }
+        /// The same for a given pair of spellings however often it is found and whichever kind it is
+        /// taken for, so each pair is only ever asked about once.
+        var id: String { "pair|" + [a.text, b.text].sorted().joined(separator: "|") }
+        /// What this pair was called before the kind was left out of it: saved answers under these still count.
+        var legacyIDs: [String] {
+            let rest = [a.text, b.text].sorted().joined(separator: "|")
+            return ["combine|" + rest, "separate|" + rest]
+        }
+        /// Whether this pair, under either name, is among `judged`.
+        func isJudged(in judged: Set<String>) -> Bool { judged.contains(id) || legacyIDs.contains(where: judged.contains) }
+    }
+
+    /// Which payee record to read a category and website from when several share one name: one the
+    /// person set, then the one with most charges, then the smallest key, so every run picks the same.
+    static func bestKey(among candidates: [(key: String, byPerson: Bool, charges: Int)]) -> String? {
+        candidates.sorted { ($0.byPerson ? 1 : 0, $0.charges, $1.key) > ($1.byPerson ? 1 : 0, $1.charges, $0.key) }.first?.key
     }
 
     /// The word a statement line leads with once processors, punctuation and store numbers are gone:
@@ -97,7 +115,7 @@ enum TidyEngine {
                 out.append(Pair(kind: .combine, a: sorted[i], b: sorted[j]))
             } }
         }
-        return Array(out.filter { !alreadyJudged.contains($0.id) }.sorted { ($0.a.count + $0.b.count, $1.id) > ($1.a.count + $1.b.count, $0.id) }.prefix(limit))
+        return Array(out.filter { !$0.isJudged(in: alreadyJudged) }.sorted { ($0.a.count + $0.b.count, $1.id) > ($1.a.count + $1.b.count, $0.id) }.prefix(limit))
     }
 
     /// What the model is shown about a pair: only the statement wording and how often each was seen.
@@ -136,13 +154,17 @@ enum TidyEngine {
     /// its maker's one-off purchases, or the other way round, without asking.
     static func verdict(for pair: Pair, probabilitySame p: Double, recurring: Set<String> = []) -> Verdict {
         switch pair.kind {
-        case .separate: return p <= sureDifferent ? .separate : .leave
+        case .separate:
+            // A payee the person named, renamed, filed or confirmed is not taken apart unasked.
+            return p <= sureDifferent && !pair.a.byHand ? .separate : .leave
         case .combine:
             guard p >= sureSame else { return .leave }
+            // Two payees the person made themselves are two things, as far as they are concerned.
+            if pair.a.byHand && pair.b.byHand { return .leave }
             let aFits = nameFits(pair.a.payee, spelling: pair.a.text), bFits = nameFits(pair.b.payee, spelling: pair.b.text)
             // A payee named for something other than what its statements say was gathered wrongly:
             // its charges go to the payee that is named for them.
-            if !aFits, bFits { return .rehome }
+            if !aFits, bFits { return pair.a.byHand ? .suggest : .rehome }
             if !bFits || !aFits { return .suggest }
             if recurring.contains(pair.a.payee) != recurring.contains(pair.b.payee) { return .suggest }
             if namesAgree(pair.a.payee, pair.b.payee) { return .combine }
@@ -243,9 +265,13 @@ struct TidyChange: Codable, Identifiable, Hashable {
 
 /// Everything remembered about tidying: what was asked (so nothing is asked twice) and what was done.
 struct TidyBook: Codable, Hashable {
-    /// Pair id to how likely the model said "the same business" was. Declined pairs are stored as -1.
+    /// Pair id to how likely the model said "the same business" was. Declined pairs are stored as -1;
+    /// a pair the model gave no answer to is -2 (asked once more next time), then -3 (not asked again).
     var judged: [String: Double] = [:]
     var changes: [TidyChange] = []
+    /// The pairs that are not asked about again: everything answered or declined, and any pair the model
+    /// has twice given no answer to (a first miss, -2, is asked once more).
+    var settled: Set<String> { Set(judged.filter { $0.value != -2 }.keys) }
     /// Pairs that are probably one business but were not combined unasked.
     var suggestions: [TidySuggestion]?
 }

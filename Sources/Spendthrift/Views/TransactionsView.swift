@@ -230,6 +230,7 @@ struct TransactionInspector: View {
     var scrolls = true
     @State private var name = ""
     @State private var note = ""
+    @State private var mailProvider = MailSearch.provider
     @State private var separating = false
 
     private var sameplace: [Transaction] { store.charges(withKey: transaction.merchantKey) }
@@ -408,11 +409,11 @@ struct TransactionInspector: View {
                             Label("Find This in My Mail", systemImage: "envelope.badge")
                         }
                         .buttonStyle(.borderless).font(.callout)
-                        .help("Opens \(MailSearch.provider.rawValue) in your browser, searching for \(Money.format(abs(t.amount))) in the days around \(t.date.formatted(.dateTime.month(.abbreviated).day().year())). Then say here what it was.")
+                        .help(MailSearch.explanation(amount: t.amount, date: t.date, provider: mailProvider))
                         Spacer()
                         Menu {
                             ForEach(MailSearch.Provider.allCases) { p in
-                                Button(p.rawValue) { MailSearch.provider = p; MailSearch.open(amount: t.amount, date: t.date) }
+                                Button(p.rawValue) { MailSearch.provider = p; mailProvider = p; MailSearch.open(amount: t.amount, date: t.date) }
                             }
                         } label: { Image(systemName: "chevron.down").font(.caption) }
                         .menuStyle(.borderlessButton).fixedSize()

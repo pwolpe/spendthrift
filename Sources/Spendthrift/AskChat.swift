@@ -456,32 +456,80 @@ enum ChatAction: Hashable {
         }
     }
 
+    /// What each payee record was before an action, so that Undo puts back exactly those records and nothing else.
+    struct Snapshot {
+        var records: [String: (name: String, category: Category?, source: MerchantInfo.Source, confirmed: Bool)] = [:]
+        /// Charges that had a category of their own, and what it was.
+        var overrides: [UUID: Category] = [:]
+    }
+    @MainActor private static var snapshots: [ChatAction: Snapshot] = [:]
+
     /// Does it, and says what was done.
     @MainActor
     func perform() -> String {
         let store = BudgetStore.shared
+        let keys = Set(store.charges(at: payee).map(\.merchantKey))
+        // The payee may have been combined or renamed since the question was put: say so, and change nothing.
+        guard !keys.isEmpty else { return "I can't find \(payee) any more (it may have been combined with another payee), so nothing was changed." }
+        var snapshot = Snapshot()
+        for key in keys {
+            if let info = store.library.merchants[key] { snapshot.records[key] = (info.name, info.category, info.source, info.confirmed) }
+        }
+        for entry in store.library.entries where keys.contains(entry.merchantKey) { if let own = entry.override { snapshot.overrides[entry.id] = own } }
         switch self {
-        case .file(let payee, let category, _):
-            for key in Set(store.charges(at: payee).map(\.merchantKey)) { store.setCategory(category, forPlace: key) }
+        case .file(_, let category, _):
+            Self.snapshots[self] = snapshot
+            for key in keys { store.setCategory(category, forPlace: key) }
             return "Done. \(payee) is filed under \(category.displayName)."
-        case .rename(let payee, let name):
-            for key in Set(store.charges(at: payee).map(\.merchantKey)) { store.renamePlace(key, to: name) }
+        case .rename(_, let name):
+            Self.snapshots[self] = snapshot
+            for key in keys { store.renamePlace(key, to: name) }
             return "Done. \(payee) is now \(name)."
-        case .combine(let payee, let into):
+        case .combine(_, let into):
+            guard !store.charges(at: into).isEmpty else { return "I can't find \(into) any more, so nothing was changed." }
             store.combinePlaces(payee, into: into)
             return "Done. \(payee) is part of \(into)."
         }
     }
 
-    /// Puts it back, where that is possible.
+    private var payee: String {
+        switch self {
+        case .file(let payee, _, _), .rename(let payee, _), .combine(let payee, _): payee
+        }
+    }
+
+    /// Puts it back, where that is possible: the records the action changed, each as it was.
     @MainActor
     var undo: (() -> String)? {
+        guard let snapshot = Self.snapshots[self] else { return nil }
         switch self {
-        case .file(let payee, _, let was?):
-            return { for key in Set(BudgetStore.shared.charges(at: payee).map(\.merchantKey)) { BudgetStore.shared.setCategory(was, forPlace: key) }; return "Put back under \(was.displayName)." }
-        case .rename(let payee, let name):
-            return { for key in Set(BudgetStore.shared.charges(at: name).map(\.merchantKey)) { BudgetStore.shared.renamePlace(key, to: payee) }; return "It is \(payee) again." }
-        default: return nil
+        case .file:
+            return {
+                let store = BudgetStore.shared
+                for (key, before) in snapshot.records where store.library.merchants[key] != nil {
+                    store.library.merchants[key]?.category = before.category
+                    store.library.merchants[key]?.source = before.source
+                    store.library.merchants[key]?.confirmed = before.confirmed
+                }
+                for i in store.library.entries.indices { if let own = snapshot.overrides[store.library.entries[i].id] { store.library.entries[i].override = own } }
+                store.changed()
+                Self.snapshots[self] = nil
+                return "Put back."
+            }
+        case .rename(let payee, _):
+            return {
+                let store = BudgetStore.shared
+                // Only the records this renamed: another payee that happened to have the new name is left alone.
+                for (key, before) in snapshot.records where store.library.merchants[key] != nil {
+                    store.library.merchants[key]?.name = before.name
+                    store.library.merchants[key]?.source = before.source
+                    store.library.merchants[key]?.confirmed = before.confirmed
+                }
+                store.changed()
+                Self.snapshots[self] = nil
+                return "It is \(payee) again."
+            }
+        case .combine: return nil
         }
     }
 }

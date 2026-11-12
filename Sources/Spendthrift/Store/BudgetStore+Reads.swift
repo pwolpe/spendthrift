@@ -33,7 +33,12 @@ extension BudgetStore {
         if !ideas.isEmpty {
             facts.append("Ways to save found: \(ideas.count), worth \(money(ideas.reduce(0) { $0 + $1.yearly })) a year together; the largest: \(ideas.prefix(2).map { "\($0.title) (\(money($0.yearly)) a year)" }.joined(separator: "; ")).")
         }
-        return ("\(Int(data.totalIncome))|\(Int(data.spending))|\(Int(data.taxes))|\(Int(data.optionalSpending))|\(ideas.count)", facts)
+        return (Self.basis(of: facts), facts)
+    }
+
+    /// Changes whenever any fact a sentence is written from changes: a hash of all of them.
+    nonisolated static func basis(of facts: [String]) -> String {
+        String(Self.hash(Data(facts.joined(separator: "\n").utf8)).prefix(16))
     }
 
     /// The sentences on file for these figures, if any. Never waits.
@@ -60,11 +65,19 @@ extension BudgetStore {
         // Every dollar amount in what was written must be one the app supplied.
         let allowed = Set(ChatAnalyst.dollarAmounts(in: given))
         guard ChatAnalyst.dollarAmounts(in: text).allSatisfy(allowed.contains) else { return nil }
-        var reads = library.reads ?? [:]
+        var reads = library.reads ?? [:], times = library.readTimes ?? [:]
         reads[key] = basis + "\t" + text
-        if reads.count > 120 { reads = Dictionary(uniqueKeysWithValues: Array(reads).suffix(90)) }
+        times[key] = .now
+        if reads.count > 120 {
+            // The oldest go (one never timed is the oldest of all), the newest ninety stay.
+            let newest = reads.keys.sorted { (times[$0] ?? .distantPast, $0) > (times[$1] ?? .distantPast, $1) }.prefix(90)
+            reads = reads.filter { newest.contains($0.key) }
+            times = times.filter { newest.contains($0.key) }
+        }
         library.reads = reads
-        changed()
+        library.readTimes = times
+        // Nothing the pages work out from the charges has changed: write it down, and do not rebuild everything.
+        savedOnly()
         return text
     }
 }

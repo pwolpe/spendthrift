@@ -74,6 +74,8 @@ struct Library: Codable {
     /// A few sentences a model wrote about a stretch, each kept with the figures it was written from
     /// ("basis<tab>text"), so it is written once and only again when those figures change.
     var reads: [String: String]?
+    /// When each of `reads` was written, so the oldest are the ones let go.
+    var readTimes: [String: Date]?
     /// Trips and events the app noticed, and which data they were worked out from.
     var stories: [Story]?
     var storiesBasis: String?
@@ -115,6 +117,7 @@ struct Library: Codable {
         spellings = try? c.decodeIfPresent([String: String].self, forKey: .spellings)
         tidy = try? c.decodeIfPresent(TidyBook.self, forKey: .tidy)
         reads = try? c.decodeIfPresent([String: String].self, forKey: .reads)
+        readTimes = try? c.decodeIfPresent([String: Date].self, forKey: .readTimes)
         stories = (try? c.decodeIfPresent(Lossy<Story>.self, forKey: .stories))?.values
         storiesBasis = try? c.decodeIfPresent(String.self, forKey: .storiesBasis)
         storyYears = try? c.decodeIfPresent([String: String].self, forKey: .storyYears)

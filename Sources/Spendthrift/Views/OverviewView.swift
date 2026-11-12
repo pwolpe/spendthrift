@@ -238,14 +238,17 @@ struct OverviewView: View {
             }
             // Every payee and category of the month, ranked: where a cut would count for most.
             TrimCard(transactions: store.spending(in: m), stretch: m.name, month: m)
+            // The ideas are always about the last twelve months, whatever month is on screen.
+            SavingsCard()
             if !DebugHooks.off("ceremony") { CeremonyCard(month: m) }
         }
     }
 
     // MARK: Month or year
 
-    /// The last twelve months first: a whole year of living, never a half-finished month or a year
-    /// that has only just begun. Then each calendar year, newest first.
+    /// The last twelve months first: twelve months ending with the newest month on file, which may
+    /// still be in progress (the figures that compare it with the year before say so). Then each
+    /// calendar year, newest first.
     private var periods: [ReportPeriod] {
         let all = ReportData.periods(for: store)
         return all.filter { $0 == .last12 } + all.filter { $0 != .last12 }
