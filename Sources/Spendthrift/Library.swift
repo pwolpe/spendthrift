@@ -99,6 +99,7 @@ struct Library: Codable {
         dismissedDownloads = (try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedDownloads)) ?? []
         dismissedInsights = (try? c.decodeIfPresent(Set<String>.self, forKey: .dismissedInsights)) ?? []
         customCategories = (try? c.decodeIfPresent(Lossy<CustomCategory>.self, forKey: .customCategories))?.values
+        spellings = try? c.decodeIfPresent([String: String].self, forKey: .spellings)
         stories = (try? c.decodeIfPresent(Lossy<Story>.self, forKey: .stories))?.values
         storiesBasis = try? c.decodeIfPresent(String.self, forKey: .storiesBasis)
         storyYears = try? c.decodeIfPresent([String: String].self, forKey: .storyYears)

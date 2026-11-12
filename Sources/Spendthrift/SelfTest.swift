@@ -192,6 +192,15 @@ enum SelfTest {
         let cents = { (entries: [LedgerEntry]) in entries.reduce(0) { $0 + Int(($1.amount * 100).rounded()) } }
         check("saved to disk (\(reloaded.entries.count) entries)", reloaded.entries.count == store.library.entries.count
               && cents(reloaded.entries) == cents(store.library.entries) && reloaded.merchants.count == store.library.merchants.count)
+        // Whatever the library holds in memory comes back from the file: a field left out of the
+        // loading code would vanish at the next launch without anyone noticing.
+        func shape(_ library: Library) -> [String: Int] {
+            guard let data = try? JSONEncoder().encode(library), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+            return object.mapValues { ($0 as? [Any])?.count ?? ($0 as? [String: Any])?.count ?? 1 }
+        }
+        let kept = shape(store.library), back = shape(reloaded)
+        let lost = kept.filter { back[$0.key] != $0.value }.keys.sorted()
+        check("every part of the library survives saving and loading" + (lost.isEmpty ? "" : " (lost: \(lost.joined(separator: ", ")))"), !kept.isEmpty && lost.isEmpty)
         print("SELFTEST SUMMARY \(passed) passed, \(failed) failed")
     }
 }
