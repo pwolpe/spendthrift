@@ -184,20 +184,6 @@ struct FlowHero: View {
         }
     }
 
-    private func headline(income: Double, used: Double, within: Bool) -> String {
-        if income <= 0.5 { return used > 0.5 ? "\(Money.format(data.spending, cents: false)) spent so far" : "Nothing here yet" }
-        return within ? "You lived within your income" : "You spent \(Money.format(-data.surplus, cents: false)) more than came in"
-    }
-
-    private func sentence(income: Double, within: Bool) -> String {
-        guard income > 0.5 else { return "No income has shown up for \(data.title) yet, so there is nothing to measure it against." }
-        let share = data.consumed / income
-        if within {
-            return "Of every dollar that came in, \(Int((share * 100).rounded()))¢ went on living, taxes and interest."
-                + (data.built > 0.5 ? " \(Money.format(data.built, cents: false)) was invested, and that is still yours." : "")
-        }
-        return "For every dollar that came in, \(Money.format(share)) went on living, taxes and interest. Investing isn't part of that."
-    }
 }
 
 /// One quiet card on the Overview: a figure, a line about it, a small picture, and a way in.
