@@ -257,6 +257,16 @@ enum DebugHooks {
             store.saveNow()
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_ASKART=<file.png>: draw one picture for the Ask pane into that file (nothing is kept), then quit.
+        if let out = env["SPENDTHRIFT_ASKART"], let tony = DailyPicture.photo {
+            var cast: [(name: String, photo: Data)] = [("Tony", tony)]
+            if let paul = DailyPicture.paulPhoto { cast.append(("Paul", paul)) }
+            let scene = AskArt.scenes.randomElement()!, style = CloudImage.styles.randomElement()!
+            print("ASKART \(style.id) | \(scene)")
+            let data = await CloudImage.draw(scene: scene, cast: cast, model: await CloudImage.bestModel(), style: style.look, receipt: nil, shape: "4:3")
+            if let data { try? data.write(to: URL(fileURLWithPath: out)); print("ASKART written \(data.count) bytes") } else { print("ASKART failed") }
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_ASKIDEAS=1: print the findings and the questions proposed from them (twice: the second set must differ), then quit.
         if env["SPENDTHRIFT_ASKIDEAS"] != nil {
             for _ in 0..<50 where store.orderRows.isEmpty { try? await Task.sleep(for: .milliseconds(100)) }

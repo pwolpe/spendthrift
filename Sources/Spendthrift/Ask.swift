@@ -358,7 +358,7 @@ struct AskView: View {
 
     private var intro: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SpotArt(name: "ask", height: 150)
+            AskArtView(height: 150)
                 .frame(maxWidth: .infinity)
             Text(CloudAI.isEnabled ? "Ask anything about where the money went. Then keep going: “and last year?”, “why?”"
                                    : "Answered right here on your Mac. Nothing is sent anywhere.")

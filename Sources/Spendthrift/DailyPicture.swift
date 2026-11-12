@@ -220,8 +220,8 @@ final class DailyPicture {
             .appendingPathComponent("Resources/\(name).jpg")
         return try? Data(contentsOf: dev)
     }
-    fileprivate static let photo: Data? = bundled("tony")
-    fileprivate static let paulPhoto: Data? = bundled("paul")
+    static let photo: Data? = bundled("tony")
+    static let paulPhoto: Data? = bundled("paul")
 
     /// Out of sight, once a day: draw the picture for what was bought on this day in an earlier year
     /// (shown the moment it is ready) and the one for tomorrow, so it is waiting. `memories` are

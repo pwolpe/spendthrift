@@ -166,6 +166,12 @@ struct ContentView: View {
             store.recapIfNewMonth()
             await store.catchUp()
         }
+        // Long after the opening: a fresh picture for the Ask pane, seen the next time the app opens.
+        .task {
+            try? await Task.sleep(for: .seconds(20))
+            guard !Task.isCancelled else { return }
+            await AskArt.shared.prepareNext()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.refreshDownloads()
             store.retrySorting()

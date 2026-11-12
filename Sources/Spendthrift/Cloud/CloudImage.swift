@@ -150,7 +150,23 @@ enum CloudImage {
 
     /// Draws the scene with the real photos as the reference for each face. Likeness comes first:
     /// the head is a faithful, detailed caricature portrait, and only the rest takes on the style.
-    static func draw(scene: String, cast: [(name: String, photo: Data)], model: String, style: String, receipt: Receipt) async -> Data? {
+    private static func receiptLines(_ receipt: Receipt, alone: Bool) -> String {
+        """
+        The receipt: \(alone ? "he holds" : "one of them holds") a paper till receipt for this purchase, as the scene \
+        describes. It is a real prop in the picture, lit and shaded like everything else, in the hand of a person who \
+        is doing something, not pasted on top. It is large (about a third of the picture's height), flat, facing \
+        the viewer and unobstructed, with crisp black printed type on white paper. It reads exactly this, on three \
+        lines, spelled exactly, and nothing else:
+        \(receipt.heading)
+        \(receipt.what)
+        TOTAL \(receipt.total)
+        The TOTAL line is the largest and boldest. Every character must be sharp and correct: check the digits.
+        """
+    }
+
+    /// With no receipt, the picture is a plain scene (the Ask pane's portrait); `shape` is the frame.
+    static func draw(scene: String, cast: [(name: String, photo: Data)], model: String, style: String, receipt: Receipt?,
+                     shape: String = "21:9") async -> Data? {
         guard let key = CloudKey.load(), !cast.isEmpty else { return nil }
         let intro = cast.count == 1
             ? "The attached photo is \(cast[0].name), a real person. Make a picture starring him."
@@ -167,20 +183,12 @@ enum CloudImage {
         Everything else (the body, costume, props, other characters and the setting) is drawn in this style: \(style). \
         The head is finished in the same medium so it belongs in the picture, but it keeps the full detail and true \
         likeness of the photo.
-        The scene, a Walter Mitty daydream: \(scene)
-        The receipt: \(cast.count == 1 ? "he holds" : "one of them holds") a paper till receipt for this purchase, as the scene \
-        describes. It is a real prop in the picture, lit and shaded like everything else, in the hand of a person who \
-        is doing something, not pasted on top. It is large (about a third of the picture's height), flat, facing \
-        the viewer and unobstructed, with crisp black printed type on white paper. It reads exactly this, on three \
-        lines, spelled exactly, and nothing else:
-        \(receipt.heading)
-        \(receipt.what)
-        TOTAL \(receipt.total)
-        The TOTAL line is the largest and boldest. Every character must be sharp and correct: check the digits.
-        Very wide cinematic landscape picture (21:9). \(star): in the foreground, shown from about the waist up or \
+        \(receipt == nil ? "The scene" : "The scene, a Walter Mitty daydream"): \(scene)
+        \(receipt.map { receiptLines($0, alone: cast.count == 1) } ?? "")
+        \(shape == "21:9" ? "Very wide cinematic landscape picture (21:9)." : "A landscape picture (\(shape)).") \(star): in the foreground, shown from about the waist up or \
         closer so the face is large, full of joy and swagger. Keep the bottom edge of the picture free of anything \
-        important. Playful, full of funny details, the kind of picture that makes someone grin. Apart from the \
-        receipt, no words, letters, numbers, logos, captions or watermarks anywhere.
+        important. Playful, full of funny details, the kind of picture that makes someone grin. \(receipt == nil ? "No" : "Apart from the receipt, no") \
+        words, letters, numbers, logos, captions or watermarks anywhere.
         """
         var content: [[String: Any]] = [["type": "text", "text": prompt]]
         for member in cast {
@@ -189,7 +197,7 @@ enum CloudImage {
         let body: [String: Any] = [
             "model": model,
             "modalities": ["image", "text"],
-            "image_config": ["aspect_ratio": "21:9"],
+            "image_config": ["aspect_ratio": shape],
             "messages": [["role": "user", "content": content]],
             "usage": ["include": true],
         ]
