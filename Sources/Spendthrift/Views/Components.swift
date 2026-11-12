@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 import AppKit
 
 // MARK: - Look & feel
@@ -262,23 +263,6 @@ struct CloudTroubleBanner: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(Theme.caution.opacity(0.09), in: .rect(cornerRadius: 12, style: .continuous))
-        }
-    }
-}
-
-/// Tony and Paul together: the app's two stars, wherever it introduces itself.
-struct CastAvatars: View {
-    var size: CGFloat = 38
-
-    var body: some View {
-        HStack(spacing: -size * 0.24) {
-            TonyAvatar(size: size)
-            if let paul = DailyPicture.shared.paulAvatar {
-                Image(nsImage: paul).resizable().aspectRatio(contentMode: .fill)
-                    .frame(width: size, height: size)
-                    .clipShape(Circle())
-                    .faceRing(size)
-            }
         }
     }
 }
@@ -598,6 +582,87 @@ private struct DownloadRow: View {
             } else {
                 Button("Add") { store.importFiles([url]) }.buttonStyle(.bordered)
             }
+        }
+    }
+}
+
+
+// MARK: - Pieces several pages share
+
+/// Earlier and later, around the name of the stretch on screen. A nil step is the end of the road.
+struct StretchStepper: View {
+    let title: String
+    let older: (() -> Void)?
+    let newer: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button { withAnimation(.snappy(duration: 0.2)) { older?() } } label: { Image(systemName: "chevron.left").frame(width: 20, height: 20) }
+                .disabled(older == nil).help("Earlier")
+            Text(title).font(.headline).frame(minWidth: 130)
+            Button { withAnimation(.snappy(duration: 0.2)) { newer?() } } label: { Image(systemName: "chevron.right").frame(width: 20, height: 20) }
+                .disabled(newer == nil).help("Later")
+        }
+        .buttonStyle(.glass)
+        .controlSize(.large)
+    }
+}
+
+extension View {
+    /// Makes the bars of a chart respond to the pointer by their label: anywhere in a bar's column
+    /// counts, so a short bar is as easy to hit as a tall one.
+    func barPointer(_ proxy: ChartProxy, hover: ((String?) -> Void)? = nil, tap: @escaping (String) -> Void) -> some View {
+        GeometryReader { geo in
+            let label = { (point: CGPoint) -> String? in
+                proxy.plotFrame.map { geo[$0] }.flatMap { proxy.value(atX: point.x - $0.origin.x) }
+            }
+            Rectangle().fill(.clear).contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    guard let hover else { return }
+                    if case .active(let point) = phase { hover(label(point)) } else { hover(nil) }
+                }
+                .onTapGesture { point in if let picked = label(point) { tap(picked) } }
+        }
+    }
+}
+
+/// A payee on one line: its icon, its name, a word about it, and an amount. Opens something when given a way to.
+struct PayeeLine: View {
+    let name: String
+    let category: Category
+    var detail: String?
+    let amount: Double
+    var action: (() -> Void)?
+
+    var body: some View {
+        let row = HStack(spacing: 12) {
+            MerchantIcon(name: name, category: category, size: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.body.weight(.medium)).lineLimit(1)
+                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+            }
+            Spacer()
+            Text(Money.format(amount)).monospacedDigit()
+        }
+        .contentShape(Rectangle())
+        if let action { Button(action: action) { row }.buttonStyle(.plain) } else { row }
+    }
+}
+
+/// The figure a page is about, large, under a word saying what it is.
+struct BigFigure: View {
+    let title: String
+    let amount: Double
+    var subtitle: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.title3.weight(.medium)).foregroundStyle(.secondary)
+            Text(Money.format(amount, cents: false))
+                .font(.system(size: 54, weight: .bold, design: .rounded))
+                .contentTransition(.numericText(value: amount))
+                .monospacedDigit()
+            if let subtitle { Text(subtitle).font(.callout).foregroundStyle(.secondary) }
         }
     }
 }

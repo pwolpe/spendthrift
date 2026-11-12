@@ -142,7 +142,7 @@ struct ReportData {
 
         // Places.
         var places: [Place] = []
-        for (name, list) in Dictionary(grouping: spending, by: \.merchantDisplay) {
+        for (name, list) in Dictionary(grouping: spending, by: \.merchant) {
             let sum = list.reduce(0) { $0 + $1.amount }
             if sum > 0 { places.append(Place(name: name, category: list[0].category, total: sum, count: list.count)) }
         }
@@ -157,14 +157,14 @@ struct ReportData {
         var seen = Set<String>()
         var big: [Transaction] = []
         for t in spending.filter({ $0.amount > 0 }).sorted(by: { $0.amount > $1.amount })
-        where !recurring.contains(t.merchantDisplay) && seen.insert(t.merchantDisplay).inserted {
+        where !recurring.contains(t.merchant) && seen.insert(t.merchant).inserted {
             big.append(t)
             if big.count == 8 { break }
         }
         biggest = big
 
         var sources: [Source] = []
-        for (name, list) in Dictionary(grouping: income, by: \.merchantDisplay) {
+        for (name, list) in Dictionary(grouping: income, by: \.merchant) {
             sources.append(Source(name: name, total: list.reduce(0) { $0 + abs($1.amount) }))
         }
         incomeSources = sources.sorted { $0.total > $1.total }
@@ -184,52 +184,6 @@ struct ReportData {
 }
 
 // MARK: - Screen
-
-struct ReportView: View {
-    @Environment(BudgetStore.self) private var store
-    @State private var period: ReportPeriod?
-
-    private var periods: [ReportPeriod] { ReportData.periods(for: store) }
-    private var current: ReportPeriod? { period.flatMap { periods.contains($0) ? $0 : nil } ?? periods.first }
-
-    var body: some View {
-        Group {
-            if let current {
-                let data = ReportData(store: store, period: current)
-                ScrollView {
-                    ReportContent(data: data, interactive: true)
-                        .padding(28)
-                        .frame(maxWidth: 1100)
-                        .frame(maxWidth: .infinity)
-                }
-                .toolbar { toolbar(data) }
-            } else {
-                ContentUnavailableView("Nothing to report yet", systemImage: "chart.bar.xaxis",
-                                       description: Text("Add a statement and your year in review appears here."))
-            }
-        }
-        .navigationTitle("Year in Review")
-    }
-
-    @ToolbarContentBuilder
-    private func toolbar(_ data: ReportData) -> some ToolbarContent {
-        if periods.count > 1 {
-            ToolbarItem(placement: .principal) {
-                Picker("Period", selection: Binding(get: { current ?? .last12 }, set: { period = $0 })) {
-                    ForEach(periods) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
-            }
-        }
-        ToolbarItem {
-            Button { ReportExporter.savePDF(data: data, store: store) } label: {
-                Label("Save as PDF", systemImage: "square.and.arrow.down")
-            }
-            .help("Save this report as a PDF to print or share")
-        }
-    }
-}
 
 // MARK: - Content (also rendered straight into the PDF)
 
@@ -589,7 +543,7 @@ private struct BiggestCard: View {
                     HStack(spacing: 12) {
                         MerchantIcon(name: t.merchant, category: t.category, size: 28)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(t.merchantDisplay).font(.body.weight(.medium)).lineLimit(1)
+                            Text(t.merchant).font(.body.weight(.medium)).lineLimit(1)
                             Text(t.date.formatted(.dateTime.month(.wide).day()))
                                 .font(.caption).foregroundStyle(.secondary)
                         }

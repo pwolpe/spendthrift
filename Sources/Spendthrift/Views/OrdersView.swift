@@ -189,10 +189,10 @@ struct OrdersView: View {
             switch store.orderScope {
             case .all: EmptyView()
             case .year(let year):
-                stepper(String(year), older: years.last { $0 < year }.map { y in { store.orderScope = .year(y) } },
+                StretchStepper(title: String(year), older: years.last { $0 < year }.map { y in { store.orderScope = .year(y) } },
                         newer: years.first { $0 > year }.map { y in { store.orderScope = .year(y) } })
             case .month(let month):
-                stepper(month.title, older: months.last { $0 < month }.map { m in { store.orderScope = .month(m) } },
+                StretchStepper(title: month.title, older: months.last { $0 < month }.map { m in { store.orderScope = .month(m) } },
                         newer: months.first { $0 > month }.map { m in { store.orderScope = .month(m) } })
             }
             Spacer()
@@ -204,16 +204,6 @@ struct OrdersView: View {
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
             }
-        }
-    }
-
-    private func stepper(_ title: String, older: (() -> Void)?, newer: (() -> Void)?) -> some View {
-        HStack(spacing: 4) {
-            Button { withAnimation(.snappy(duration: 0.2)) { older?() } } label: { Image(systemName: "chevron.left").frame(width: 18, height: 18) }
-                .disabled(older == nil).help("Earlier")
-            Text(title).font(.headline).frame(minWidth: 120)
-            Button { withAnimation(.snappy(duration: 0.2)) { newer?() } } label: { Image(systemName: "chevron.right").frame(width: 18, height: 18) }
-                .disabled(newer == nil).help("Later")
         }
     }
 
@@ -419,8 +409,8 @@ struct OrdersView: View {
                     AxisValueLabel { if let y = value.as(String.self), bars.count <= 14 || (Int(y) ?? 0) % 2 == 0 { Text("’" + y.suffix(2)) } }
                 } }
                 // Click a year's bar to step into that year.
-                .chartOverlay { proxy in barTaps(proxy) { label in
-                    if let year = Int(label), bars.contains(where: { $0.year == year }) { store.orderScope = .year(year) }
+                .chartOverlay { proxy in Color.clear.barPointer(proxy) { label in
+                    if let year = Int(label), bars.contains(where: { $0.year == year }) { withAnimation(.snappy(duration: 0.25)) { store.orderScope = .year(year) } }
                 } }
                 .help("Click a bar to open that year")
             }
@@ -435,22 +425,11 @@ struct OrdersView: View {
                 }
                 .chartXScale(domain: (1...12).map { Month(year: year, month: $0).shortName })
                 // Click a month's bar to step into that month.
-                .chartOverlay { proxy in barTaps(proxy) { label in
-                    if let month = months.first(where: { $0.shortName == label }), (byMonth[month] ?? 0) > 0 { store.orderScope = .month(month) }
+                .chartOverlay { proxy in Color.clear.barPointer(proxy) { label in
+                    if let month = months.first(where: { $0.shortName == label }), (byMonth[month] ?? 0) > 0 { withAnimation(.snappy(duration: 0.25)) { store.orderScope = .month(month) } }
                 } }
                 .help("Click a bar to open that month")
             }
-        }
-    }
-
-    /// Turns a click on a bar chart into the label of the bar under it.
-    private func barTaps(_ proxy: ChartProxy, _ act: @escaping (String) -> Void) -> some View {
-        GeometryReader { geo in
-            Rectangle().fill(.clear).contentShape(Rectangle())
-                .onTapGesture { point in
-                    guard let frame = proxy.plotFrame.map({ geo[$0] }), let label: String = proxy.value(atX: point.x - frame.origin.x) else { return }
-                    withAnimation(.snappy(duration: 0.25)) { act(label) }
-                }
         }
     }
 

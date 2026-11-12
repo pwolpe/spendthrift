@@ -38,11 +38,4 @@ enum AISchemas {
         return try? GenerationSchema(root: root, dependencies: [])
     }
 
-    static let dailyPlan: GenerationSchema? = {
-        let root = DynamicGenerationSchema(name: "Plan", properties: [
-            string("prop", "One simple object a person can hold up in one hand"),
-            string("backdrop", "An empty place, with no people"),
-        ])
-        return try? GenerationSchema(root: root, dependencies: [])
-    }()
 }

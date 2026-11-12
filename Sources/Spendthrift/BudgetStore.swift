@@ -28,6 +28,10 @@ final class BudgetStore {
 
     // UI state
     var selection: SidebarItem? = .overview { didSet { if placeFocus != nil { placeFocus = nil }; if chargesFocus != nil { chargesFocus = nil }; if overviewDetail != nil { overviewDetail = nil } } }
+    /// The month and the year the Overview is showing (nil: the latest). Kept here, not in the page,
+    /// so stepping into a charge or a payee and back returns to the same stretch.
+    var overviewMonth: Month?
+    var overviewPeriod: ReportPeriod?
     /// Which of the Overview's cards has been stepped into, if any. Nil is the summary itself.
     var overviewDetail: OverviewDetail?
     enum OverviewDetail: String { case flow, spending, income, investing }
@@ -261,7 +265,7 @@ final class BudgetStore {
             if let kind = orderKind { parts.append("only the kind \(kind)") }
             if !orderSearch.trimmingCharacters(in: .whitespaces).isEmpty { parts.append("searched for “\(orderSearch)”") }
             return parts.joined(separator: ", ")
-        case .overview, .report, .ask:
+        case .overview:
             switch overviewDetail {
             case .spending: return "their everyday spending, by category and month"
             case .income: return "their income, by who paid it"
@@ -269,7 +273,6 @@ final class BudgetStore {
             case .flow: return "all their money in and out (income, spending, taxes, investing)"
             case nil: return "the Overview: what came in and what it did, with spending, income and investing"
             }
-        case .cashflow: return "the Cash Flow page (income, spending, investing and taxes)"
         case .stories: return "the Trips & Events page"
         case .places: return "the list of payees"
         case .transactions: return "the list of all transactions"
@@ -1311,13 +1314,6 @@ final class BudgetStore {
         withAnimation(.snappy) { changed() }
     }
 
-    func showDiscovery(_ discovery: Discovery) {
-        var filter = TransactionFilter()
-        filter.ids = Set(discovery.entryIDs)
-        filter.title = discovery.title
-        showCharges(filter)
-    }
-
     private func findDiscoveriesIfNeeded() async {
         guard CloudAI.isEnabled, !isFindingDiscoveries, !isImporting, !isSuggesting, let last = months.last else { return }
         // The last twelve months of real spending: recent enough to act on. Only a change inside
@@ -1720,6 +1716,11 @@ final class BudgetStore {
     /// Everything that counted as spending in one month: what a bar on a chart stands for.
     func showSpending(in month: Month) {
         showCharges(TransactionFilter(ids: Set(spending(in: month).map(\.id)), title: "Spending in \(month.title)"))
+    }
+
+    /// The same, for a payee known by its key.
+    func showPlace(key: String) {
+        if let name = place(key)?.name { showPlace(name) }
     }
 
     func showPlace(_ name: String) {
@@ -2666,6 +2667,16 @@ final class BudgetStore {
 
     func insights(for month: Month) -> [Insight] {
         InsightEngine.insights(for: month, in: transactions).filter { !library.dismissedInsights.contains($0.id) }
+    }
+
+    /// Opens what an insight is about: its charges, its payee, or its category for the month.
+    func show(_ insight: Insight) {
+        switch insight.target {
+        case .place(let name)?: showPlace(name)
+        case .charges(let ids, let title)?: showCharges(TransactionFilter(ids: ids, title: title))
+        case .category(let category, let month)?: showCharges(TransactionFilter(category: category, month: month))
+        case nil: break
+        }
     }
 
     func dismissInsight(_ insight: Insight) {

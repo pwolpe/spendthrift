@@ -283,7 +283,7 @@ enum DebugHooks {
             await snap("41-onthisday", outDir, width: 900) { OnThisDayLine().padding(20) }
             if let memory = store.onThisDay() { print("ONTHISDAY \(memory.years)y \(memory.charge.merchant) \(memory.charge.amount)") } else { print("ONTHISDAY none") }
             if let period = ReportData.periods(for: store).first {
-                await snap("42-verdict", outDir, width: 900) { VStack(spacing: 16) { VerdictCard(data: CashFlowData(store: store, period: period), compact: true); VerdictCard(data: CashFlowData(store: store, period: period)) }.padding(20) }
+                await snap("42-verdict", outDir, width: 900) { FlowHero(data: CashFlowData(store: store, period: period)).padding(20) }
             }
             if let card = PictureSharing.card(DailyPicture.shared), let data = IconRenderer.png(card) { try? data.write(to: outDir.appendingPathComponent("43-share.png")) }
             print("TRIPS \(store.tripHighlights().count): " + store.tripHighlights().prefix(6).map { "\($0.trip ?? "") / \($0.merchant) \($0.amount)" }.joined(separator: "; "))

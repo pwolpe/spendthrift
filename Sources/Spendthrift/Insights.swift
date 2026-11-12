@@ -9,6 +9,14 @@ struct Insight: Identifiable, Hashable {
     let kind: Kind
     let title: String
     let detail: String
+    /// What a click on it opens: the charges, payee or category it is about.
+    var target: Target?
+
+    enum Target: Hashable {
+        case place(String)
+        case charges(Set<UUID>, title: String)
+        case category(Category, Month)
+    }
 
     var symbol: String {
         switch kind {
@@ -50,7 +58,7 @@ enum InsightEngine {
     static func subscriptions(asOf month: Month, in all: [Transaction]) -> [Subscription] {
         let window = Set((0..<4).map { month.adding(-$0) })
         let spending = all.filter { $0.countsAsSpending && $0.amount > 0 && window.contains(Month(date: $0.date)) }
-        return Dictionary(grouping: spending, by: \.merchantDisplay).compactMap { name, txns in
+        return Dictionary(grouping: spending, by: \.merchant).compactMap { name, txns in
             let byMonth = monthCharges(txns)
             guard byMonth.count >= 2, byMonth.values.allSatisfy({ $0.count == 1 }) else { return nil }
             let amounts = txns.map(\.amount).sorted()
@@ -74,13 +82,13 @@ enum InsightEngine {
 
         // New subscriptions & price increases
         for sub in subscriptions(asOf: month, in: all) {
-            let history = spending.filter { $0.merchantDisplay == sub.merchant }.sorted { $0.date < $1.date }
+            let history = spending.filter { $0.merchant == sub.merchant }.sorted { $0.date < $1.date }
             guard let first = history.first else { continue }
             let firstMonth = Month(date: first.date)
             if firstMonth >= month.adding(-1), firstMonth > firstDataMonth {
                 out.append(Insight(id: "sub-\(sub.merchant)-\(firstMonth.key)", kind: .newSubscription,
                                    title: "New subscription: \(sub.merchant)",
-                                   detail: "\(Money.format(sub.monthlyAmount)) a month, starting \(firstMonth.name)."))
+                                   detail: "\(Money.format(sub.monthlyAmount)) a month, starting \(firstMonth.name).", target: .place(sub.merchant)))
             }
             let inMonth = history.filter { Month(date: $0.date) == month }
             let before = history.filter { Month(date: $0.date) < month }
@@ -88,21 +96,22 @@ enum InsightEngine {
                now.amount > prev.amount + 0.5, now.amount / prev.amount >= 1.03, now.amount / prev.amount <= 1.5 {
                 out.append(Insight(id: "price-\(sub.merchant)-\(month.key)", kind: .priceIncrease,
                                    title: "\(sub.merchant) went up",
-                                   detail: "From \(Money.format(prev.amount)) to \(Money.format(now.amount)) a month."))
+                                   detail: "From \(Money.format(prev.amount)) to \(Money.format(now.amount)) a month.", target: .place(sub.merchant)))
             }
         }
 
         // Possible double charges
         let sameDay = Dictionary(grouping: thisMonth.filter { $0.amount >= 5 }) {
-            "\($0.merchantDisplay)|\($0.account)|\(String(format: "%.2f", $0.amount))"
+            "\($0.merchant)|\($0.account)|\(String(format: "%.2f", $0.amount))"
         }
         for (_, group) in sameDay where group.count >= 2 {
             let sorted = group.sorted { $0.date < $1.date }
             for (a, b) in zip(sorted, sorted.dropFirst())
             where Calendar.current.dateComponents([.day], from: a.date, to: b.date).day ?? 99 <= 1 {
-                out.append(Insight(id: "dup-\(a.merchantDisplay)-\(DateParsing.iso.string(from: a.date))-\(a.amount)", kind: .duplicate,
-                                   title: "Possible double charge at \(a.merchantDisplay)",
-                                   detail: "Two charges of \(Money.format(a.amount)) on \(a.date.formatted(.dateTime.month(.abbreviated).day())). Worth a quick look."))
+                out.append(Insight(id: "dup-\(a.merchant)-\(DateParsing.iso.string(from: a.date))-\(a.amount)", kind: .duplicate,
+                                   title: "Possible double charge at \(a.merchant)",
+                                   detail: "Two charges of \(Money.format(a.amount)) on \(a.date.formatted(.dateTime.month(.abbreviated).day())). Worth a quick look.",
+                                   target: .charges([a.id, b.id], title: "Possible double charge at \(a.merchant)")))
                 break
             }
         }
@@ -117,9 +126,10 @@ enum InsightEngine {
             return t.amount >= past[past.count / 2] * 4 && t.amount >= (past.last ?? 0) * 0.9
         }
         for t in unusual.sorted(by: { $0.amount > $1.amount }).prefix(3) {
-            out.append(Insight(id: "big-\(t.merchantDisplay)-\(DateParsing.iso.string(from: t.date))-\(t.amount)", kind: .unusual,
-                               title: "Bigger than usual: \(t.merchantDisplay)",
-                               detail: "\(Money.format(t.amount)) on \(t.date.formatted(.dateTime.month(.abbreviated).day())), more than a typical \(t.category.displayName) purchase."))
+            out.append(Insight(id: "big-\(t.merchant)-\(DateParsing.iso.string(from: t.date))-\(t.amount)", kind: .unusual,
+                               title: "Bigger than usual: \(t.merchant)",
+                               detail: "\(Money.format(t.amount)) on \(t.date.formatted(.dateTime.month(.abbreviated).day())), more than a typical \(t.category.displayName) purchase.",
+                               target: .charges([t.id], title: "Bigger than usual: \(t.merchant)")))
         }
 
         // Category trends vs. the previous 3 months
@@ -134,11 +144,11 @@ enum InsightEngine {
                 if diff >= 75, usual > 0, diff / usual >= 0.3 {
                     out.append(Insight(id: "up-\(category.rawValue)-\(month.key)", kind: .categoryUp,
                                        title: "\(category.displayName) is up",
-                                       detail: "\(Money.format(now, cents: false)) in \(month.name), about \(Money.format(diff, cents: false)) more than usual."))
+                                       detail: "\(Money.format(now, cents: false)) in \(month.name), about \(Money.format(diff, cents: false)) more than usual.", target: .category(category, month)))
                 } else if monthIsComplete, -diff >= 75, usual > 0, -diff / usual >= 0.3 {
                     out.append(Insight(id: "down-\(category.rawValue)-\(month.key)", kind: .categoryDown,
                                        title: "Nice: \(category.displayName) is down",
-                                       detail: "\(Money.format(now, cents: false)) in \(month.name), \(Money.format(-diff, cents: false)) less than usual."))
+                                       detail: "\(Money.format(now, cents: false)) in \(month.name), \(Money.format(-diff, cents: false)) less than usual.", target: .category(category, month)))
                 }
             }
         }
@@ -184,7 +194,7 @@ enum AwardEngine {
 
         // Places
         var places: [(name: String, total: Double, count: Int, cat: Category)] = []
-        for (name, txns) in Dictionary(grouping: thisMonth, by: \.merchantDisplay) {
+        for (name, txns) in Dictionary(grouping: thisMonth, by: \.merchant) {
             places.append((name, txns.reduce(0.0) { $0 + $1.amount }, txns.count, txns[0].category))
         }
         if let venue = places.max(by: { $0.total < $1.total }), venue.total > 0 {
@@ -201,7 +211,7 @@ enum AwardEngine {
         // Newcomer: first-ever appearance this month (only if we have earlier history).
         let firstDataMonth = spending.map { Month(date: $0.date) }.min() ?? month
         if firstDataMonth < month {
-            let seenBefore = Set(spending.filter { Month(date: $0.date) < month }.map(\.merchantDisplay))
+            let seenBefore = Set(spending.filter { Month(date: $0.date) < month }.map(\.merchant))
             if let newcomer = places.filter({ !seenBefore.contains($0.name) && !usedWinners.contains($0.name) && $0.total >= 10 })
                 .max(by: { $0.total < $1.total }) {
                 awards.append(Award(title: "New this month", winner: newcomer.name, value: Money.format(newcomer.total),
@@ -229,7 +239,7 @@ enum AwardEngine {
         // Lifetime achievement: the longest-running regular charge.
         let subs = InsightEngine.subscriptions(asOf: month, in: all)
         let lifetime = subs.map { sub -> (Subscription, Int) in
-            let months = Set(spending.filter { $0.merchantDisplay == sub.merchant }.map { Month(date: $0.date) }).count
+            let months = Set(spending.filter { $0.merchant == sub.merchant }.map { Month(date: $0.date) }).count
             return (sub, months)
         }.filter { !usedWinners.contains($0.0.merchant) }.max { $0.1 < $1.1 }
         if let (sub, months) = lifetime, months >= 3 {
@@ -263,36 +273,21 @@ enum RecapWriter {
             let allowed = Set(facts.joined(separator: " ").components(separatedBy: digits).filter { $0.count >= 2 })
             return !text.isEmpty && text.components(separatedBy: digits).filter { $0.count >= 2 }.allSatisfy(allowed.contains)
         }
-        if let written = await CloudWriter.line(system: """
+        let voice = """
             You are the voice of Spendthrift, a personal spending app with the manner of a dry, fond bookkeeper who is quietly amused by where the money goes. Speak to the person as \"you\"; never name them or guess their job.
             Write a 2-sentence note on this month using ONLY the facts given. Copy dollar amounts exactly as written.
             Deadpan and warm, a little wry, specific, never scolding and never gushing. No awards or theater language. No lists, no quotes, no exclamation marks.
-            """, facts: facts.joined(separator: "\n"), maxTokens: 3_000, temperature: 0.8), numbersAreReal(written) {
-            cache[key] = written
-            return written
+            """
+        let prompt = facts.joined(separator: "\n")
+        // The cloud model when there is one, Apple's on the Mac otherwise; the same brief and the same check for both.
+        var written = await CloudWriter.line(system: voice, facts: prompt, maxTokens: 3_000, temperature: 0.8)
+        if written == nil, SystemLanguageModel.default.isAvailable {
+            let session = LanguageModelSession(instructions: voice)
+            written = await Timeout.run(45) { try? await session.respond(to: prompt, options: GenerationOptions(temperature: 0.7)).content }
         }
-        guard SystemLanguageModel.default.isAvailable else { return fallback }
-
-        let session = LanguageModelSession(instructions: """
-        You are the voice of Spendthrift, a personal spending app with the manner of a dry, fond bookkeeper who is quietly amused by where the money goes. Speak to the person as \"you\"; never name them or guess their job.
-        Write a 2-sentence note on this month using ONLY the facts given. Copy dollar amounts exactly as written.
-        Deadpan and warm, a little wry, specific, never scolding and never gushing. No awards or theater language. No lists, no quotes, no exclamation marks.
-        """)
-        do {
-            let prompt = facts.joined(separator: "\n")
-            guard let answer = await Timeout.run(45, { try? await session.respond(to: prompt, options: GenerationOptions(temperature: 0.7)).content }) else { throw CancellationError() }
-            let reply = (content: answer, ())
-            let text = reply.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Guard against the model inventing numbers.
-            let digits = CharacterSet(charactersIn: "0123456789,").inverted
-            let allowed = Set(facts.joined(separator: " ").components(separatedBy: digits).filter { $0.count >= 2 })
-            let used = text.components(separatedBy: digits).filter { $0.count >= 2 }
-            guard !text.isEmpty, used.allSatisfy({ allowed.contains($0) }) else { return fallback }
-            cache[key] = text
-            return text
-        } catch {
-            return fallback
-        }
+        guard let text = written?.trimmingCharacters(in: .whitespacesAndNewlines), numbersAreReal(text) else { return fallback }
+        cache[key] = text
+        return text
     }
 
     static func fallbackText(month: Month, total: Double, previous: Double?, awards: [Award]) -> String {
@@ -336,7 +331,7 @@ struct CeremonyCard: View {
                                 .font(.headline)
                             VStack(alignment: .leading, spacing: 12) {
                                 ForEach(insights) { insight in
-                                    InsightRow(insight: insight) { store.dismissInsight(insight) }
+                                    InsightRow(insight: insight, open: { store.show(insight) }) { store.dismissInsight(insight) }
                                         .transition(.opacity)
                                 }
                             }
@@ -381,20 +376,33 @@ struct CeremonyCard: View {
 
 private struct InsightRow: View {
     let insight: Insight
+    let open: () -> Void
     let dismiss: () -> Void
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: insight.symbol)
-                .font(.system(size: 26))
-                .foregroundStyle(insight.color.gradient)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(insight.title).font(.body.weight(.semibold))
-                Text(insight.detail).font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            // The row itself opens what it is about; the cross beside it puts it away.
+            Button(action: open) {
+                HStack(spacing: 12) {
+                    Image(systemName: insight.symbol)
+                        .font(.system(size: 26))
+                        .foregroundStyle(insight.color.gradient)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(insight.title).font(.body.weight(.semibold))
+                        Text(insight.detail).font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    if insight.target != nil {
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                            .opacity(hovering ? 1 : 0)
+                    }
+                }
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 0)
+            .buttonStyle(.plain)
+            .disabled(insight.target == nil)
             Button(action: dismiss) {
                 Image(systemName: "xmark.circle.fill").font(.title3)
             }
@@ -403,7 +411,8 @@ private struct InsightRow: View {
             .opacity(hovering ? 1 : 0)
             .help("Got it")
         }
-        .contentShape(Rectangle())
+        .padding(.vertical, 4).padding(.horizontal, 6)
+        .background(Color.primary.opacity(hovering && insight.target != nil ? 0.05 : 0), in: .rect(cornerRadius: 10, style: .continuous))
         .onHover { hovering = $0 }
     }
 }

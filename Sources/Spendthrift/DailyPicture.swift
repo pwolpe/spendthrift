@@ -74,8 +74,6 @@ final class DailyPicture {
     }()
 
     private var todayKey: String { DateParsing.iso.string(from: .now) }
-    private var imageFile: URL { folder.appendingPathComponent("\(todayKey).png") }
-    private var captionFile: URL { folder.appendingPathComponent("\(todayKey).txt") }
     private var lastHighlights: [Highlight] = []
     private var lastTrips: [Highlight] = []
     private var lastMemories: [Highlight] = []
@@ -85,21 +83,6 @@ final class DailyPicture {
         guard !preparedThisLaunch, !isGenerating, !lastHighlights.isEmpty else { return }
         let highlights = lastHighlights, trips = lastTrips, memories = lastMemories
         Task { await prepareNext(highlights: highlights, trips: trips, memories: memories) }
-    }
-
-    /// The caricature as a PNG no larger than 1024 pixels, to send along as the reference for a drawing.
-    static func referencePNG(_ image: NSImage) -> Data? {
-        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        let scale = min(1, 1024 / CGFloat(max(cg.width, cg.height)))
-        let width = Int(CGFloat(cg.width) * scale), height = Int(CGFloat(cg.height) * scale)
-        guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
-        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        ctx.interpolationQuality = .high
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let scaled = ctx.makeImage() else { return nil }
-        return NSBitmapImageRep(cgImage: scaled).representation(using: .png, properties: [:])
     }
 
     // MARK: What to feature

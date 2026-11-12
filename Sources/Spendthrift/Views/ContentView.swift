@@ -20,7 +20,7 @@ struct ContentView: View {
                         ChargesView(filter: filter)
                     } else {
                         switch store.selection ?? .overview {
-                        case .overview, .report, .ask, .cashflow: OverviewView()
+                        case .overview: OverviewView()
                         case .stories: StoriesView()
                         case .places: PlacesView()
                         case .orders: OrdersView()
@@ -151,7 +151,6 @@ struct SidebarView: View {
         // The rows draw their own selection, in the app's ink blue rather than the Mac's accent color.
         let current: SidebarItem = {
             switch store.selection ?? .overview {
-            case .report, .ask, .cashflow: return .overview
             case .categories: return .accounts
             case let other: return other
             }

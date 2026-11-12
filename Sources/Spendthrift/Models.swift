@@ -176,8 +176,6 @@ struct LedgerEntry: Codable, Identifiable, Hashable {
     /// The statement file this line was read from (a `SourceFile` id), when the original was kept.
     var sourceID: String?
 
-    var dedupeKey: String { "\(date)|\(description.uppercased())|\(String(format: "%.2f", amount))" }
-
     init(id: UUID = UUID(), accountID: UUID, date: String, description: String, amount: Double,
          bankCategory: String? = nil, merchantKey: String, override: Category? = nil) {
         self.id = id; self.accountID = accountID; self.date = date; self.description = description
@@ -352,7 +350,6 @@ struct Transaction: Identifiable, Hashable {
     /// A deposit nobody has labelled yet is left out too: it's far more likely income or a transfer than a refund.
     var countsAsSpending: Bool { category.isSpending && !isUnsortedDeposit }
     var isUnsortedDeposit: Bool { isUnknown && amount < 0 }
-    var merchantDisplay: String { merchant }
     var categorySortKey: String { category.displayName }
 }
 
@@ -510,7 +507,7 @@ struct Toast: Identifiable, Equatable {
 }
 
 enum SidebarItem: Hashable {
-    case overview, cashflow, stories, places, orders, apart, transactions, statements, report, ask, review, categories, accounts
+    case overview, stories, places, orders, apart, transactions, statements, review, categories, accounts
 }
 
 /// A charge whose original statement is being shown.

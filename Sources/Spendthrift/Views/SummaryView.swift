@@ -27,8 +27,7 @@ struct FlowHero: View {
         let scale = max(income, used, 1)
         let color: Color = within ? Theme.good : Theme.spent
 
-        Button { action?() } label: {
-            Card(padding: 22) {
+        let card = Card(padding: 22) {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack(alignment: .center, spacing: 18) {
                         if income > 0 { SpotArt(name: within ? "within" : "over", height: 92) }
@@ -78,12 +77,15 @@ struct FlowHero: View {
                     }
                 }
             }
-            .contentShape(Rectangle())
+        // With somewhere to go it is a button; on the page it leads to, it is just the card.
+        if let action {
+            Button(action: action) { card.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .onHover { hovered = $0 }
+                .help("See all the money in and out")
+        } else {
+            card
         }
-        .buttonStyle(.plain)
-        .disabled(action == nil)
-        .onHover { hovered = $0 }
-        .help(action == nil ? "" : "See all the money in and out")
     }
 
     private func figure(_ name: String, _ amount: Double, _ color: Color?) -> some View {

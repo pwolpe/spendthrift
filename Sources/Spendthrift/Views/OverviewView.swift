@@ -3,16 +3,14 @@ import Charts
 
 struct OverviewView: View {
     @Environment(BudgetStore.self) private var store
-    @State private var month: Month?
     /// The bar under the pointer in "Month by month".
     @State private var hoveredBar: String?
-    @State private var period: ReportPeriod?
     @State private var hoveredAngle: Double?
 
     /// False when rendered for a test snapshot (ImageRenderer can't draw scroll views).
     var scrolls = true
 
-    private var currentMonth: Month? { month ?? store.months.last }
+    private var currentMonth: Month? { store.overviewMonth.flatMap { store.months.contains($0) ? $0 : nil } ?? store.months.last }
 
     var body: some View {
         if scrolls {
@@ -104,8 +102,8 @@ struct OverviewView: View {
     /// The small figures on the cards: the run of months each sits in, and a line about each.
     private struct Figures {
         var labels: [String] = []
-        var income: [Double] = []
-        var invested: [Double] = []
+        let income: [Double]
+        let invested: [Double]
         var lit: Int?
         var categories: [(category: Category, total: Double)] = []
         var spendingNote: String?
@@ -123,18 +121,9 @@ struct OverviewView: View {
             } else {
                 window = data.months
             }
-            let place = Dictionary(uniqueKeysWithValues: window.enumerated().map { ($1, $0) })
-            income = Array(repeating: 0, count: window.count)
-            invested = income
-            for t in store.transactions {
-                guard let i = place[t.month] else { continue }
-                switch t.lane {
-                case .everyday: if t.isIncome || t.isUnsortedDeposit { income[i] -= t.amount }
-                case .investments:
-                    if t.amount > 0 { invested[i] += t.amount } else if t.category == .investmentIncome { income[i] -= t.amount }
-                default: break
-                }
-            }
+            let run = CashFlowData.run(of: window, in: store)
+            income = run.map(\.income)
+            invested = run.map(\.invested)
             labels = window.map { window.count > 6 ? String($0.shortName.prefix(1)) : $0.shortName }
 
             if let month {
@@ -216,7 +205,7 @@ struct OverviewView: View {
     // MARK: Month or year
 
     private var periods: [ReportPeriod] { ReportData.periods(for: store) }
-    private var currentPeriod: ReportPeriod? { period.flatMap { periods.contains($0) ? $0 : nil } ?? periods.first }
+    private var currentPeriod: ReportPeriod? { store.overviewPeriod.flatMap { periods.contains($0) ? $0 : nil } ?? periods.first }
 
     private var scopePicker: some View {
         @Bindable var store = store
@@ -231,7 +220,7 @@ struct OverviewView: View {
             .controlSize(.large)
             if store.overviewShowsYear, let current = currentPeriod {
                 if periods.count > 1 {
-                    Picker("Period", selection: Binding(get: { current }, set: { period = $0 })) {
+                    Picker("Period", selection: Binding(get: { current }, set: { store.overviewPeriod = $0 })) {
                         ForEach(periods) { Text($0.title).tag($0) }
                     }
                     .labelsHidden()
@@ -247,21 +236,9 @@ struct OverviewView: View {
                     .help("Save the year as a PDF to print or share")
                 }
             } else if let m = currentMonth {
-                let months = store.months
-                let index = months.firstIndex(of: m) ?? 0
-                HStack(spacing: 4) {
-                    Button { withAnimation { month = months[index - 1] } } label: {
-                        Image(systemName: "chevron.left").frame(width: 20, height: 20)
-                    }
-                    .disabled(index == 0)
-                    Text(m.title).font(.headline).frame(minWidth: 130)
-                    Button { withAnimation { month = months[index + 1] } } label: {
-                        Image(systemName: "chevron.right").frame(width: 20, height: 20)
-                    }
-                    .disabled(index >= months.count - 1)
-                }
-                .buttonStyle(.glass)
-                .controlSize(.large)
+                StretchStepper(title: m.title,
+                               older: store.months.last { $0 < m }.map { earlier in { store.overviewMonth = earlier } },
+                               newer: store.months.first { $0 > m }.map { later in { store.overviewMonth = later } })
                 Spacer()
             } else {
                 Spacer()
@@ -273,31 +250,22 @@ struct OverviewView: View {
 
     private func header(_ m: Month) -> some View {
         let total = store.totalSpent(in: m)
-        let previous = store.totalSpent(in: m.adding(-1))
-        let hasPrevious = store.months.contains(m.adding(-1))
-
-        return HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Spent in \(m.name)")
-                    .font(.title3.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Text(Money.format(total, cents: false))
-                    .font(.system(size: 54, weight: .bold, design: .rounded))
-                    .contentTransition(.numericText(value: total))
-                    .monospacedDigit()
-                if hasPrevious, previous > 0 {
-                    let diff = total - previous
-                    Label {
-                        Text("\(Money.format(abs(diff), cents: false)) \(diff <= 0 ? "less" : "more") than \(m.adding(-1).name)")
-                    } icon: {
-                        Image(systemName: diff <= 0 ? "arrow.down.right" : "arrow.up.right")
-                    }
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(diff <= 0 ? Theme.good : Theme.caution)
+        let before = m.adding(-1)
+        let previous = store.months.contains(before) ? store.totalSpent(in: before) : 0
+        return VStack(alignment: .leading, spacing: 6) {
+            BigFigure(title: "Spent in \(m.name)", amount: total)
+            if previous > 0 {
+                let diff = total - previous
+                Label {
+                    Text("\(Money.format(abs(diff), cents: false)) \(diff <= 0 ? "less" : "more") than \(before.name)")
+                } icon: {
+                    Image(systemName: diff <= 0 ? "arrow.down.right" : "arrow.up.right")
                 }
+                .font(.callout.weight(.medium))
+                .foregroundStyle(diff <= 0 ? Theme.good : Theme.caution)
             }
-            Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Charges that repeat every month, and when each is due next: no surprises.
@@ -316,18 +284,11 @@ struct OverviewView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     SectionHeader(title: "Coming up", subtitle: "Charges that repeat, due in the next month")
                     ForEach(Array(upcoming.prefix(7).enumerated()), id: \.offset) { _, item in
-                        HStack(spacing: 12) {
-                            MerchantIcon(name: item.sub.merchant, category: item.sub.category, size: 30)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(item.sub.merchant).font(.body.weight(.medium)).lineLimit(1)
-                                Text(Calendar.current.isDateInToday(item.due) ? "Today"
-                                     : Calendar.current.isDateInTomorrow(item.due) ? "Tomorrow"
-                                     : item.due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text(Money.format(item.sub.monthlyAmount)).monospacedDigit()
-                        }
+                        PayeeLine(name: item.sub.merchant, category: item.sub.category,
+                                  detail: Calendar.current.isDateInToday(item.due) ? "Today"
+                                      : Calendar.current.isDateInTomorrow(item.due) ? "Tomorrow"
+                                      : item.due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()),
+                                  amount: item.sub.monthlyAmount) { store.showPlace(item.sub.merchant) }
                     }
                     Divider()
                     HStack {
@@ -513,18 +474,8 @@ struct OverviewView: View {
                 }
                 // Anywhere in a bar's column counts, so a short bar is as easy to hit as a tall one.
                 .chartOverlay { proxy in
-                    GeometryReader { geo in
-                        Rectangle().fill(.clear).contentShape(Rectangle())
-                            .onContinuousHover { phase in
-                                guard case .active(let location) = phase, let frame = proxy.plotFrame.map({ geo[$0] }) else { hoveredBar = nil; return }
-                                hoveredBar = proxy.value(atX: location.x - frame.origin.x)
-                            }
-                            .onTapGesture { location in
-                                guard let frame = proxy.plotFrame.map({ geo[$0] }),
-                                      let label: String = proxy.value(atX: location.x - frame.origin.x),
-                                      let picked = data.first(where: { $0.month.shortName == label }) else { return }
-                                store.showSpending(in: picked.month)
-                            }
+                    Color.clear.barPointer(proxy, hover: { hoveredBar = $0 }) { label in
+                        if let picked = data.first(where: { $0.month.shortName == label }) { store.showSpending(in: picked.month) }
                     }
                 }
                 .animation(.easeOut(duration: 0.12), value: hoveredBar)
@@ -541,23 +492,8 @@ struct OverviewView: View {
             VStack(alignment: .leading, spacing: 14) {
                 SectionHeader(title: "Top payees")
                 ForEach(Array(top.enumerated()), id: \.offset) { _, item in
-                    Button {
-                        store.showPlace(item.name)
-                    } label: {
-                    HStack(spacing: 12) {
-                        MerchantIcon(name: item.name, category: item.category, size: 30)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(item.name).font(.body.weight(.medium)).lineLimit(1)
-                            Text(item.count == 1 ? "1 visit" : "\(item.count) visits")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Text(Money.format(item.total)).monospacedDigit()
-                    }
-                    .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                    PayeeLine(name: item.name, category: item.category, detail: item.count == 1 ? "1 visit" : "\(item.count) visits",
+                              amount: item.total) { store.showPlace(item.name) }
                 }
                 if top.isEmpty { Text("Nothing yet.").foregroundStyle(.secondary) }
             }

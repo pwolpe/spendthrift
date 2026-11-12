@@ -292,7 +292,6 @@ enum Redactor {
         let street = try? NSRegularExpression(
             pattern: #"^\s*\d{1,6}\s+[A-Za-z0-9 .'-]*\b(ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|LN|LANE|WAY|PL|PLACE|CT|COURT|TER|TERRACE|PKWY|HWY|SQ|CIR)\b.*$"#,
             options: .caseInsensitive)
-        let poBox = try? NSRegularExpression(pattern: #"^\s*P\.?\s?O\.?\s+BOX\b.*$"#, options: .caseInsensitive)
         let cityZip = try? NSRegularExpression(pattern: #"^\s*[A-Za-z .'-]+,?\s+[A-Z]{2}\s+\d{5}(-\d{4})?\s*$"#)
         func matches(_ re: NSRegularExpression?, _ s: String) -> Bool {
             re?.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil

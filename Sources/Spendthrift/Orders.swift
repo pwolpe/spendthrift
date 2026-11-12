@@ -52,14 +52,6 @@ struct OrderItem: Codable, Hashable {
         }
     }
 
-    /// The shelf it came off, in plain words, for adding orders up by kind.
-    var shelf: String {
-        switch shop {
-        case .groceries: "Groceries"
-        case .digital: "Books & Digital"
-        case .store: department == "Grocery" ? "Groceries" : (department ?? "Everything Else")
-        }
-    }
 }
 
 /// Which order items a card charge paid for, and how sure that is.

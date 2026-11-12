@@ -158,7 +158,7 @@ enum AnswerEngine {
             if let c = q.category { guard t.category == c else { return false } }
             else if !t.countsAsSpending { return false }
             if let p = q.place {
-                guard t.merchantDisplay.localizedCaseInsensitiveContains(p) || t.description.localizedCaseInsensitiveContains(p) else { return false }
+                guard t.merchant.localizedCaseInsensitiveContains(p) || t.description.localizedCaseInsensitiveContains(p) else { return false }
             }
             return true
         }
@@ -167,7 +167,7 @@ enum AnswerEngine {
         let verb = wantsIncome ? "You received" : "You spent"
 
         func txRows(_ list: [Transaction]) -> [(String, String, String, Category?)] {
-            list.map { ($0.merchantDisplay, $0.date.formatted(.dateTime.month(.abbreviated).day().year()), Money.format($0.amount), $0.category) }
+            list.map { ($0.merchant, $0.date.formatted(.dateTime.month(.abbreviated).day().year()), Money.format($0.amount), $0.category) }
         }
 
         return tidy(compose())
@@ -202,7 +202,7 @@ enum AnswerEngine {
                               return (m.title, "", Money.format(t), nil)
                           })
         case .topPlaces:
-            let grouped = Dictionary(grouping: matches, by: \.merchantDisplay)
+            let grouped = Dictionary(grouping: matches, by: \.merchant)
                 .map { (name: $0.key, total: $0.value.reduce(0) { $0 + $1.amount }, count: $0.value.count, cat: $0.value[0].category) }
                 .sorted { $0.total > $1.total }.prefix(8)
             return Answer(question: question, query: q,
@@ -602,15 +602,7 @@ private struct AnswerChart: View {
                 AxisValueLabel { if let v = value.as(Double.self) { Text(Money.format(v, cents: false)) } }
             }
         }
-        .chartOverlay { proxy in
-            GeometryReader { geo in
-                Rectangle().fill(.clear).contentShape(Rectangle())
-                    .onTapGesture { location in
-                        guard let frame = proxy.plotFrame.map({ geo[$0] }) else { return }
-                        if let label: String = proxy.value(atX: location.x - frame.origin.x) { onPick(label) }
-                    }
-            }
-        }
+        .chartOverlay { proxy in Color.clear.barPointer(proxy, tap: onPick) }
         .frame(height: 170)
     }
 }

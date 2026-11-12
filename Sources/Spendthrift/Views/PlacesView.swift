@@ -66,10 +66,22 @@ struct PlacesView: View {
         }
     }
 
+    private func rows(_ places: ArraySlice<Place>) -> some View {
+        Card(padding: 8) {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(places.enumerated()), id: \.element.id) { index, p in
+                    if index > 0 { Divider().padding(.leading, 56) }
+                    PlaceRow(place: p) { store.showPlace(p.name) }
+                }
+            }
+        }
+    }
+
     var body: some View {
         @Bindable var store = store
         let list = places()
         let finding = !store.placeSearch.trimmingCharacters(in: .whitespaces).isEmpty
+        let query = Self.squeeze(store.placeSearch)
         MaybeScroll(scrolls: scrolls) {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -106,33 +118,26 @@ struct PlacesView: View {
                              message: "Nothing matches “\(store.placeSearch)”\(store.placeSpan == .all ? "" : " in \(store.placeSpan.rawValue.lowercased())"). Try part of the name, or how it's spelled on your statement.",
                              art: "nothing")
                 } else {
-                    // What was asked for, added up: the answer before the list.
+                    // A name that matches is the answer. A payee found only by how a statement spells it
+                    // ("amzn.com/bill" for "bill") is listed after, and kept out of the sum.
+                    let named = finding ? list.filter { Self.squeeze($0.name).contains(query) } : list
+                    let spelled = finding ? list.filter { !Self.squeeze($0.name).contains(query) } : []
+                    let counted = named.isEmpty ? spelled : named
                     if finding {
-                        let spent = list.reduce(0) { $0 + $1.total }, visits = list.reduce(0) { $0 + $1.visits }
-                        ReceiptPaper(padding: 16) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("“\(store.placeSearch.trimmingCharacters(in: .whitespaces))” · \(store.placeSpan.rawValue)".uppercased())
-                                    .font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
-                                ReceiptRule()
-                                ForEach(list.prefix(6)) { p in
-                                    ReceiptLine(value: Money.format(abs(p.total))) { Text(p.name).lineLimit(1) }
-                                }
-                                if list.count > 6 { Text("and \(list.count - 6) more below").font(.caption).foregroundStyle(.tertiary) }
-                                ReceiptRule()
-                                ReceiptLine(value: Money.format(abs(spent)), bold: true) {
-                                    Text("TOTAL · \(visits) \(visits == 1 ? "CHARGE" : "CHARGES")").font(Theme.mono(13, .bold))
-                                }
-                            }
+                        let visits = counted.reduce(0) { $0 + $1.visits }
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("\(counted.count == 1 ? "1 payee" : "\(counted.count) payees") · \(visits == 1 ? "1 charge" : "\(visits) charges")")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(Money.format(abs(counted.reduce(0) { $0 + $1.total }))).font(Theme.mono(15, .bold))
                         }
-                        .frame(maxWidth: 520)
+                        .font(.callout)
+                        .padding(.horizontal, 14)
                     }
-                    Card(padding: 8) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(list.prefix(finding ? 200 : 300).enumerated()), id: \.element.id) { index, p in
-                                if index > 0 { Divider().padding(.leading, 56) }
-                                PlaceRow(place: p) { store.showPlace(p.name) }
-                            }
-                        }
+                    rows(counted.prefix(300))
+                    if !named.isEmpty, !spelled.isEmpty {
+                        Text("Also found in how statements spell these").font(.callout).foregroundStyle(.secondary).padding(.horizontal, 14).padding(.top, 6)
+                        rows(spelled.prefix(100))
                     }
                     if list.count > 300, !finding {
                         Text("Showing the 300 biggest of \(list.count) payees. Type a name to find any of the rest.")

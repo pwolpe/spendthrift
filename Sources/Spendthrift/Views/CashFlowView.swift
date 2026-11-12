@@ -35,7 +35,6 @@ struct CashFlowData {
     let bars: [MonthBar]
     let investmentLines: [Line]
     let incomeLines: [Line]
-    let taxLines: [Line]
     let byInvestmentCategory: [(category: Category, moneyIn: Double, moneyOut: Double)]
 
     // What each dollar did. Money that went out is not all one thing: some was lived on, some was
@@ -80,6 +79,22 @@ struct CashFlowData {
             inPeriod = { $0 >= start && $0 <= end }
         }
         self.init(store: store, period: period, title: period.title, inPeriod: inPeriod)
+    }
+
+    /// Income and money invested, month by month, by the same definitions as the totals.
+    @MainActor static func run(of months: [Month], in store: BudgetStore) -> [(income: Double, invested: Double)] {
+        let place = Dictionary(uniqueKeysWithValues: months.enumerated().map { ($1, $0) })
+        var run = Array(repeating: (income: 0.0, invested: 0.0), count: months.count)
+        for t in store.transactions {
+            guard let i = place[t.month] else { continue }
+            switch t.lane {
+            case .everyday: if t.isIncome || t.isUnsortedDeposit { run[i].income -= t.amount }
+            case .investments:
+                if t.amount > 0 { run[i].invested += t.amount } else if t.category == .investmentIncome { run[i].income -= t.amount }
+            case .taxes, .transfers: break
+            }
+        }
+        return run
     }
 
     /// The same sums for a single month.
@@ -140,7 +155,6 @@ struct CashFlowData {
         let investments = txns.filter { $0.lane == .investments }
         investmentLines = lines(investments)
         incomeLines = lines(txns.filter(\.isIncome))
-        taxLines = lines(txns.filter { $0.lane == .taxes })
         var perCategory: [(category: Category, moneyIn: Double, moneyOut: Double)] = []
         for c in Category.investmentCases {
             var moneyIn = 0.0, moneyOut = 0.0
@@ -148,41 +162,6 @@ struct CashFlowData {
             perCategory.append((c, moneyIn, moneyOut))
         }
         byInvestmentCategory = perCategory
-    }
-}
-
-struct CashFlowView: View {
-    @Environment(BudgetStore.self) private var store
-    @State private var period: ReportPeriod?
-
-    private var periods: [ReportPeriod] { ReportData.periods(for: store) }
-    private var current: ReportPeriod? { period.flatMap { periods.contains($0) ? $0 : nil } ?? periods.first }
-
-    var body: some View {
-        Group {
-            if let current {
-                ScrollView {
-                    CashFlowContent(data: CashFlowData(store: store, period: current), interactive: true)
-                        .padding(28)
-                        .frame(maxWidth: 1100)
-                        .frame(maxWidth: .infinity)
-                }
-                .toolbar {
-                    if periods.count > 1 {
-                        ToolbarItem(placement: .principal) {
-                            Picker("Period", selection: Binding(get: { current }, set: { period = $0 })) {
-                                ForEach(periods) { Text($0.title).tag($0) }
-                            }
-                            .pickerStyle(.segmented)
-                            .fixedSize()
-                        }
-                    }
-                }
-            } else {
-                TonySays(title: "Nothing here yet", message: "Add your bank and card statements and I'll show where every dollar came from and went.", art: "welcome")
-            }
-        }
-        .navigationTitle("Cash Flow")
     }
 }
 
@@ -200,7 +179,7 @@ struct CashFlowContent: View {
                     .font(.title3)
                     .foregroundStyle(.secondary)
             }
-            VerdictCard(data: data)
+            FlowHero(data: data)
             PurposeCard(data: data)
             HStack(alignment: .top, spacing: 22) {
                 StatementCard(data: data, open: interactive ? open : nil)
@@ -220,90 +199,11 @@ struct CashFlowContent: View {
         store.showCharges(TransactionFilter(category: category, month: nil))
     }
     private func openPlace(_ key: String) {
-        if let name = store.place(key)?.name { store.showPlace(name) }
+        store.showPlace(key: key)
     }
 }
 
 // MARK: - The verdict
-
-/// The one judgment the app makes: did consumption stay within income? Investing never counts
-/// against it. Spending more than was earned always does.
-struct VerdictCard: View {
-    let data: CashFlowData
-    var compact = false
-
-    var body: some View {
-        let income = data.totalIncome, consumed = data.consumed
-        let within = data.surplus >= 0
-        let share = income > 0 ? consumed / income : 0
-        let color: Color = within ? Theme.good : Theme.spent
-        Card(padding: compact ? 14 : 20) {
-            VStack(alignment: .leading, spacing: compact ? 8 : 14) {
-                HStack(alignment: compact ? .firstTextBaseline : .center, spacing: compact ? 10 : 18) {
-                    // On the full card the two of them deliver the verdict: proud when it went well,
-                    // appalled when it didn't.
-                    if !compact, income > 0 {
-                        SpotArt(name: within ? "within" : "over", height: 104)
-                    } else {
-                        Image(systemName: within ? "checkmark.seal.fill" : "exclamationmark.triangle.fill").foregroundStyle(color)
-                            .font(compact ? .title3 : .title2)
-                    }
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(income <= 0 ? "No income found for this period"
-                             : within ? "You lived within your income" : "You spent \(Money.format(-data.surplus, cents: false)) more than you earned")
-                            .font(.system(size: compact ? 17 : 24, weight: .bold, design: .serif))
-                        Text(detail(income: income, consumed: consumed, within: within, share: share))
-                            .font(compact ? .callout : .body)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 0)
-                    if income > 0 {
-                        Stamp(text: within ? "WITHIN MEANS" : "OVER", color: color, size: compact ? 10 : 14)
-                            .padding(.trailing, compact ? 4 : 10)
-                    }
-                    if compact { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary) }
-                }
-                if income > 0 {
-                    // Income is the whole track; consumption fills it. Past the end is living beyond it.
-                    GeometryReader { geo in
-                        let full = geo.size.width
-                        let track = within ? full : full / CGFloat(share)
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(Theme.spent.opacity(within ? 0 : 0.9)).frame(width: full)
-                            Capsule().fill(Theme.good.opacity(0.18)).frame(width: track)
-                            Capsule().fill(Theme.spent.gradient).frame(width: max(6, min(track, track * CGFloat(share))))
-                            Rectangle().fill(Color.primary).frame(width: 2, height: compact ? 16 : 22).offset(x: track - 1)
-                        }
-                    }
-                    .frame(height: compact ? 10 : 14)
-                    if !compact {
-                        HStack {
-                            Label("Consumed \(Money.format(consumed, cents: false))", systemImage: "circle.fill").foregroundStyle(Theme.spent)
-                            Spacer()
-                            Text("Income \(Money.format(income, cents: false))").foregroundStyle(.secondary)
-                        }
-                        .font(.caption.weight(.semibold))
-                        .labelStyle(.titleAndIcon)
-                    }
-                }
-            }
-        }
-    }
-
-    private func detail(income: Double, consumed: Double, within: Bool, share: Double) -> String {
-        guard income > 0 else { return "Add the account your pay goes into and this will say whether spending stayed within it." }
-        let cents = Int((share * 100).rounded())
-        let period = data.title
-        if within {
-            return "\(period): of every dollar that came in, \(cents)¢ was consumed (living, taxes, interest). "
-                + "\(Money.format(data.surplus, cents: false)) was left to save or invest."
-                + (data.built > 0.5 ? " Money you invested is not counted as spending." : "")
-        }
-        return "\(period): for every dollar of income, \(Money.format(share)) went to living, taxes and interest. "
-            + "The difference came out of savings, sold investments or borrowing. Investing is not part of this number."
-    }
-}
 
 // MARK: - What the money did
 
@@ -734,7 +634,7 @@ struct IncomeDetail: View {
     var body: some View {
         let paidOut = data.investmentLines.filter { $0.category == .investmentIncome && $0.moneyIn > 0.5 }
         VStack(alignment: .leading, spacing: 22) {
-            DetailTitle(title: "Income", figure: data.totalIncome, subtitle: "What came in. \(data.title).")
+            BigFigure(title: "Income", amount: data.totalIncome, subtitle: "What came in. \(data.title).")
             HStack(alignment: .top, spacing: 22) {
                 VStack(spacing: 22) {
                     lines("Salary & income", "What you were paid", data.incomeLines.filter { $0.moneyIn > 0.5 }, total: data.income)
@@ -759,17 +659,7 @@ struct IncomeDetail: View {
                 }
                 if lines.isEmpty { Text("Nothing in this stretch.").foregroundStyle(.secondary) }
                 ForEach(lines.prefix(14)) { line in
-                    Button { if let name = store.place(line.key)?.name { store.showPlace(name) } } label: {
-                        HStack(spacing: 12) {
-                            MerchantIcon(name: line.name, category: line.category, size: 30)
-                            Text(line.name).font(.body.weight(.medium)).lineLimit(1)
-                            Spacer()
-                            Text(Money.format(line.moneyIn)).monospacedDigit()
-                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                    PayeeLine(name: line.name, category: line.category, amount: line.moneyIn) { store.showPlace(key: line.key) }
                 }
             }
         }
@@ -783,28 +673,14 @@ struct InvestingDetail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            DetailTitle(title: "Investing", figure: data.built, subtitle: "Money put to work. It isn't spending: it's still yours. \(data.title).")
+            BigFigure(title: "Investing", amount: data.built, subtitle: "Money put to work. It isn't spending: it's still yours. \(data.title).")
             PurposeCard(data: data)
             if data.investmentLines.isEmpty {
                 Text("Nothing on the investment side in this stretch.").foregroundStyle(.secondary)
             } else {
-                InvestmentsCard(data: data, open: { key in if let name = store.place(key)?.name { store.showPlace(name) } })
+                InvestmentsCard(data: data, open: { store.showPlace(key: $0) })
             }
         }
     }
 }
 
-struct DetailTitle: View {
-    let title: String
-    let figure: Double
-    let subtitle: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.title3.weight(.medium)).foregroundStyle(.secondary)
-            Text(Money.format(figure, cents: false))
-                .font(.system(size: 54, weight: .bold, design: .rounded)).monospacedDigit()
-            Text(subtitle).font(.callout).foregroundStyle(.secondary)
-        }
-    }
-}
