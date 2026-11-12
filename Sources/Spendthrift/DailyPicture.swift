@@ -29,13 +29,6 @@ final class DailyPicture {
         return NSImage(contentsOf: dev)
     }()
     var avatar: NSImage? { portrait ?? croppedAvatar(cartoon ?? headshot) }
-    /// Paul's portrait, drawn the same way, for the places that show the two of them.
-    let paulAvatar: NSImage? = {
-        if let url = Bundle.main.url(forResource: "paul-avatar", withExtension: "png") { return NSImage(contentsOf: url) }
-        let dev = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Resources/paul-avatar.png")
-        return NSImage(contentsOf: dev)
-    }()
 
     @ObservationIgnored private var avatarCache: (source: ObjectIdentifier, image: NSImage)?
     private func croppedAvatar(_ source: NSImage?) -> NSImage? {

@@ -66,7 +66,6 @@ struct ReportData {
     let monthTotals: [Month: Double]
     let incomeSources: [Source]
     let accounts: [AccountLine]
-    let subscriptions: [Subscription]
 
     var monthlyAverage: Double { months.isEmpty ? 0 : spent / Double(months.count) }
     var kept: Double { moneyIn - spent }
@@ -149,11 +148,9 @@ struct ReportData {
         places.sort { $0.total > $1.total }
         self.places = Array(places.prefix(10))
 
-        let subs: [Subscription] = monthList.last.map { InsightEngine.subscriptions(asOf: $0, in: all) } ?? []
-        subscriptions = subs.sorted { $0.monthlyAmount > $1.monthlyAmount }
 
-        // One per place, leaving out monthly bills (those are in the recurring card).
-        let recurring = Set(subs.map(\.merchant))
+        // One per place, leaving out monthly bills: a bill that repeats is not a purchase.
+        let recurring = Set((monthList.last.map { InsightEngine.subscriptions(asOf: $0, in: all) } ?? []).map(\.merchant))
         var seen = Set<String>()
         var big: [Transaction] = []
         for t in spending.filter({ $0.amount > 0 }).sorted(by: { $0.amount > $1.amount })

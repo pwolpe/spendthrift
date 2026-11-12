@@ -370,10 +370,6 @@ struct CeremonyCard: View {
                                     }
                                     .buttonStyle(.plain)
                                 }
-                                ReceiptRule()
-                                ReceiptLine(value: Money.format(store.totalSpent(in: month), cents: false), bold: true) {
-                                    Text("TOTAL").font(Theme.mono(13, .bold))
-                                }
                             }
                         }
                         .frame(width: 320)

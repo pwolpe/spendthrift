@@ -116,7 +116,7 @@ extension BudgetStore {
     /// What Back leads to, for its label.
     var backTitle: String { history.last.map(title(of:)) ?? "Back" }
 
-    private func title(of location: Location) -> String {
+    func title(of location: Location) -> String {
         switch location.route.last {
         case .place(let name)?: return name
         case .charges(let filter)?: return filter.title ?? filter.category?.displayName ?? "Charges"

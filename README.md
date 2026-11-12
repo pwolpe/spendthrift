@@ -71,23 +71,19 @@ credit, or there's no internet, everything falls back to the on-device paths.
   if none fits) and keeps the note. Notes also feed trip-finding, answers and the estimate below.
 - **Looking ahead**: an estimate of next month's everyday spending from the history, what repeats and
   your notes. Always labelled an estimate.
-- **Drill-downs**: any click on a category, month, trip or account opens one plain page of charges
-  (`ChargesView`); a place opens its own page (`PlaceView`). Only one pane is ever open on the right.
-- **Overview**: a wide banner across the top with a cartoon of Tony living out a daydream about a
-  real recent purchase. It never waits: on opening it shows the picture prepared during the last
-  visit (or one of twelve starters in `Resources/Starters`), then quietly asks OpenRouter which image
-  model is best today and draws the next one from his photo for next time. One picture a day: it stays the same all day,
-  and a share button sends it. Each trip or event page gets its own picture too, drawn the first time it is opened. Below it, a **Month / Year** switch. *Month*: the total, where it went,
-  the trend, top places, what's coming up, and **the month, itemized** (a receipt of the month's superlatives plus notes on new
-  subscriptions, price increases, possible double charges and unusual purchases). *Year*:
-  month-by-month stacked spending, category trends, top places, biggest purchases, repeating
-  charges and their yearly cost, money in, tax-time totals. **Save as PDF** to share.
-- **Cash Flow**: the whole picture in lanes. *Everyday* (salary in, spending out), *Income taxes* on
-  their own line, and *Investments* (distributions, capital calls, the investment loan, brokerage
-  moves) kept apart, with a month-by-month chart and a by-fund table. Transfers between own accounts
-  are left out. A **Credit Cards** check compares what the bank paid each card with the statements
-  added: a payment only counts as a transfer when that card's purchases are in the app; otherwise it
-  counts as spending under "Cards Not Added Yet", so the total is complete either way.
+- **One way back**: every link inside a page (a category, a month, a trip, a payee, an order, a
+  statement) goes through one navigation history, so **Back** (or ⌘[) always returns to where it was
+  followed from, however many steps deep. Choosing a section in the sidebar is a fresh start.
+- **Overview**: one page that answers one question first. A banner with the day's picture (a real
+  purchase on this day in an earlier year), then a **Month / Year** switch and **the verdict**: what
+  came in, and how much of it went on living, taxes and interest. What is left is gold: kept or
+  invested, it is still yours. Below it, three cards to step into:
+  - **Spending**: where it went, the run of months, top payees, an estimate for next month, and the
+    month's note. In Year view, the year in review, with **Save as PDF**.
+  - **Income**: who paid, and how much.
+  - **Investing**: where the money came from and what it did, and the investment side line by line.
+  - The verdict itself opens **Money In and Out**: the full statement, with transfers between your
+    own accounts left out and card payments counted once.
 - **Transactions**: searchable, filterable table with an inspector.
 - **Trips & Events**: runs of charges the model recognizes as a trip or an occasion, with totals
   added up in code. A charge in the wrong trip can be moved: right-click it in Transactions and
@@ -228,14 +224,20 @@ To back up or move Tony to a new Mac, copy that folder.
 
 ## Code map
 
-| File | What it does |
+| Where | What it does |
 | --- | --- |
-| `BudgetStore.swift` | The single source of truth: importing, sorting, editing, analytics |
-| `Library.swift` | The saved file, and `MerchantResolver` (which place is this? instant category) |
-| `Importing.swift`, `CSV.swift`, `PDFStatement.swift` | Reading CSV, OFX/QFX and PDF statements |
+| `BudgetStore.swift` | The single source of truth: the saved library, what the screens derive from it, and all stored state |
+| `Store/` | The store's work, one file per concern: `+Navigation` (where you are and the way back), `+Importing`, `+Sorting`, `+Editing`, `+Orders`, `+Stories`, `+Noticed`, `+Accounts`, `+Insights` |
+| `Cloud/` | Everything sent to a model, one file per job: the client and its cost ledger, blanking personal details, sorting payees, reading statements and checks, pictures, lookups, trips, findings, short writing |
+| `Library.swift` | The saved file, and `MerchantResolver` (which payee is this? instant category) |
+| `Importing.swift`, `CSV.swift`, `PDFStatement.swift`, `Scans.swift` | Reading CSV, OFX/QFX and PDF statements |
+| `Orders.swift` | An order history: reading the export, matching orders to card charges |
 | `Suggestions.swift`, `AISchemas.swift` | Name cleanup, known businesses, bank categories, Apple Intelligence |
-| `Insights.swift`, `Ask.swift`, `DailyPicture.swift`, `Compositor.swift` | The month's superlatives and notes, questions, the daily picture |
-| `Views/` | The screens |
+| `Insights.swift`, `Ask.swift`, `AskChat.swift` | The month's notes and awards; questions, answered from figures the app computes |
+| `Views/` | The screens. `Components.swift` holds the pieces they share (cards, receipts, steppers, payee rows) |
+
+Two rules the code keeps: every number shown is computed in code (a model only reads intent or
+writes prose around figures it is given), and every link goes through `BudgetStore.navigate`.
 
 ## Testing (for Paul)
 

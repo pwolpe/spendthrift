@@ -492,6 +492,27 @@ enum DebugHooks {
     private static func selfTest(files: [URL]) async {
         let store = BudgetStore.shared
         func check(_ name: String, _ ok: Bool) { print("SELFTEST \(ok ? "PASS" : "FAIL") \(name)") }
+        // Back always returns to where a link was followed from, however deep; the sidebar is a fresh start.
+        if let payee = store.transactions.first?.merchant, let month = store.months.first {
+            store.selection = .overview
+            store.overviewMonth = month
+            store.stepInto(.spending)
+            store.showCharges(TransactionFilter(category: .dining, month: month))
+            store.showPlace(payee)
+            store.go(to: .transactions)
+            let deep = store.selection == .transactions && store.route.isEmpty && store.canGoBack
+            store.back()
+            let onPayee = store.selection == .overview && store.route.last == .place(payee) && store.overviewDetail == .spending
+            store.back(); store.back()
+            let onDetail = store.route.isEmpty && store.overviewDetail == .spending && store.overviewMonth == month
+            store.back()
+            check("back retraces every step", deep && onPayee && onDetail && store.overviewDetail == nil && !store.canGoBack)
+            store.showPlace(payee)
+            store.selection = .places
+            check("the sidebar starts afresh", store.route.isEmpty && !store.canGoBack)
+            store.selection = .overview
+            store.overviewMonth = nil
+        }
         // SPENDTHRIFT_EXPLAIN="Whitfield|my accountant, for tax prep": say what a place was and print what happened.
         if let spec = ProcessInfo.processInfo.environment["SPENDTHRIFT_EXPLAIN"]?.split(separator: "|", maxSplits: 1).map(String.init), spec.count == 2,
            let t = store.transactions.first(where: { $0.merchant.localizedCaseInsensitiveContains(spec[0]) }) {
