@@ -229,6 +229,16 @@ enum DecisionSorter {
         .taxes: "Payments to or refunds from the IRS or a state tax department",
     ]
 
+    /// "Which category?" as a question a decision model can answer: every category the person can pick, with what it covers.
+    static func categoryQuestion() -> Decisions.Question {
+        var options: [String: String] = [:]
+        for category in Category.pickable {
+            options[category.rawValue] = meanings[category] ?? "A category this person created for themselves; use it whenever the transaction fits its name"
+        }
+        return .choice("Pick the budget category for this bank or credit card transaction. A refund belongs in the category of what was bought. "
+                       + "\"TST*\" and \"SQ *\" are payment processors used by restaurants and small shops.", options: options)
+    }
+
     static func sort(_ items: [CloudItem], examples: [MerchantRule]) async -> [String: CloudVerdict]? {
         var criteria: [String: String] = [:]
         for category in Category.pickable {

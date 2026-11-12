@@ -213,6 +213,41 @@ enum DebugHooks {
             try? await Task.sleep(for: .seconds(2))
             NSApp.terminate(nil); return
         }
+        // SPENDTHRIFT_DECISION_BENCH="model,model": how well each decision model files payees whose category
+        // the person chose by hand (the only ground truth there is), how sure it says it is, and how fast.
+        if let models = env["SPENDTHRIFT_DECISION_BENCH"]?.split(separator: ",").map(String.init) {
+            var amounts: [String: [Double]] = [:]
+            for entry in store.library.entries { amounts[entry.merchantKey, default: []].append(entry.amount) }
+            let gold = store.library.merchants.filter { key, info in
+                info.source == .user && info.confirmed && info.category.map(Category.pickable.contains) == true && !(info.sample ?? "").isEmpty && amounts[key] != nil
+            }.sorted { $0.key < $1.key }.prefix(Int(env["SPENDTHRIFT_BENCH_COUNT"] ?? "") ?? 200)
+            var states: [String: String] = [:]
+            for (key, info) in gold {
+                let list = amounts[key] ?? [], mean = list.reduce(0, +) / Double(max(list.count, 1))
+                states[key] = "Transaction text: \(Redactor.scrub(info.sample ?? "")). Money \(mean < 0 ? "came in" : "went out"). "
+                    + "Typical amount $\(String(format: "%.2f", abs(mean))). Appears \(list.count) time\(list.count == 1 ? "" : "s")."
+            }
+            print("DECISION gold payees: \(states.count)")
+            for model in models {
+                let began = Date.now
+                let answers = await Decisions.askAll(job: "Benchmark", model: model, states: states, questions: ["category": DecisionSorter.categoryQuestion()])
+                let seconds = Date.now.timeIntervalSince(began)
+                var right = 0, sure = 0, sureRight = 0, quite = 0, quiteRight = 0
+                for (key, info) in gold {
+                    guard let answer = answers[key]?["category"], let choice = answer.choice else { continue }
+                    let ok = choice == info.category?.rawValue
+                    if ok { right += 1 }
+                    if (answer.confidence ?? 0) >= 0.9 { sure += 1; if ok { sureRight += 1 } }
+                    if (answer.confidence ?? 0) >= 0.7 { quite += 1; if ok { quiteRight += 1 } }
+                }
+                let n = max(answers.count, 1)
+                print(String(format: "DECISION %@: answered %d/%d, right %d%%, when >=0.9 sure: %d%% right over %d%% of payees, when >=0.7: %d%% right over %d%%, %.1fs (%.0f ms each)",
+                             model, answers.count, states.count, right * 100 / n, sureRight * 100 / max(sure, 1), sure * 100 / n, quiteRight * 100 / max(quite, 1), quite * 100 / n,
+                             seconds, seconds * 1000 / Double(n)))
+            }
+            for line in CloudSpend.shared.lines(days: 1) where line.job == "Benchmark" { print("DECISION cost \(line)") }
+            NSApp.terminate(nil); return
+        }
         // SPENDTHRIFT_BENCH=1: how long the things pages do over and over take, then quit.
         if env["SPENDTHRIFT_BENCH"] != nil {
             func time(_ name: String, _ work: () -> Void) {
