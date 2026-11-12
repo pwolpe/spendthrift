@@ -74,12 +74,14 @@ struct ContentView: View {
                                 switch page {
                                 case .place(let name): PlaceView(name: name)
                                 case .charges(let filter): ChargesView(filter: filter)
+                                case .card(let id): CardPage(id: id)
                                 }
                             } else {
                                 switch store.selection ?? .overview {
                                 case .overview: OverviewView()
                                 case .stories: StoriesView()
                                 case .places: PlacesView()
+                                case .cards: CardsView()
                                 case .orders: OrdersView()
                                 case .apart: SetApartView()
                                 case .transactions: TransactionsView()
@@ -205,6 +207,10 @@ struct SidebarView: View {
                 SidebarRow(item: .overview, title: "Overview", symbol: "chart.pie.fill", current: current)
                 SidebarRow(item: .stories, title: "Trips & Events", symbol: "airplane.departure", current: current, count: store.stories.count, quiet: true)
                 SidebarRow(item: .places, title: "Payees", symbol: "storefront.fill", current: current)
+                // Only there once a credit card's statements are.
+                if store.hasCards || store.selection == .cards {
+                    SidebarRow(item: .cards, title: "Cards", symbol: "creditcard.fill", current: current)
+                }
                 // Only there once an order history has been added: a closer look, never a requirement.
                 if !store.orderRows.isEmpty || store.selection == .orders {
                     SidebarRow(item: .orders, title: "Amazon", symbol: "shippingbox.fill", current: current)

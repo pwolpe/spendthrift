@@ -7,6 +7,7 @@ struct TidyCard: View {
     @State private var showsAll = false
 
     var body: some View {
+        let _ = store.readsChecked
         let changes = store.tidyChanges, allOffers = store.library.tidy?.suggestions ?? [], offers = Array(allOffers.prefix(6))
         if !changes.isEmpty || !offers.isEmpty {
             Card {
@@ -15,9 +16,13 @@ struct TidyCard: View {
                         Label("Tidied for you", systemImage: "wand.and.stars").font(.headline)
                         Spacer()
                         if store.isTidying { ProgressView().controlSize(.small) }
+                        if !changes.isEmpty {
+                            Button(changes.count == 1 ? "Looks Good" : "All Look Good", systemImage: "checkmark") { withAnimation(.snappy) { store.keep() } }
+                                .help("Keep all of these and clear the list")
+                        }
                     }
                     if !changes.isEmpty {
-                        Text("The same business written two ways was combined; two businesses gathered under one name were separated. Anything can be put back.")
+                        Text("The same business written two ways was combined; two businesses gathered under one name were separated. Keep what is right, put back what is not; anything left here clears itself after a month.")
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         ForEach(changes.prefix(showsAll ? 200 : 5)) { change in
                             HStack(spacing: 10) {
@@ -33,6 +38,10 @@ struct TidyCard: View {
                                 .buttonStyle(.plain)
                                 .help("Open the payee")
                                 Spacer()
+                                Button { withAnimation(.snappy) { store.keep(change) } } label: { Image(systemName: "checkmark") }
+                                    .buttonStyle(.borderless)
+                                    .help("This is right: keep it and take it off the list")
+                                    .accessibilityLabel("Keep")
                                 Button("Undo") { store.undo(change) }
                                     .buttonStyle(.borderless)
                                     .help("Put this back as it was. It won't be done again.")

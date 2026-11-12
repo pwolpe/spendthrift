@@ -64,6 +64,9 @@ struct GoMenu: Commands {
             Button("Trips & Events") { store.selection = .stories }.keyboardShortcut("3")
             Button("Transactions") { store.selection = .transactions }.keyboardShortcut("4")
             Button("Find a Payee…") { store.selection = .places }.keyboardShortcut("f")
+            if Boot.shared.ready, store.hasCards {
+                Button("Cards") { store.selection = .cards }
+            }
             if Boot.shared.ready, !store.orderRows.isEmpty {
                 Button("Amazon") { store.selection = .orders }.keyboardShortcut("8")
             }

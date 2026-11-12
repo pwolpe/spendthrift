@@ -251,6 +251,18 @@ struct TidyChange: Codable, Identifiable, Hashable {
     var spelling: String?
     /// False once the person has seen it in the list.
     var isNew: Bool? = true
+    /// True once the person has said it is right. It then leaves the list; the pair stays settled.
+    var kept: Bool?
+
+    /// How long a change waits in the list to be looked at. After this it is taken as right:
+    /// a list of things to undo should not be there forever.
+    static let daysOnShow = 30
+    /// Whether it still belongs in the list on this day (yyyy-MM-dd).
+    func isOnShow(today: String) -> Bool {
+        guard kept != true else { return false }
+        guard let done = DateParsing.parse(day, format: "yyyy-MM-dd"), let now = DateParsing.parse(today, format: "yyyy-MM-dd") else { return true }
+        return now.timeIntervalSince(done) < Double(Self.daysOnShow) * 86_400
+    }
 
     struct Before: Codable, Hashable {
         var name: String

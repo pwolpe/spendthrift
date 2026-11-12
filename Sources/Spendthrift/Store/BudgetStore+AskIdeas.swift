@@ -42,6 +42,13 @@ extension BudgetStore {
         if !kindsTop.isEmpty { facts.append("Biggest categories of the last twelve months: " + kindsTop.map { "\($0.key.rawValue) \(money($0.value))" }.joined(separator: "; ") + ".") }
         let new = top.filter { (firstSeen[$0.key] ?? .distantPast) >= recently && $0.value >= 150 }.prefix(5)
         if !new.isEmpty { facts.append("Payees never seen before the last ten weeks: " + new.map { "\($0.key) \(money($0.value))" }.joined(separator: "; ") + ".") }
+        // What the cards' own statements show (said without the card's number).
+        for card in cardFacts() {
+            let name = card.name.components(separatedBy: "••").first?.trimmingCharacters(in: .whitespaces) ?? "A card"
+            for finding in card.findings.filter({ [.waiting, .wrongCard, .missed, .feeRose, .quiet].contains($0.kind) }).prefix(2) {
+                facts.append("On the \(name) card: \(finding.text)")
+            }
+        }
         // What the order history adds.
         let habits = orderHabits().prefix(4)
         if !habits.isEmpty {

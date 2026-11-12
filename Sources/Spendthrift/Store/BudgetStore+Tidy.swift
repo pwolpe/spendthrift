@@ -6,9 +6,12 @@ extension BudgetStore {
 
     /// What was tidied automatically, newest first.
     /// (A split-off payee that the sorter then gave its old name back is no change at all, and is left out.)
+    /// Only what still wants a look: not what the person has kept, nor anything done over a month ago.
     var tidyChanges: [TidyChange] {
-        (library.tidy?.changes ?? []).reversed().filter { change in
-            change.kind == .combine || change.otherKey.flatMap { library.merchants[$0]?.name } != change.from
+        let today = DateParsing.iso.string(from: .now)
+        return (library.tidy?.changes ?? []).reversed().filter { change in
+            guard change.isOnShow(today: today) else { return false }
+            return change.kind == .combine || change.otherKey.flatMap { library.merchants[$0]?.name } != change.from
         }
     }
     var newTidyChanges: [TidyChange] { tidyChanges.filter { $0.isNew ?? false } }
@@ -268,6 +271,17 @@ extension BudgetStore {
     }
 
     /// The list has been looked at: nothing in it is news any more.
+    /// "This is right": the change stays as it is and leaves the list. Nil keeps everything on show.
+    func keep(_ change: TidyChange? = nil) {
+        guard var book = library.tidy else { return }
+        let ids = Set(change.map { [$0.id] } ?? tidyChanges.map(\.id))
+        for i in book.changes.indices where ids.contains(book.changes[i].id) { book.changes[i].kept = true; book.changes[i].isNew = false }
+        library.tidy = book
+        // Nothing the pages work out from the charges has changed.
+        readsChecked += 1
+        savedOnly()
+    }
+
     func markTidySeen() {
         guard var book = library.tidy, book.changes.contains(where: { $0.isNew ?? false }) else { return }
         for i in book.changes.indices { book.changes[i].isNew = false }

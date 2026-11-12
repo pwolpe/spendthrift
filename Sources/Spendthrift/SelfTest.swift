@@ -557,9 +557,55 @@ enum SelfTest {
         let m = OrderMatcher.match([c2, c1], to: twin)
         check("orders: equal charges take their own orders, nearest first", m[c1.id.uuidString]?.items == [0] && m[c2.id.uuidString]?.items == [1])
         let refund = OrderMatcher.Charge(id: UUID(), date: "2026-03-02", cents: -1999, shop: .store), other = OrderMatcher.Charge(id: UUID(), date: "2026-03-02", cents: 1999, shop: .groceries)
+        do {
+            var change = TidyChange(kind: .combine, day: "2026-03-01", from: "A", other: "B", charges: 2, pairID: "a|b")
+            let fresh = change.isOnShow(today: "2026-03-20"), faded = !change.isOnShow(today: "2026-04-05")
+            change.kept = true
+            check("tidy: a change waits a month to be looked at, then is taken as right; one the person kept leaves at once",
+                  fresh && faded && !change.isOnShow(today: "2026-03-02"))
+        }
         check("ask: suggested questions are read from a list, and one with a figure or no question mark is dropped",
               BudgetStore.askIdeas(in: "Here you go:\n[\"Why did dining jump in March?\", \"Did I really spend $400 on coffee?\", \"Tell me about rent\", \"why did dining jump in march?\", \"What is my longest-running subscription?\"]")
                 == ["Why did dining jump in March?", "What is my longest-running subscription?"] && BudgetStore.askIdeas(in: "no list here").isEmpty)
+        // What the statements say about a credit card.
+        do {
+            check("cards: a credit line names its benefit; a refund, a fraud reversal and a bank transfer do not",
+                  CardEngine.benefitName("Platinum Lululemon Credit LULULEMON FLATIRON") == "Platinum Lululemon Credit"
+                  && CardEngine.benefitName("TRAVEL CREDIT $300/YEAR") == "Travel Credit"
+                  && CardEngine.benefitName("LULULEMON UNION SQUARE NEW YORK NY") == nil && CardEngine.benefitName("FRAUD CREDIT - CITY WINERY") == nil
+                  && CardEngine.benefitName("ZELLE CREDIT PAYMENT FROM: SOMEONE") == nil && CardEngine.benefitName("CREDIT - INTEREST") == nil)
+            check("cards: a yearly allowance printed in a credit line is read", CardEngine.printedAllowance("TRAVEL CREDIT $300/YEAR") == 300 && CardEngine.printedAllowance("DOORDASH CREDIT") == nil)
+            check("cards: a yearly fee is told from other lines, and names the other cardholder when the line does",
+                  CardEngine.annualFee("ANNUAL MEMBERSHIP FEE").isFee && CardEngine.annualFee("ANNUAL MEMBERSHIP FEE").who == nil
+                  && CardEngine.annualFee("JANE Q ROE ANNUAL MEMBERSHIP FEE").who == "Jane" && !CardEngine.annualFee("LATE FEE").isFee)
+            let card = UUID(), other = UUID()
+            func line(_ day: String, _ amount: Double, _ text: String, payee: String, on account: UUID, category: Category = .shopping) -> Transaction {
+                let date = DateParsing.isoDay(day)!
+                return Transaction(id: UUID(), date: date, month: Month(date: date), description: text, amount: amount, merchant: payee, merchantKey: "own:" + payee,
+                                   category: category, account: account == card ? "Bank Card ••1111" : "Other ••2222", accountID: account, source: .user, needsCheck: false, isOverride: false)
+            }
+            var lines = [line("2025-11-20", 695, "ANNUAL MEMBERSHIP FEE", payee: "Annual Fee", on: card, category: .fees)]
+            // A shop credit every quarter but one; that quarter, the shop was paid on the other card.
+            for day in ["2025-08-10", "2025-11-12", "2026-05-09", "2026-08-11"] {
+                lines.append(line(day, 90, "TOGS FLATIRON", payee: "Togs", on: card))
+                lines.append(line(day, -75, "Gold Togs Credit TOGS FLATIRON", payee: "Togs", on: card))
+            }
+            lines.append(line("2026-02-14", 140, "TOGS UPTOWN", payee: "Togs", on: other))
+            lines.append(line("2026-11-05", 30, "CORNER CAFE", payee: "Corner Cafe", on: card, category: .dining))
+            let facts = CardEngine.cards([(id: card, name: "Bank Card ••1111")], in: lines.sorted { $0.date < $1.date }, asOf: DateParsing.isoDay("2026-11-10")!)
+            let togs = facts.first?.benefits.first
+            check("cards: a credit that comes most quarters is quarterly, and a full quarter is what it usually pays",
+                  togs?.name == "Gold Togs Credit" && togs?.cadence == .quarterly && togs?.usual == 75 && togs?.shops == ["Togs"])
+            check("cards: a quarter the credit did not come is found, with what went to that shop on another card",
+                  togs?.missed.map(\.label) == ["Jan to Mar 2026"] && togs?.missed.first?.elsewhere.map(\.amount) == [140]
+                  && facts.first?.findings.contains { $0.kind == .wrongCard && $0.text.contains("$140") && $0.text.contains("Togs") } == true)
+            check("cards: the quarter now running, with nothing yet, is said once the statements reach well into it",
+                  facts.first?.findings.contains { $0.kind == .waiting && $0.text.contains("Dec 31") } == true)
+            check("cards: the last twelve months set fees against credits, and the verdict follows",
+                  facts.first?.feesPaid == 695 && facts.first?.creditsBack == 225 && facts.first?.verdict == .costs(470)
+                  && facts.first?.nextFee?.amount == 695 && facts.first.map { DateParsing.iso.string(from: $0.nextFee!.date) } == "2026-11-20"
+                  && facts.first?.findings.contains { $0.kind == .feeDue } == true)
+        }
         // What an order history says beyond its totals.
         do {
             func day(_ text: String) -> Date { DateParsing.parse(text, format: "yyyy-MM-dd")! }
@@ -692,6 +738,14 @@ enum SelfTest {
               store.askIdeaFacts().count >= 3 && store.askIdeaFacts() == store.askIdeaFacts())
         check("orders: with card charges on file, an order with none is explained by its date",
               store.orderChargeList.isEmpty || (store.orderChargeSpan != nil && store.unpaidNote(for: .distantFuture) == "not on a statement yet" && store.unpaidNote(for: .distantPast) == "before your statements begin"))
+        for card in store.cardFacts() {
+            check("cards: \(card.name.components(separatedBy: "••").first ?? "a card")adds up: each year's credits are its benefits' credits, and every finding has words",
+                  abs(card.years.reduce(0) { $0 + $1.credits } - card.benefits.reduce(0) { $0 + $1.total }) < 0.01
+                  && card.findings.allSatisfy { !$0.text.isEmpty } && card.share >= 0 && card.share <= 1.0001)
+        }
+        check("cards: the cards are the accounts named for a card issuer, and their shares of card spending make a whole",
+              store.cardFacts().count <= store.accounts.filter(BudgetStore.isCard).count
+              && (store.cardFacts().allSatisfy { $0.spent < 0.5 } || abs(store.cardFacts().reduce(0) { $0 + $1.share } - 1) < 0.001))
         let repeating = store.recurring()
         // A past year shows the bills of that time: nothing that began later, nothing judged by today.
         if let first = store.transactions.first?.date, let last = store.transactions.last?.date,

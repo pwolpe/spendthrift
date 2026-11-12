@@ -361,6 +361,18 @@ enum DebugHooks {
                     EditableName(text: .constant("Pastis"), font: .system(size: 19, weight: .bold, design: .serif), centered: true, commit: {}).frame(maxWidth: .infinity)
                 }.padding(24)
             }
+            let cards = store.cardFacts()
+            if !cards.isEmpty {
+                await snap("47-cards", outDir) { CardsView(scrolls: false) }
+                for (n, card) in cards.filter({ !$0.benefits.isEmpty }).prefix(3).enumerated() { await snap("47-card-\(n + 1)", outDir) { CardPage(id: card.id, scrolls: false) } }
+                // The facts in words, with card numbers left out.
+                for card in cards {
+                    let name = card.name.components(separatedBy: "••").first ?? ""
+                    print("CARD \(name)| fees \(Int(card.feesPaid)) back \(Int(card.creditsBack)) spent \(Int(card.spent)) x\(card.charges) share \(Int(card.share * 100))% next fee \(card.nextFee.map { "\(Int($0.amount)) \(DateParsing.iso.string(from: $0.date))" } ?? "-")")
+                    for b in card.benefits { print("  BENEFIT \(b.name) | \(b.cadence.rawValue) usual \(b.usual) printed \(b.printed ?? 0) total \(Int(b.total)) ended \(b.ended) shops \(b.shops) | " + b.uses.map { "\(Int($0.received))\($0.isCurrent ? "*" : "")" }.joined(separator: " ")) }
+                    for f in card.findings { print("  FINDING [\(f.kind)] \(f.text.replacingOccurrences(of: card.name, with: name))") }
+                }
+            }
             if !store.orderRows.isEmpty {
                 await snap("45-orders", outDir) { OrdersView(scrolls: false) }
                 if env["SPENDTHRIFT_ORDERREAD"] != nil {
