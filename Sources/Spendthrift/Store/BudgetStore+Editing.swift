@@ -235,6 +235,12 @@ extension BudgetStore {
     }
 
     func onThisDay(_ today: Date = .now) -> (years: Int, charge: Transaction)? {
+        // Asked on every draw of the Overview: worked out once a day. (Kept as a list: the cache cannot keep a "none".)
+        let kept: [Transaction] = cached("on-this-day|\(DateParsing.iso.string(from: today))") { remembered(today).map { [$0.charge] } ?? [] }
+        return kept.first.map { (Calendar.current.component(.year, from: today) - Calendar.current.component(.year, from: $0.date), $0) }
+    }
+
+    private func remembered(_ today: Date) -> (years: Int, charge: Transaction)? {
         let cal = Calendar.current
         let now = cal.dateComponents([.year, .month, .day], from: today)
         let routine = Set(subscriptions().map(\.merchant))

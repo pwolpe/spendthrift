@@ -557,29 +557,7 @@ struct CardPage: View {
     /// The paper behind all of this: the last year of statements as a row of sheets, each one a
     /// click from the original, with a gap where a month is missing.
     @ViewBuilder private func papers(_ card: CardEngine.Card) -> some View {
-        let all = store.statements(of: card.id)
-        if let newest = all.first {
-            let latest = Month(isoDay: newest.lastDate ?? "") ?? Month(date: card.last)
-            let months = (0..<12).reversed().map { latest.adding(-$0) }
-            let missing = Set(store.missingStatements.first { $0.accountID == card.id }?.months ?? [])
-            Card {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .firstTextBaseline) {
-                        SectionHeader(title: "Where this comes from", subtitle: "\(all.count) \(all.count == 1 ? "statement" : "statements"), exactly as the bank sent them")
-                        Spacer()
-                        Button("All Its Statements") { store.browse(newest) }.buttonStyle(.borderless).font(.callout)
-                            .help("Browse every statement of this card")
-                    }
-                    HStack(alignment: .bottom, spacing: 8) {
-                        ForEach(months) { month in
-                            let sheet = all.first { ($0.lastDate.flatMap { Month(isoDay: $0) }) == month } ?? all.first { $0.monthsCovered.contains(month) }
-                            Sheet(month: month, source: sheet, missing: sheet == nil && missing.contains(month))
-                        }
-                        Spacer(minLength: 0)
-                    }
-                }
-            }
-        }
+        StatementStrip(account: card.id, fallbackEnd: card.last)
     }
 
     // MARK: What it carries
@@ -746,6 +724,41 @@ private struct Pip: View {
         .onAppear {
             guard justLanded else { return }
             withAnimation(.spring(response: 0.45, dampingFraction: 0.45).delay(0.6)) { landed = true }
+        }
+    }
+}
+
+/// The paper behind an account: its last year of statements as a row of sheets, each a click from
+/// the original, with a gap where a month is missing.
+struct StatementStrip: View {
+    let account: UUID
+    /// The last day with a line on this account, for when a statement does not say its own dates.
+    var fallbackEnd: Date = .now
+    private var store: BudgetStore { .shared }
+
+    var body: some View {
+        let all = store.statements(of: account)
+        if let newest = all.first {
+            let latest = Month(isoDay: newest.lastDate ?? "") ?? Month(date: fallbackEnd)
+            let months = (0..<12).reversed().map { latest.adding(-$0) }
+            let missing = Set(store.missingStatements.first { $0.accountID == account }?.months ?? [])
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline) {
+                        SectionHeader(title: "Where this comes from", subtitle: "\(all.count) \(all.count == 1 ? "statement" : "statements"), exactly as the bank sent them")
+                        Spacer()
+                        Button("All Its Statements") { store.browse(newest) }.buttonStyle(.borderless).font(.callout)
+                            .help("Browse every statement of this account")
+                    }
+                    HStack(alignment: .bottom, spacing: 8) {
+                        ForEach(months) { month in
+                            let sheet = all.first { ($0.lastDate.flatMap { Month(isoDay: $0) }) == month } ?? all.first { $0.monthsCovered.contains(month) }
+                            Sheet(month: month, source: sheet, missing: sheet == nil && missing.contains(month))
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
         }
     }
 }

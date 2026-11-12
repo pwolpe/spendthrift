@@ -33,7 +33,8 @@ extension BudgetStore {
         if !ideas.isEmpty {
             facts.append("Ways to save found: \(ideas.count), worth \(money(ideas.reduce(0) { $0 + $1.yearly })) a year together; the largest: \(ideas.prefix(2).map { "\($0.title) (\(money($0.yearly)) a year)" }.joined(separator: "; ")).")
         }
-        return (Self.basis(of: facts), facts)
+        // (The last line is the style the sentences are written in: change it and they are written again.)
+        return (Self.basis(of: facts + ["style: the conclusion only, once"]), facts)
     }
 
     /// Changes whenever any fact a sentence is written from changes: a hash of all of them.
@@ -84,9 +85,12 @@ extension BudgetStore {
         guard CloudAI.isEnabled, !facts.isEmpty else { return nil }
         let system = """
         You are the voice of Spendthrift, a personal money app. You are given figures the app worked out about \
-        one person's money over a stretch of time. Write two or three sentences: the read a sharp, kind friend \
-        would give after looking at them. Lead with what matters most to someone asking "am I living within my \
-        means, and what changed?". Say what explains it when the figures say so.
+        one person's money over a stretch of time. Write the conclusion a sharp, kind friend would draw from them: \
+        one sentence, two at most, 35 words at most. Answer "am I living within my means?" and, if the figures \
+        say so, the one thing that explains it.
+        The page prints every total right under your words (what came in, taxes, what was lived on, loan \
+        interest, what was left, pay against living) and lists what changed just below. Do not recite them. \
+        Use at most two figures, and only where the figure is the point.
         Use ONLY the figures given. Copy every dollar amount and percentage exactly as written; never add, \
         subtract, round or estimate. Speak to the person as "you". Plain words, dry and warm. No advice the \
         figures do not support, no lists, no headings, no exclamation marks, no opening such as "Over the last".

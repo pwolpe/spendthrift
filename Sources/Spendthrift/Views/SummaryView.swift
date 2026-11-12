@@ -127,16 +127,12 @@ struct FlowHero: View {
     /// The sum, in words: what came in, less tax, against what was lived on.
     private func sentence(_ verdict: Verdict) -> String {
         guard verdict != .unknown else { return "No income has shown up for \(data.period == .last12 ? "the last 12 months" : data.title) yet, so there is nothing to measure it against." }
+        // The conclusion only: every figure is printed just beneath.
         let money = { (v: Double) in Money.format(v, cents: false) }
-        let takeHome = data.totalIncome - data.taxes
-        var text = data.taxes > 0.5 ? "After \(money(data.taxes)) in income taxes, \(money(takeHome)) was yours. "
-                                    : "\(money(takeHome)) came in. "
-        text += "You lived on \(money(data.spending))"
-        if data.loanInterest > 0.5 { text += " and paid \(money(data.loanInterest)) in loan interest" }
-        switch verdict {
-        case .within: text += ", and \(money(data.surplus)) was left to keep or invest."
-        case .even: text += data.surplus >= 0 ? ", which left \(money(data.surplus))." : ", \(money(-data.surplus)) more than that."
-        default: text += "."
+        let text: String = switch verdict {
+        case .within: "\(money(data.surplus)) was left after taxes and everything you lived on."
+        case .even: "What came in and what went out were about even."
+        default: "You lived on \(money(-data.surplus)) more than came in."
         }
         return text + (data.built > 0.5 ? " Money you invested is never counted as spending." : "")
     }

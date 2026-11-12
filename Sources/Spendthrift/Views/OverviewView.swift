@@ -6,6 +6,8 @@ struct OverviewView: View {
     /// The bar under the pointer in "Month by month".
     @State private var hoveredBar: String?
     @State private var hoveredAngle: Double?
+    /// Whether the notices behind the first are on show.
+    @State private var showsAllNotices = false
 
     /// False when rendered for a test snapshot (ImageRenderer can't draw scroll views).
     var scrolls = true
@@ -46,15 +48,7 @@ struct OverviewView: View {
     @ViewBuilder
     private var summary: some View {
         if !DebugHooks.off("daily") { BannerCard() }
-        OnThisDayLine()
-        CloudTroubleBanner()
-        DownloadsBanner()
-        if !store.reviewItems.isEmpty, !store.isSuggesting { reviewBanner }
-        if !store.missingStatements.isEmpty, !store.isImporting { missingBanner }
-        AfterFirstFrame { SinceCard() }
-        TidyNotice()
-        // A card with something that will not wait (worked out after the page is up; only about the present).
-        if store.overviewAsOf == nil, store.hasCards { AfterFirstFrame { CardNotice() } }
+        tray
         if store.months.count > 1 { scopePicker }
         if let data = flowData {
             // The judgment that matters most comes first: did living stay within income?
@@ -387,6 +381,88 @@ struct OverviewView: View {
     }
 
     /// The picture is only as complete as the statements in it: say what's missing, in one line.
+    // MARK: Notices: the one that matters most, and a way to the rest
+
+    /// Everything that can ask for attention above the figures, most pressing first.
+    private enum Notice: String, CaseIterable, Identifiable {
+        case cloud, downloads, missing, card, since, review, tidy, memory
+        var id: String { rawValue }
+        /// For the "and two more" line.
+        var name: String {
+            switch self {
+            case .cloud: "the AI has paused"
+            case .downloads: "new statements in Downloads"
+            case .missing: "missing statements"
+            case .card: "a card"
+            case .since: "what arrived since you last looked"
+            case .review: "guesses to check"
+            case .tidy: "payees tidied"
+            case .memory: "on this day"
+            }
+        }
+    }
+
+    private func has(_ notice: Notice) -> Bool {
+        switch notice {
+        case .cloud: CloudStatus.shared.stopped != nil && CloudStatus.shared.hasKey
+        case .downloads: !store.downloadCandidates.isEmpty
+        case .missing: !store.missingStatements.isEmpty && !store.isImporting
+        // (These two are worked out after the page is up.)
+        case .card: Boot.shared.drawn && store.overviewAsOf == nil && store.hasCards && (!store.creditArrivals().isEmpty || store.cardNudge() != nil)
+        case .since: Boot.shared.drawn && store.sinceLastLooked != nil
+        case .review: !store.reviewItems.isEmpty && !store.isSuggesting
+        case .tidy: !store.newTidyChanges.isEmpty
+        case .memory: OnThisDayLine.hasSomething
+        }
+    }
+
+    @ViewBuilder private func show(_ notice: Notice) -> some View {
+        switch notice {
+        case .cloud: CloudTroubleBanner()
+        case .downloads: DownloadsBanner()
+        case .missing: missingBanner
+        case .card: CardNotice()
+        case .since: SinceCard()
+        case .review: reviewBanner
+        case .tidy: TidyNotice()
+        case .memory: OnThisDayLine()
+        }
+    }
+
+    /// One notice, the most pressing; the others wait behind a line that says how many and what.
+    /// (A page that opens with six banners has said nothing.)
+    @ViewBuilder private var tray: some View {
+        let _ = store.readsChecked
+        let waiting = Notice.allCases.filter(has)
+        VStack(alignment: .leading, spacing: 10) {
+            if let first = waiting.first {
+                show(first)
+                if waiting.count > 1 {
+                    if showsAllNotices { ForEach(Array(waiting.dropFirst())) { show($0) } }
+                    Button { withAnimation(.snappy(duration: 0.25)) { showsAllNotices.toggle() } } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: showsAllNotices ? "chevron.up" : "chevron.down").font(.caption2.weight(.bold))
+                            Text(showsAllNotices ? "Show only the first"
+                                                 : "And \(waiting.count - 1) more: " + waiting.dropFirst().map(\.name).joined(separator: ", "))
+                                .font(.callout).lineLimit(1)
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(showsAllNotices ? "Put the others away" : "Show the other notices")
+                }
+            }
+        }
+        // The card facts are worked out in the background whether or not a card has anything to say yet.
+        .task(id: store.revision) {
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled, store.hasCards else { return }
+            await store.warmCardFacts()
+        }
+    }
+
     private var missingBanner: some View {
         let missing = store.missingStatements
         let count = missing.reduce(0) { $0 + $1.months.count }
@@ -602,6 +678,12 @@ private struct CategoryRow: View {
 /// One line from the person's own history: what they were buying on this day in an earlier year.
 struct OnThisDayLine: View {
     private var store: BudgetStore { .shared }
+
+    /// Whether there is a memory to show today that the picture is not already showing.
+    @MainActor static var hasSomething: Bool {
+        guard !DailyPicture.shared.showsMemory, let memory = BudgetStore.shared.onThisDay() else { return false }
+        return DailyPicture.shared.entry != memory.charge.id
+    }
 
     var body: some View {
         // One memory a day. When today's picture is itself an "on this day", the picture is the memory
