@@ -105,9 +105,13 @@ extension BudgetStore {
             let day = DateParsing.iso.string(from: t.date)
             if let story = all.first(where: { $0.kind == .trip && $0.start <= day && $0.end >= day }) { during[story.id, default: []].append(t) }
         }
+        // A charge that merely fell on a day away says something only when most of the payee's charges
+        // did: a hotel does, a gym membership that bills every month wherever you are does not.
+        let away = part.values.reduce(0) { $0 + $1.count } + during.values.reduce(0) { $0 + $1.count }
+        let countsDuring = away * 2 >= charges.count
         return all.compactMap { story in
-            if let list = part[story.id] { return (story, list + (during[story.id] ?? []), false) }
-            if let list = during[story.id] { return (story, list, true) }
+            if let list = part[story.id] { return (story, list + (countsDuring ? during[story.id] ?? [] : []), false) }
+            if countsDuring, let list = during[story.id] { return (story, list, true) }
             return nil
         }
     }

@@ -488,7 +488,8 @@ enum DebugHooks {
         for (i, kind) in PremiereCard.Kind.available(in: store).enumerated() {
             await snap("20-premiere-\(i + 1)", outDir) { PremiereCard(kind: kind).padding(.vertical, 50).frame(width: 900) }
         }
-        if let busiest = Dictionary(grouping: store.transactions.filter(\.countsAsSpending), by: \.merchant).max(by: { $0.value.count < $1.value.count })?.key {
+        // SPENDTHRIFT_PLACE="DoorDash" picks the payee; otherwise the busiest one.
+        if let busiest = env["SPENDTHRIFT_PLACE"] ?? Dictionary(grouping: store.transactions.filter(\.countsAsSpending), by: \.merchant).max(by: { $0.value.count < $1.value.count })?.key {
             await snap("12-place", outDir) { PlaceView(name: busiest, scrolls: false).frame(width: 1000) }
         }
         if let trip = store.stories.max(by: { store.transactions(in: $0).count < store.transactions(in: $1).count }) {

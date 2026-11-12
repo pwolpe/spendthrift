@@ -656,6 +656,12 @@ enum SelfTest {
                   && ChatAction(["type": "file", "payee": t.merchant, "category": "no such thing"], store: store) == nil)
         }
 
+        // A payee is tied to a trip by its charges in it, not by a monthly bill that happened to fall on a day away.
+        for bill in store.recurring().filter({ $0.isActive && $0.cadence == .monthly && $0.count >= 12 }).prefix(3) {
+            let charges = store.charges(at: bill.merchant)
+            check("a monthly bill is not called part of every trip (\(bill.merchant))", store.stories(touching: charges).count * 2 <= max(1, charges.count))
+        }
+
         // What pages keep between redraws must equal what they would work out afresh.
         for f in [TransactionFilter(category: .travel), TransactionFilter(month: store.months.last), TransactionFilter(needsCheck: true)] {
             let fresh = store.transactions.filter { (f.category == nil || $0.category == f.category!) && (f.month == nil || $0.month == f.month!) && (!f.needsCheck || $0.needsCheck) }.map(\.id)
