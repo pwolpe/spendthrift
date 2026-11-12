@@ -1,15 +1,68 @@
 import SwiftUI
 
+/// The window: a sidebar and the page beside it. The frame of it (the split, the title bar) is there
+/// from the first instant, so the Mac lays the window out once and correctly; what fills it arrives
+/// when the saved file has been read (`Boot`). Nothing here may touch the store before then.
 struct ContentView: View {
-    @Environment(BudgetStore.self) private var store
     @State private var isDropTargeted = false
     @State private var decidedAboutAsk = false
+    @State private var width: CGFloat = 0
+    private var boot: Boot { .shared }
+    /// Only ever read once `boot.ready` is true: naming it makes it.
+    private var store: BudgetStore { .shared }
 
     var body: some View {
         NavigationSplitView {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 300)
+            Group {
+                if boot.ready { SidebarView().environment(store) } else { Color.clear }
+            }
+            .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 300)
         } detail: {
+            if boot.ready {
+                loaded.environment(store)
+            } else {
+                // The empty sheet the pages arrive on, a few hundredths of a second later.
+                Theme.paper.ignoresSafeArea().onAppear { Launch.mark("empty window appears"); boot.begin() }
+            }
+        }
+        // The question pane is open from the start when there is room for it beside the pages.
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0; decideAboutAsk() }
+        .onChange(of: boot.ready) { decideAboutAsk() }
+        .tint(Theme.accent)
+        .overlay {
+            if boot.ready, isDropTargeted, !store.accounts.isEmpty {
+                DropOverlay().transition(.opacity).allowsHitTesting(false)
+            }
+        }
+        .overlay {
+            if boot.ready, store.stage != nil { ShowView().environment(store).transition(.opacity) }
+        }
+        .overlay(alignment: .bottom) {
+            if boot.ready, let toast = store.toast {
+                ToastView(toast: toast)
+                    .environment(store)
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .id(toast.id)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard boot.ready else { return false }
+            store.importFiles(urls)
+            return true
+        } isTargeted: { targeted in
+            withAnimation(.easeOut(duration: 0.15)) { isDropTargeted = targeted }
+        }
+    }
+
+    private func decideAboutAsk() {
+        guard boot.ready, !decidedAboutAsk, width > 0 else { return }
+        decidedAboutAsk = true
+        if width >= 1320 { store.showsAsk = true }
+    }
+
+    /// The pages, and everything that hangs off them, once there is a store to draw from.
+    private var loaded: some View {
             HStack(spacing: 0) {
                 Group {
                     if store.accounts.isEmpty {
@@ -69,35 +122,12 @@ struct ContentView: View {
                     }
                 }
             }
-        }
-        // The question pane is open from the start when there is room for it beside the pages.
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-            guard !decidedAboutAsk, width > 0 else { return }
-            decidedAboutAsk = true
-            if width >= 1320 { store.showsAsk = true }
-        }
-        .tint(Theme.accent)
-        .overlay {
-            if isDropTargeted && !store.accounts.isEmpty {
-                DropOverlay().transition(.opacity).allowsHitTesting(false)
-            }
-        }
-        .overlay {
-            if store.stage != nil { ShowView().transition(.opacity) }
-        }
-        .overlay(alignment: .bottom) {
-            if let toast = store.toast {
-                ToastView(toast: toast)
-                    .padding(.bottom, 24)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .id(toast.id)
-            }
-        }
-        .dropDestination(for: URL.self) { urls, _ in
-            store.importFiles(urls)
-            return true
-        } isTargeted: { targeted in
-            withAnimation(.easeOut(duration: 0.15)) { isDropTargeted = targeted }
+        // Timed from inside the pass that draws the first page; the pieces held back follow it.
+        .overlay(alignment: .topLeading) { FirstPaintProbe().frame(width: 1, height: 1).allowsHitTesting(false).accessibilityHidden(true) }
+        .onAppear {
+            Launch.mark("window appears")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Launch.mark("one second later (idle)") }
+            if Launch.enabled { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { Launch.mark("quitting"); NSApp.terminate(nil) } }
         }
         .sheet(item: Binding(get: { store.pendingImports.first }, set: { _ in })) { pending in
             ImportSheet(pending: pending)

@@ -53,7 +53,7 @@ struct OrderShelf: View {
     private var pictures: ProductImages { .shared }
     private var store: BudgetStore { .shared }
 
-    private static let gap: CGFloat = 14, tall: CGFloat = 116, small: CGFloat = 58
+    private static let gap: CGFloat = 18, tall: CGFloat = 124, small: CGFloat = 60
 
     private func size(_ thing: OrderHabits.Bought, top: Int) -> CGFloat {
         Self.small + (Self.tall - Self.small) * CGFloat((Double(thing.cents) / Double(max(top, 1))).squareRoot())
@@ -74,61 +74,94 @@ struct OrderShelf: View {
         return rows
     }
 
+    /// The wall behind the shelves: warm paper in light and dark alike, so product shots (which come
+    /// on white) melt into it and the things look as if they are standing there.
+    private static let wall = Color(red: 0.985, green: 0.965, blue: 0.925)
+    private static let ink = Color(red: 0.2, green: 0.17, blue: 0.14)
+
     var body: some View {
         // Only what there is a picture of: asking for one starts fetching it, so the shelf fills as they arrive.
         let pictured = things.filter { pictures.image(for: $0.asin) != nil }
         if pictured.count >= 5 {
             let top = pictured.first?.cents ?? 1
-            Card(padding: 16) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("WHAT ARRIVED").font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
-                    // Each shelf is as tall as the tallest thing on it. (The width is measured behind the
-                    // shelves, so their height can follow from what is on them.)
-                    VStack(alignment: .leading, spacing: 14) {
-                        ForEach(Array(shelves(pictured, width: width, top: top).enumerated()), id: \.offset) { _, row in
-                            VStack(spacing: 0) {
-                                HStack(alignment: .bottom, spacing: Self.gap) {
-                                    ForEach(row) { thing in tile(thing, size: size(thing, top: top)) }
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.top, 8)
-                                plank
+            VStack(alignment: .leading, spacing: 10) {
+                Text("WHAT ARRIVED").font(Theme.mono(10.5, .bold)).tracking(1.2).foregroundStyle(Self.ink.opacity(0.55))
+                // Each shelf is as tall as the tallest thing on it. (The width is measured behind the
+                // shelves, so their height can follow from what is on them.)
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(Array(shelves(pictured, width: width, top: top).enumerated()), id: \.offset) { _, row in
+                        VStack(spacing: 0) {
+                            HStack(alignment: .bottom, spacing: Self.gap) {
+                                ForEach(row) { thing in item(thing, size: size(thing, top: top)) }
+                                Spacer(minLength: 0)
                             }
+                            .padding(.horizontal, 10).padding(.top, 26)
+                            plank
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background { GeometryReader { geo in Color.clear.onAppear { width = geo.size.width }.onChange(of: geo.size.width) { width = geo.size.width } } }
-                    Group {
-                        if let thing = pictured.first(where: { $0.id == pointed }) {
-                            Text("\(thing.name) · \(Money.format(Double(thing.cents) / 100)) · \(thing.date.formatted(.dateTime.month(.abbreviated).day().year()))")
-                                .foregroundStyle(.primary)
-                        } else {
-                            Text(about).foregroundStyle(.secondary)
-                        }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background { GeometryReader { geo in Color.clear.onAppear { width = geo.size.width - 20 }.onChange(of: geo.size.width) { width = geo.size.width - 20 } } }
+                Group {
+                    if let thing = pictured.first(where: { $0.id == pointed }) {
+                        Text("\(thing.name) · \(thing.date.formatted(.dateTime.month(.abbreviated).day().year()))").foregroundStyle(Self.ink)
+                    } else {
+                        Text(about).foregroundStyle(Self.ink.opacity(0.6))
                     }
-                    .font(.callout).lineLimit(1)
+                }
+                .font(.callout).lineLimit(1).padding(.top, 2)
+            }
+            .padding(18)
+            .background(Self.wall, in: .rect(cornerRadius: 16, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.hairline) }
+        }
+    }
+
+    /// A wooden shelf: a lit top edge, a face, and the shadow it throws on the wall.
+    private var plank: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Color(red: 0.86, green: 0.71, blue: 0.5)).frame(height: 2)
+            Rectangle().fill(LinearGradient(colors: [Color(red: 0.74, green: 0.57, blue: 0.37), Color(red: 0.6, green: 0.44, blue: 0.27)], startPoint: .top, endPoint: .bottom)).frame(height: 8)
+        }
+        .clipShape(.rect(cornerRadius: 2, style: .continuous))
+        .shadow(color: Color(red: 0.35, green: 0.25, blue: 0.12).opacity(0.3), radius: 5, y: 5)
+    }
+
+    /// One thing, standing on the shelf: no frame around it, a soft shadow at its feet. Pointed at,
+    /// it hops, leans, and shows its price on a tag.
+    private func item(_ thing: OrderHabits.Bought, size: CGFloat) -> some View {
+        let up = pointed == thing.id
+        let lean: Double = thing.id % 2 == 0 ? -4 : 4
+        return Button { store.navigate { store.orderOnly = thing.orderID } } label: {
+            ZStack(alignment: .bottom) {
+                Ellipse().fill(Color(red: 0.3, green: 0.22, blue: 0.12).opacity(up ? 0.12 : 0.22))
+                    .frame(width: size * (up ? 0.6 : 0.78), height: 7).blur(radius: 3).offset(y: 3)
+                if let picture = pictures.image(for: thing.asin) {
+                    Image(nsImage: picture).resizable().aspectRatio(contentMode: .fit)
+                        .frame(width: size, height: size, alignment: .bottom)
+                        // White in the shot becomes the wall; only the thing itself is left.
+                        .blendMode(.multiply)
+                        .rotationEffect(.degrees(up ? lean : 0), anchor: .bottom)
+                        .offset(y: up ? -9 : 0)
                 }
             }
-        }
-    }
-
-    private var plank: some View {
-        RoundedRectangle(cornerRadius: 2, style: .continuous)
-            .fill(LinearGradient(colors: [Color(red: 0.72, green: 0.56, blue: 0.38), Color(red: 0.52, green: 0.38, blue: 0.24)], startPoint: .top, endPoint: .bottom))
-            .frame(height: 7)
-            .shadow(color: .black.opacity(0.25), radius: 3, y: 3)
-    }
-
-    private func tile(_ thing: OrderHabits.Bought, size: CGFloat) -> some View {
-        let up = pointed == thing.id
-        return Button { store.navigate { store.orderOnly = thing.orderID } } label: {
-            ProductThumb(asin: thing.asin, kind: thing.kind, size: size)
-                .shadow(color: .black.opacity(up ? 0.3 : 0.16), radius: up ? 9 : 4, y: up ? 6 : 2)
-                .scaleEffect(up ? 1.07 : 1, anchor: .bottom)
-                .rotationEffect(.degrees(up ? (thing.id % 2 == 0 ? -2 : 2) : 0), anchor: .bottom)
+            .overlay(alignment: .top) {
+                if up {
+                    Text(Money.format(Double(thing.cents) / 100, cents: false))
+                        .font(Theme.mono(11, .bold)).foregroundStyle(Self.ink)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Color(red: 1, green: 0.86, blue: 0.4), in: .rect(cornerRadius: 4, style: .continuous))
+                        .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                        .rotationEffect(.degrees(-lean * 1.5))
+                        .fixedSize()
+                        .offset(y: -24)
+                        .transition(.scale(scale: 0.4, anchor: .bottom).combined(with: .opacity))
+                }
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { inside in withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) { pointed = inside ? thing.id : (pointed == thing.id ? nil : pointed) } }
+        .onHover { inside in withAnimation(.spring(response: 0.28, dampingFraction: 0.5)) { pointed = inside ? thing.id : (pointed == thing.id ? nil : pointed) } }
         .help("Open this order")
         .accessibilityLabel("\(thing.name), \(Money.format(Double(thing.cents) / 100))")
         .zIndex(up ? 1 : 0)
