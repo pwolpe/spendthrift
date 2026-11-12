@@ -506,6 +506,31 @@ enum SelfTest {
         let store = BudgetStore.shared
         logic()
         books(store)
+        // What pages keep between redraws must equal what they would work out afresh.
+        for f in [TransactionFilter(category: .travel), TransactionFilter(month: store.months.last), TransactionFilter(needsCheck: true)] {
+            let fresh = store.transactions.filter { (f.category == nil || $0.category == f.category!) && (f.month == nil || $0.month == f.month!) && (!f.needsCheck || $0.needsCheck) }.map(\.id)
+            check("kept rows equal a fresh filter (\(f.cacheKey))", Set(store.filteredTransactions(f, search: "").map(\.id)) == Set(fresh))
+        }
+        if let t = store.transactions.first {
+            check("a payee's kept charges equal a fresh search", Set(store.charges(at: t.merchant).map(\.id)) == Set(store.transactions.filter { $0.merchant == t.merchant }.map(\.id)))
+            check("the kept list of payees is every payee", store.allPayeeNames == Set(store.transactions.map(\.merchant)))
+            let old = t.merchant, new = old + " Renamed"
+            _ = store.charges(at: old); _ = PlaceLinker.names()
+            store.renamePlace(t.merchantKey, to: new)
+            check("a rename is seen at once by everything kept", !store.charges(at: new).isEmpty && store.allPayeeNames.contains(new))
+            store.renamePlace(t.merchantKey, to: old)
+        }
+        if let a = store.accounts.first {
+            let mine = store.transactions.filter { $0.accountID == a.id }
+            let s = store.summary(of: a)
+            check("an account's kept summary equals fresh sums", s.count == mine.count && abs(s.spent - mine.filter(\.countsAsSpending).reduce(0) { $0 + $1.amount }) < 0.01)
+        }
+        store.go(to: .orders) { store.orderOnly = nil }
+        store.navigate { store.orderOnly = "X" }
+        store.back()
+        check("Back leaves a single order for the whole list", store.orderOnly == nil)
+        store.selection = .overview
+
         // Tidying acts, records what it did, and puts it back exactly on Undo.
         do {
             let byName = TidyEngine.spellings(of: store.transactions, byHand: [])

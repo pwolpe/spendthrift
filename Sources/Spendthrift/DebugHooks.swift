@@ -252,6 +252,10 @@ enum DebugHooks {
         if env["SPENDTHRIFT_TIDY"] != nil {
             for _ in 0..<100 where store.isSuggesting || store.isTidying { try? await Task.sleep(for: .milliseconds(200)) }
             await store.tidyIfNeeded()
+            // Payees split off by the tidy-up get a proper name and category before quitting.
+            for _ in 0..<10 where store.isSuggesting { try? await Task.sleep(for: .milliseconds(300)) }
+            await store.sortRemaining()
+            for _ in 0..<200 where store.isSuggesting { try? await Task.sleep(for: .milliseconds(300)) }
             store.saveNow()
             NSApp.terminate(nil); return
         }
