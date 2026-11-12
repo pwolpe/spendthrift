@@ -331,38 +331,39 @@ struct TonyFigure: View {
 struct SpotArt: View {
     let name: String
     var height: CGFloat = 200
+    @State private var picture: NSImage?
 
     @MainActor private static var cache: [String: NSImage] = [:]
-    /// The picture, read at the size it will be drawn. The files are large; decoding one in full to
-    /// show it two inches tall costs a noticeable slice of the time the app takes to open.
+
+    private static func url(_ name: String) -> URL? {
+        if let url = Bundle.main.resourceURL?.appendingPathComponent("Art/\(name).jpg"), FileManager.default.fileExists(atPath: url.path) { return url }
+        let dev = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Resources/Art/\(name).jpg")
+        return FileManager.default.fileExists(atPath: dev.path) ? dev : nil
+    }
+
+    /// The picture at the size it will be drawn, straight away. For callers that cannot wait
+    /// (a rendered snapshot, a PDF); pages use the view, which never holds up the main thread.
     @MainActor static func image(_ name: String, height: CGFloat = 200) -> NSImage? {
-        let pixels = Int((height * 2 * 1.6 / 100).rounded(.up)) * 100      // sharp on a Retina screen, in steps of 100
-        let key = "\(name)@\(pixels)"
-        if let hit = cache[key] { return hit }
-        var url = Bundle.main.resourceURL?.appendingPathComponent("Art/\(name).jpg")
-        if url.map({ FileManager.default.fileExists(atPath: $0.path) }) != true {
-            url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                .deletingLastPathComponent().appendingPathComponent("Resources/Art/\(name).jpg")
-        }
-        guard let url, let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: pixels,
-                                        kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true]
-        guard let small = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return NSImage(contentsOf: url) }
+        let pixels = Decoding.pixels(for: height)
+        if let hit = cache["\(name)@\(pixels)"] { return hit }
+        guard let url = url(name), let small = Decoding.thumbnail(at: url, maxPixel: pixels) else { return nil }
         let image = NSImage(cgImage: small, size: NSSize(width: small.width, height: small.height))
-        cache[key] = image
+        cache["\(name)@\(pixels)"] = image
         return image
     }
 
-    @State private var shown = Launch.hasDrawn
-
     var body: some View {
-        if let image = Self.image(name, height: height) {
-            // Its place is kept from the start, but the picture itself is put up a moment after the
-            // page first draws: showing an image is the single slowest thing on the opening page.
-            let width = height * image.size.width / max(image.size.height, 1)
+        if let url = Self.url(name) {
+            // Its place is kept from the start (the file's header says how big it is); the pixels are
+            // read on another thread and fade in. Decoding a picture is the slowest thing on the opening page.
+            let aspect = Decoding.aspect(of: url) ?? 4.0 / 3.0
+            let pixels = Decoding.pixels(for: height)
             ZStack {
-                if shown {
-                    Image(nsImage: image)
+                // (In a rendered snapshot nothing is drawn or awaited, so the picture is read on the spot.)
+                if Boot.shared.drawn, let picture = picture ?? Self.cache["\(name)@\(pixels)"]
+                    ?? (ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil ? Self.image(name, height: height) : nil) {
+                    Image(nsImage: picture)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .clipShape(.rect(cornerRadius: height * 0.11, style: .continuous))
@@ -370,17 +371,75 @@ struct SpotArt: View {
                         .transition(.opacity)
                 }
             }
-            .frame(width: width, height: height)
+            .frame(width: height * aspect, height: height)
             .accessibilityHidden(true)
-            .onAppear {
-                guard !shown else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + Launch.settle) {
-                    Launch.hasDrawn = true
-                    withAnimation(.easeOut(duration: 0.25)) { shown = true }
-                }
+            .task(id: "\(name)@\(pixels)") {
+                guard Self.cache["\(name)@\(pixels)"] == nil else { return }
+                guard let small = await Task.detached(priority: .userInitiated, operation: { Decoding.thumbnail(at: url, maxPixel: pixels) }).value else { return }
+                let image = NSImage(cgImage: small, size: NSSize(width: small.width, height: small.height))
+                Self.cache["\(name)@\(pixels)"] = image
+                withAnimation(.easeOut(duration: 0.2)) { picture = image }
             }
         } else {
             TonyFigure(height: height)
+        }
+    }
+}
+
+/// Reading pictures without making the window wait.
+enum Decoding {
+    /// Sharp on a Retina screen, in steps of 100 so a few sizes share one copy.
+    nonisolated static func pixels(for height: CGFloat) -> Int { Int((height * 2 * 1.6 / 100).rounded(.up)) * 100 }
+
+    /// Width over height, from the file's header alone (nothing is decoded).
+    nonisolated static func aspect(of url: URL) -> CGFloat? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? CGFloat, let height = properties[kCGImagePropertyPixelHeight] as? CGFloat, height > 0 else { return nil }
+        return width / height
+    }
+
+    /// The picture, decoded, no larger than it will be shown. Safe to call from any thread.
+    nonisolated static func thumbnail(at url: URL, maxPixel: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+                                        kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    /// A picture already in memory, drawn once into a plain bitmap so showing it costs nothing more.
+    nonisolated static func bitmap(_ image: CGImage, maxWidth: Int) -> CGImage? {
+        let scale = min(1, CGFloat(maxWidth) / CGFloat(max(image.width, 1)))
+        let width = max(1, Int(CGFloat(image.width) * scale)), height = max(1, Int(CGFloat(image.height) * scale))
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+}
+
+/// Shows a picture once it has been decoded on another thread; until then, nothing (its place is the caller's to keep).
+struct ReadyImage: View {
+    let image: NSImage
+    var maxWidth = 2600
+    @State private var ready: (for: ObjectIdentifier, picture: NSImage)?
+
+    var body: some View {
+        ZStack {
+            if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil {
+                // A rendered snapshot awaits nothing: show the picture as it is.
+                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else if Boot.shared.drawn, let ready, ready.for == ObjectIdentifier(image) {
+                Image(nsImage: ready.picture).resizable().aspectRatio(contentMode: .fill).transition(.opacity)
+            }
+        }
+        .task(id: ObjectIdentifier(image)) {
+            guard let lazy = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+            let limit = maxWidth
+            guard let drawn = await Task.detached(priority: .userInitiated, operation: { Decoding.bitmap(lazy, maxWidth: limit) }).value else { return }
+            let picture = NSImage(cgImage: drawn, size: image.size)
+            withAnimation(.easeOut(duration: 0.2)) { ready = (ObjectIdentifier(image), picture) }
         }
     }
 }
@@ -880,18 +939,8 @@ struct BigFigure: View {
 /// take a moment to lay out: the window opens without waiting for them, and they fade in after.
 struct AfterFirstFrame<Content: View>: View {
     @ViewBuilder var content: Content
-    @State private var ready = Launch.hasDrawn
 
     var body: some View {
-        Group {
-            if ready { content.transition(.opacity) }
-        }
-        .onAppear {
-            guard !ready else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + Launch.settle) {
-                Launch.hasDrawn = true
-                withAnimation(.easeOut(duration: 0.2)) { ready = true }
-            }
-        }
+        if Boot.shared.drawn { content.transition(.opacity) }
     }
 }

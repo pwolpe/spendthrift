@@ -48,13 +48,19 @@ if [[ -n $LIBRARY ]]; then
   run "a copy of the library" "$WORK/library-home" ""
 fi
 
-# How long the app takes to open, for the record (the second of two runs: the first pays one-off costs).
-# Not a pass or fail: machines differ. It is here so a slow start is noticed the day it appears.
+# How long the app takes to open, for the record: the middle of five runs (single runs vary by a
+# tenth of a second). "Drawn" is when the first page is really on screen, timed from inside the pass
+# that draws it; "all in" is when the pictures and lower cards have followed and the app is free.
+# Not a pass or fail on other machines, but on this one a first page slower than 700 ms is a regression.
 home="$WORK/fixtures-home"; [[ -d "$WORK/library-home" ]] && home="$WORK/library-home"
-for i in 1 2; do
+drawn=(); allin=()
+for i in 1 2 3 4 5 6; do
   SPENDTHRIFT_HOME="$home" SPENDTHRIFT_TIMING=1 SPENDTHRIFT_NO_CLOUD=1 "$APP" > "$WORK/timing.log" 2>&1
+  (( i == 1 )) && continue          # the first run after a build pays one-off costs
+  drawn+=($(grep "pages drawn" "$WORK/timing.log" | awk '{print $2}'))
+  allin+=($(grep "held-back pieces in" "$WORK/timing.log" | awk '{print $2}'))
 done
-frame=$(grep "first frame drawn" "$WORK/timing.log" | awk '{print $2}')
-settled=$(grep -E "orders rematched|one second later" "$WORK/timing.log" | head -1 | awk '{print $2}')
-echo "opening: first frame at ${frame:-?} ms, settled at ${settled:-?} ms"
+drawn=(${(on)drawn}); allin=(${(on)allin})
+echo "opening: first page drawn at ${drawn[3]:-?} ms, all in at ${allin[3]:-?} ms (middle of five)"
+if [[ -n ${drawn[3]:-} ]] && (( ${drawn[3]} > 700 )); then echo "opening: slower than 700 ms"; [[ -n ${SPENDTHRIFT_STRICT_TIMING:-} ]] && bad=1; fi
 exit $bad

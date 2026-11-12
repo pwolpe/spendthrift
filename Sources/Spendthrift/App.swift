@@ -7,16 +7,15 @@ struct SpendthriftApp: App {
 
     var body: some Scene {
         Window("Spendthrift", id: "main") {
-            ContentView()
-                .onAppear {
-                    Launch.mark("window appears")
-                    // The first frame is on the glass one turn of the run loop later.
-                    DispatchQueue.main.async { Launch.mark("first frame drawn") }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Launch.mark("one second later (idle)") }
-                    if Launch.enabled { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { Launch.mark("quitting"); NSApp.terminate(nil) } }
+            Group {
+                if Boot.shared.ready {
+                    pages
+                } else {
+                    // The empty sheet the pages arrive on, a few hundredths of a second later.
+                    Theme.paper.ignoresSafeArea().onAppear { Launch.mark("empty window appears"); Boot.shared.begin() }
                 }
-                .environment(BudgetStore.shared)
-                .frame(minWidth: 920, minHeight: 620)
+            }
+            .frame(minWidth: 920, minHeight: 620)
         }
         // Wide enough for the pages and the question pane side by side.
         .defaultSize(width: 1480, height: 900)
@@ -42,9 +41,22 @@ struct SpendthriftApp: App {
 
         // Spendthrift → Settings… (⌘,)
         Settings {
-            SettingsView()
-                .environment(BudgetStore.shared)
+            // (Not before the store exists: naming it here would make it at once, on the main thread.)
+            if Boot.shared.ready { SettingsView().environment(BudgetStore.shared) }
         }
+    }
+
+    private var pages: some View {
+        ContentView()
+            .onAppear {
+                Launch.mark("window appears")
+                // The first frame is on the glass one turn of the run loop later.
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Launch.mark("one second later (idle)") }
+                if Launch.enabled { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { Launch.mark("quitting"); NSApp.terminate(nil) } }
+            }
+            .overlay(alignment: .topLeading) { FirstPaintProbe().frame(width: 1, height: 1).allowsHitTesting(false).accessibilityHidden(true) }
+            .environment(BudgetStore.shared)
     }
 }
 
@@ -72,10 +84,10 @@ struct GoMenu: Commands {
             Button("Trips & Events") { store.selection = .stories }.keyboardShortcut("3")
             Button("Transactions") { store.selection = .transactions }.keyboardShortcut("4")
             Button("Find a Payee…") { store.selection = .places }.keyboardShortcut("f")
-            if !store.orderRows.isEmpty {
+            if Boot.shared.ready, !store.orderRows.isEmpty {
                 Button("Amazon") { store.selection = .orders }.keyboardShortcut("8")
             }
-            if store.accounts.contains(where: { $0.apart != nil }) {
+            if Boot.shared.ready, store.accounts.contains(where: { $0.apart != nil }) {
                 Button("Kept Apart") { store.selection = .apart }
             }
             Button("Statements") { store.selection = .statements }.keyboardShortcut("9")

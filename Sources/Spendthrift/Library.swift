@@ -176,6 +176,11 @@ struct Library: Codable {
         }
     }
 
+    /// Runs `then` on the main thread once the early read has finished (at once if it already has).
+    static func whenPreloaded(_ then: @escaping @MainActor () -> Void) {
+        earlyDone.notify(queue: .main) { MainActor.assumeIsolated(then) }
+    }
+
     static func load(paths: BudgetPaths) -> (Library, LoadResult) {
         earlyDone.wait()
         if let ready = early, ready.file == paths.libraryFile, let library = ready.library {

@@ -42,6 +42,37 @@ extension BudgetStore {
     }
 
     /// The sentences on file for these figures, if any. Never waits.
+    /// A cheap fingerprint of the library: enough to say "nothing has changed since this was last
+    /// checked" without working out the figures, which costs a tenth of a second the opening page
+    /// does not have. Anything that could alter the figures alters one of these counts.
+    private var glance: String {
+        "\(library.entries.count)|\(library.merchants.count)|\(library.tidy?.changes.count ?? 0)|\(library.dismissedInsights.count)|\(library.sources?.count ?? 0)"
+    }
+
+    /// The sentences shown last time, if the library looks untouched since they were checked against
+    /// their figures. For the first draw only: `confirmRead` then checks properly.
+    func glancedRead(_ key: String) -> String? {
+        guard (UserDefaults.standard.dictionary(forKey: "readGlances") as? [String: String])?[key] == glance,
+              let kept = library.reads?[key], let tab = kept.firstIndex(of: "\t") else { return nil }
+        return String(kept[kept.index(after: tab)...])
+    }
+
+    /// Checks the kept sentences against today's figures, writes new ones if they no longer match,
+    /// and remembers the library's fingerprint so the next opening can show them at once.
+    func confirmRead(_ key: String, basis: String, facts: [String]) async {
+        var glances = (UserDefaults.standard.dictionary(forKey: "readGlances") as? [String: String]) ?? [:]
+        if keptRead(key, basis: basis) == nil {
+            // What was shown at a glance is out of date: take it down before asking for better.
+            glances[key] = nil
+            UserDefaults.standard.set(glances, forKey: "readGlances")
+            readsChecked += 1
+            guard await read(key, basis: basis, facts: facts) != nil else { return }
+        }
+        glances[key] = glance
+        UserDefaults.standard.set(glances, forKey: "readGlances")
+        readsChecked += 1
+    }
+
     func keptRead(_ key: String, basis: String) -> String? {
         guard let kept = library.reads?[key], kept.hasPrefix(basis + "\t") else { return nil }
         return String(kept.dropFirst(basis.count + 1))

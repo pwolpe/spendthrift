@@ -55,5 +55,9 @@ open $HOME_DIR/snaps
 
 Pickers and text fields cannot be drawn this way and appear as yellow placeholders.
 
-The app should stay fast: the test script prints the time to the first frame. If your change moves
-it, find out why before going further (`SPENDTHRIFT_TIMING=1` prints each step; `SPENDTHRIFT_BENCH=1` times what pages do repeatedly, then quits).
+The app should stay fast: the test script prints when the first page is really drawn (the middle of
+five runs; under 700 ms on a 19,000-charge library). If your change moves it, find out why before
+going further (`SPENDTHRIFT_TIMING=1` prints each step; `SPENDTHRIFT_BENCH=1` times what pages do
+repeatedly, then quits). Three things keep it there: the window goes up while the saved file is read
+(`Boot` in Launch.swift), pictures are decoded off the main thread (`Decoding`), and anything not in
+the first screenful waits for the first draw (`AfterFirstFrame`).

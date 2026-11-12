@@ -43,9 +43,12 @@ struct ContentView: View {
                 if !store.accounts.isEmpty {
                     HStack(spacing: 0) {
                         Divider()
-                        AskView()
-                            .frame(width: 380)
-                            .background(Theme.paper)
+                        // Built once the first page is up (or at once if it is open): it is out of sight until asked for.
+                        if store.showsAsk || Boot.shared.drawn {
+                            AskView()
+                                .frame(width: 380)
+                                .background(Theme.paper)
+                        }
                     }
                     .frame(width: store.showsAsk ? 381 : 0, alignment: .leading)
                     .clipped()

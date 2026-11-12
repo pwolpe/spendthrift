@@ -59,12 +59,15 @@ struct OverviewView: View {
             if !DebugHooks.off("hero") {
                 if store.overviewShowsYear, let period = currentPeriod {
                     // The verdict, said in the model's words when it has written some (it is asked once the page is up).
-                    let given = store.overviewFacts(data, period: period)
-                    FlowHero(data: data, written: store.keptRead("overview-\(period.id)", basis: given.basis)) { store.stepInto(.flow) }
-                        .task(id: given.basis) {
-                            try? await Task.sleep(for: .seconds(1.5))
+                    // Shown at once when nothing has changed since it was last checked; checked properly
+                    // (the figures worked out, the sentences compared) only after the page is up.
+                    let _ = store.readsChecked
+                    FlowHero(data: data, written: store.glancedRead("overview-\(period.id)")) { store.stepInto(.flow) }
+                        .task(id: "\(period.id)|\(store.revision)") {
+                            try? await Task.sleep(for: .seconds(1))
                             guard !Task.isCancelled else { return }
-                            _ = await store.read("overview-\(period.id)", basis: given.basis, facts: given.facts)
+                            let given = store.overviewFacts(data, period: period)
+                            await store.confirmRead("overview-\(period.id)", basis: given.basis, facts: given.facts)
                         }
                 } else {
                     FlowHero(data: data) { store.stepInto(.flow) }
@@ -103,9 +106,12 @@ struct OverviewView: View {
                 }
                 if !DebugHooks.off("noticed") { noticed }
             } else {
-                HStack(alignment: .top, spacing: 16) {
-                    if !DebugHooks.off("noticed") { AfterFirstFrame { noticed } }
-                    if !DebugHooks.off("coming") { recurringCard }
+                // Below the first screenful: both arrive just after the page is up.
+                AfterFirstFrame {
+                    HStack(alignment: .top, spacing: 16) {
+                        if !DebugHooks.off("noticed") { noticed }
+                        if !DebugHooks.off("coming") { recurringCard }
+                    }
                 }
             }
             AfterFirstFrame { SavingsStrip() }

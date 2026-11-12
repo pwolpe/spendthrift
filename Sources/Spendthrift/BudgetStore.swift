@@ -174,6 +174,8 @@ final class BudgetStore {
     /// A sort asked for while payees were being tidied waits for the tidy-up to end, then runs once.
     @ObservationIgnored var sortAfterTidy = false
     @ObservationIgnored var isLearningFacts = false
+    /// Goes up when a kept summary has been checked or rewritten, so the card showing it redraws.
+    var readsChecked = 0
     /// True once "since you last looked" has been put away for this sitting.
     var sinceDismissed = false
     @ObservationIgnored var isGuessing = false

@@ -56,12 +56,19 @@ struct FlowHero: View {
                             .contentTransition(.opacity)
                     }
                     Spacer(minLength: 0)
-                    switch verdict {
-                    case .within: Stamp(text: "WITHIN MEANS", color: Theme.good, size: 13).padding(.trailing, 6)
-                    case .even: Stamp(text: "ABOUT EVEN", color: Theme.caution, size: 13).padding(.trailing, 6)
-                    case .over: Stamp(text: "OVER", color: Theme.spent, size: 13).padding(.trailing, 6)
-                    case .unknown: EmptyView()
+                    // The stamp lands a beat after the page is up (it animates in anyway); its place is kept.
+                    ZStack {
+                        AfterFirstFrame {
+                            switch verdict {
+                            case .within: Stamp(text: "WITHIN MEANS", color: Theme.good, size: 13)
+                            case .even: Stamp(text: "ABOUT EVEN", color: Theme.caution, size: 13)
+                            case .over: Stamp(text: "OVER", color: Theme.spent, size: 13)
+                            case .unknown: EmptyView()
+                            }
+                        }
                     }
+                    .frame(width: verdict == .unknown ? 0 : 172, height: 44)
+                    .padding(.trailing, 6)
                     if action != nil {
                         Image(systemName: "chevron.right").font(.callout.weight(.semibold))
                             .foregroundStyle(hovered ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))

@@ -344,10 +344,9 @@ struct BannerCard: View {
             Color.black.opacity(0.06)
                 .aspectRatio(21.0 / 9.0, contentMode: .fit)
                 .overlay {
+                    // Decoded on another thread: a megabyte of picture must not hold up the page it sits on.
                     if let image = daily.image ?? daily.cartoon {
-                        Image(nsImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
+                        ReadyImage(image: image)
                             .id(ObjectIdentifier(image))
                             .transition(.opacity)
                     }
