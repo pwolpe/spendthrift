@@ -567,6 +567,9 @@ enum SelfTest {
         check("ask: suggested questions are read from a list, and one with a figure or no question mark is dropped",
               BudgetStore.askIdeas(in: "Here you go:\n[\"Why did dining jump in March?\", \"Did I really spend $400 on coffee?\", \"Tell me about rent\", \"why did dining jump in march?\", \"What is my longest-running subscription?\"]")
                 == ["Why did dining jump in March?", "What is my longest-running subscription?"] && BudgetStore.askIdeas(in: "no list here").isEmpty)
+        check("memories: a payee that is only the bank's words for moving money is nothing to remember or to draw",
+              BudgetStore.isBankWords("ACH Debit") && BudgetStore.isBankWords("Wire Transfer") && BudgetStore.isBankWords("Check 1042")
+              && !BudgetStore.isBankWords("World Nomads") && !BudgetStore.isBankWords("Bank Street Bookstore") && !BudgetStore.isBankWords("Check Republic"))
         // What the statements say about a credit card.
         do {
             check("cards: a credit line names its benefit; a refund, a fraud reversal and a bank transfer do not",
@@ -613,6 +616,40 @@ enum SelfTest {
                   facts.first?.feesPaid == 695 && facts.first?.creditsBack == 225 && facts.first?.verdict == .costs(470)
                   && facts.first?.nextFee?.amount == 695 && facts.first.map { DateParsing.iso.string(from: $0.nextFee!.date) } == "2026-11-20"
                   && facts.first?.findings.contains { $0.kind == .feeDue } == true)
+        }
+        // A payee in a few words.
+        do {
+            func days(_ list: [String]) -> [Date] { list.map { DateParsing.isoDay($0)! } }
+            let asOf = DateParsing.isoDay("2026-11-10")!
+            func sketch(_ list: [String], trips: [String?]? = nil) -> String? { PayeeSketch.line(days: days(list), trips: trips ?? list.map { _ in nil }, asOf: asOf) }
+            // Tuesdays through 2026: Jan 6 is a Tuesday.
+            let tuesdays = (0..<12).map { DateParsing.iso.string(from: Calendar.current.date(byAdding: .day, value: $0 * 14, to: DateParsing.isoDay("2026-01-06")!)!) }
+            check("sketch: a payee paid on one day of the week is said to be", sketch(tuesdays) == "Tuesdays, mostly")
+            check("sketch: a payee paid only on a trip is said to be", sketch(["2025-03-02", "2025-03-04", "2025-03-05"], trips: ["Lisbon", "Lisbon", "Lisbon"]) == "Only on the Lisbon trip")
+            check("sketch: a burst is told from a habit", sketch(["2023-03-06", "2023-03-08", "2023-03-10"]) == "3 times in one week of March 2023")
+            check("sketch: a monthly bill is clockwork", sketch((1...10).map { String(format: "2026-%02d-05", $0) }) == "Every month, like clockwork")
+            check("sketch: a habit long given up is said to be over", sketch(["2021-02-03", "2021-05-19", "2021-09-07", "2022-01-11", "2022-06-30"]) == "A regular until 2022")
+            check("sketch: something bought once each December is said to be, and a December habit likewise",
+                  sketch(["2022-12-10", "2023-12-14", "2024-12-09", "2025-12-12"]) == "Once a year, in December"
+                  && sketch(["2023-12-02", "2023-12-20", "2024-12-05", "2024-12-18", "2025-12-09", "2025-12-21"]) == "Every December")
+            check("sketch: one visit, or nothing particular, gets no sketch", sketch(["2025-06-01"]) == nil && sketch(["2024-01-10", "2025-08-22"]) == nil)
+        }
+        // What a statement just brought in.
+        do {
+            func line(_ day: String, _ amount: Double, _ text: String, _ payee: String) -> Transaction {
+                let date = DateParsing.isoDay(day)!
+                return Transaction(id: UUID(), date: date, month: Month(date: date), description: text, amount: amount, merchant: payee, merchantKey: "own:" + payee,
+                                   category: text.contains("FEE") ? .fees : amount < 0 ? .shopping : .dining, account: "Card", accountID: UUID(), source: .user, needsCheck: false, isOverride: false)
+            }
+            let before = [line("2026-09-03", 12, "CAFE", "Cafe")]
+            let new = [line("2026-10-02", 12, "CAFE", "Cafe"), line("2026-10-09", 310, "BISTRO", "Bistro"), line("2026-10-11", -75, "Gold Togs Credit TOGS", "Togs"),
+                       line("2026-10-20", 695, "ANNUAL MEMBERSHIP FEE", "Annual Fee")]
+            let story = ImportStory.lines(new: new, before: before, verified: true).map(\.text)
+            check("import: a statement's receipt says how much came, the biggest thing, a new place, a credit, the fee, and that it adds up",
+                  story.first?.hasPrefix("4 lines, Oct 2 to Oct 20") == true && story.contains("The biggest: Bistro, $310.00")
+                  && story.contains("Somewhere new: Bistro") && story.contains("A credit landed: Gold Togs Credit, $75.00")
+                  && story.contains("The yearly fee came round: $695.00") && story.last == "Every line adds up to the totals the statement prints")
+            check("import: nothing new makes no receipt", ImportStory.lines(new: [], before: before, verified: false).isEmpty)
         }
         // What an order history says beyond its totals.
         do {

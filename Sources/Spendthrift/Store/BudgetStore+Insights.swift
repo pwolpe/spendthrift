@@ -10,7 +10,7 @@ extension BudgetStore {
 
     /// Recent purchases for the daily picture: one per place, from the last two weeks of data.
     func recentHighlights() -> [DailyPicture.Highlight] {
-        let spending = transactions.filter { $0.countsAsSpending && $0.amount >= 3 && $0.category != .unsorted }
+        let spending = transactions.filter { $0.countsAsSpending && $0.amount >= 3 && $0.category != .unsorted && !Self.isBankWords($0.merchant) }
         guard let latest = spending.last?.date else { return [] }
         let cutoff = latest.addingTimeInterval(-14 * 24 * 3600)
         var seen: Set<String> = []

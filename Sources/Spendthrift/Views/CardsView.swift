@@ -112,6 +112,47 @@ extension BudgetStore {
         readsChecked += 1
     }
 
+    // MARK: A credit arriving
+
+    private static let seenCreditsKey = "cardCreditsSeen"
+    /// Not in a test or snapshot run: those are not the person looking.
+    private static var remembersCredits: Bool {
+        let env = ProcessInfo.processInfo.environment
+        return env["SPENDTHRIFT_HOME"] == nil && env["SPENDTHRIFT_SNAPSHOT"] == nil && env["SPENDTHRIFT_TIMING"] == nil
+    }
+
+    /// A card credit that has landed since the person last looked at that card: which card, which
+    /// credit, and the line itself. The first time the app meets a library, everything already there
+    /// counts as seen: news is only what arrives afterwards.
+    func creditArrivals() -> [(card: CardEngine.Card, benefit: CardEngine.Benefit, credit: Transaction)] {
+        guard let warm = cardFactsWarm, warm.revision == revision, let asOf = transactions.last?.date else { return [] }
+        let every = warm.cards.flatMap { card in card.benefits.flatMap { benefit in benefit.creditIDs.map { (card, benefit, $0) } } }
+        if ProcessInfo.processInfo.environment["SPENDTHRIFT_FRESH_CREDIT"] != nil {
+            // For looking at the page: treat the latest credit as just arrived.
+            let lines = Dictionary(transactions(withIDs: every.map(\.2)).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            return every.compactMap { card, benefit, id in lines[id].map { (card, benefit, $0) } }.max { $0.2.date < $1.2.date }.map { [$0] } ?? []
+        }
+        guard let known = UserDefaults.standard.stringArray(forKey: Self.seenCreditsKey) else {
+            if Self.remembersCredits { UserDefaults.standard.set(every.map { $0.2.uuidString }, forKey: Self.seenCreditsKey) }
+            return []
+        }
+        let seen = Set(known), cutoff = asOf.addingTimeInterval(-60 * 86_400)
+        let fresh = every.filter { !seen.contains($0.2.uuidString) }
+        let lines = Dictionary(transactions(withIDs: fresh.map(\.2)).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        // Old lines that were never marked (a statement added late) are history, not news.
+        let old = fresh.filter { (lines[$0.2]?.date ?? .distantPast) <= cutoff }.map { $0.2.uuidString }
+        if !old.isEmpty, Self.remembersCredits { UserDefaults.standard.set(Array(seen.union(old)), forKey: Self.seenCreditsKey) }
+        return fresh.compactMap { card, benefit, id in lines[id].flatMap { $0.date > cutoff ? (card, benefit, $0) : nil } }.sorted { $0.2.date > $1.2.date }
+    }
+
+    /// The person has seen these credits on the card's page.
+    func markCreditsSeen(_ ids: [UUID]) {
+        guard !ids.isEmpty, Self.remembersCredits else { return }
+        let seen = Set(UserDefaults.standard.stringArray(forKey: Self.seenCreditsKey) ?? []).union(ids.map(\.uuidString))
+        UserDefaults.standard.set(Array(seen), forKey: Self.seenCreditsKey)
+        readsChecked += 1
+    }
+
     /// The one card thing most worth a look right now, for the Overview: a credit not yet come with
     /// the stretch running out, a purchase that went on the wrong card, a fee about to come round.
     /// Nil until the facts have been worked out in the background: it never makes the main thread do it.
@@ -391,6 +432,16 @@ struct CardPage: View {
             }
         }
         .navigationTitle("Cards")
+        // The Cards page may be opened before the Overview has worked the facts out in the background.
+        .task { await store.warmCardFacts() }
+        // A credit that has just come gets its moment here, and is then no longer news.
+        .task(id: store.readsChecked) {
+            let fresh = store.creditArrivals().filter { $0.card.id == id }.map(\.credit.id)
+            guard !fresh.isEmpty else { return }
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            store.markCreditsSeen(fresh)
+        }
     }
 
     private func head(_ card: CardEngine.Card) -> some View {
@@ -455,9 +506,10 @@ struct CardPage: View {
         return Card {
             VStack(alignment: .leading, spacing: 14) {
                 SectionHeader(title: "Credits it has paid you", subtitle: "Each mark is a month, a quarter or a year: filled when the credit came, hollow when it did not.")
+                let fresh = Set(store.creditArrivals().filter { $0.card.id == card.id }.map(\.credit.id))
                 ForEach(Array(live.enumerated()), id: \.element.id) { index, benefit in
                     if index > 0 { Divider() }
-                    BenefitRow(benefit: benefit)
+                    BenefitRow(benefit: benefit, fresh: fresh)
                 }
                 if !past.isEmpty {
                     if !live.isEmpty { Divider() }
@@ -590,6 +642,8 @@ struct CardPage: View {
 /// One credit: its name, its rhythm, and a mark for each stretch.
 private struct BenefitRow: View {
     let benefit: CardEngine.Benefit
+    /// Credits that landed since the person last looked: their marks arrive with a flourish.
+    var fresh: Set<UUID> = []
     private var store: BudgetStore { .shared }
     @State private var pointed: String?
 
@@ -629,7 +683,8 @@ private struct BenefitRow: View {
             }
             HStack(spacing: 7) {
                 ForEach(benefit.uses) { use in
-                    Pip(fraction: benefit.usual > 0 ? min(1, use.received / benefit.usual) : 0, current: use.isCurrent)
+                    Pip(fraction: benefit.usual > 0 ? min(1, use.received / benefit.usual) : 0, current: use.isCurrent,
+                        justLanded: use.credits.contains(where: fresh.contains))
                         .onHover { inside in pointed = inside ? use.id : (pointed == use.id ? nil : pointed) }
                         .onTapGesture {
                             let ids = Set(use.credits + (use.elsewhere + use.here).map(\.id))
@@ -651,28 +706,47 @@ private struct BenefitRow: View {
     }
 }
 
-/// One stretch of a credit: a coin that is full, part full or empty, and ringed while it is still running.
+/// One stretch of a credit: a coin that is full, part full or empty, and ringed while it is still
+/// running. One whose credit has just landed drops in, rings like a coin on a counter, and throws a few sparks.
 private struct Pip: View {
     let fraction: Double
     let current: Bool
+    var justLanded = false
     @State private var breathing = false
+    @State private var landed = false
 
     var body: some View {
+        let shownFraction = justLanded && !landed ? 0 : fraction
         ZStack {
             Circle().fill(Color.primary.opacity(0.07))
-            if fraction > 0.02 {
+            if shownFraction > 0.02 {
                 Circle().fill(Theme.good.gradient)
-                    .mask(alignment: .bottom) { Rectangle().frame(height: 18 * max(0.18, fraction)) }
+                    .mask(alignment: .bottom) { Rectangle().frame(height: 18 * max(0.18, shownFraction)) }
+                    .transition(.scale(scale: 0.2).combined(with: .opacity))
             }
-            Circle().strokeBorder(fraction >= 0.98 ? Theme.good : Color.primary.opacity(0.22), lineWidth: 1.2)
+            Circle().strokeBorder(shownFraction >= 0.98 ? Theme.good : Color.primary.opacity(0.22), lineWidth: 1.2)
             if current, fraction < 0.98 {
                 Circle().strokeBorder(Theme.caution, style: StrokeStyle(lineWidth: 1.6, dash: [3, 2.5]))
                     .scaleEffect(breathing ? 1.32 : 1.18).opacity(breathing ? 0.5 : 1)
                     .onAppear { withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathing = true } }
             }
+            if justLanded {
+                // The ring it sends out, and the sparks.
+                Circle().strokeBorder(Theme.good, lineWidth: 1.5).scaleEffect(landed ? 2.6 : 1).opacity(landed ? 0 : 0.9)
+                ForEach(0..<6, id: \.self) { i in
+                    Image(systemName: "sparkle").font(.system(size: 7, weight: .bold)).foregroundStyle(Theme.goldDeep)
+                        .offset(x: landed ? cos(Double(i) * .pi / 3) * 17 : 0, y: landed ? sin(Double(i) * .pi / 3) * 17 : 0)
+                        .opacity(landed ? 0 : 1)
+                }
+            }
         }
         .frame(width: 18, height: 18)
+        .scaleEffect(justLanded && landed ? 1 : justLanded ? 1.6 : 1)
         .contentShape(Circle())
+        .onAppear {
+            guard justLanded else { return }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.45).delay(0.6)) { landed = true }
+        }
     }
 }
 
@@ -746,7 +820,28 @@ struct CardNotice: View {
     }
 
     @ViewBuilder private var notice: some View {
-        if let nudge = store.cardNudge() {
+        if let arrival = store.creditArrivals().first {
+            // Good news first: a credit that was being waited for has come.
+            Button { store.go(to: .cards) { store.route = [.card(arrival.card.id)] } } label: {
+                HStack(spacing: 12) {
+                    CardFace(id: arrival.card.id, name: arrival.card.name, width: 54).allowsHitTesting(false)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("The \(Money.format(-arrival.credit.amount, cents: false)) came").font(.callout.weight(.semibold))
+                        Text("\(arrival.benefit.name) landed on \(store.cardTitle(arrival.card.id)) on \(arrival.credit.date.formatted(.dateTime.month(.abbreviated).day())).")
+                            .font(.callout).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                    }
+                    Spacer()
+                    Image(systemName: "sparkles").foregroundStyle(Theme.good)
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(Theme.good.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("See it on the card's page")
+            .transition(.opacity)
+        } else if let nudge = store.cardNudge() {
             Button { store.go(to: .cards) { store.route = [.card(nudge.card.id)] } } label: {
                 HStack(spacing: 12) {
                     CardFace(id: nudge.card.id, name: nudge.card.name, width: 54).allowsHitTesting(false)

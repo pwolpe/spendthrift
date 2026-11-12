@@ -361,6 +361,19 @@ enum DebugHooks {
                     EditableName(text: .constant("Pastis"), font: .system(size: 19, weight: .bold, design: .serif), centered: true, commit: {}).frame(maxWidth: .infinity)
                 }.padding(24)
             }
+            // The receipt for the newest statement of the busiest card, as it would print after adding it.
+            if let busiest = store.cardFacts().first, let newest = store.statements(of: busiest.id).first {
+                store.reveal(Set(store.library.entries.filter { $0.sourceID == newest.id }.map(\.id)), verified: newest.check == "verified")
+                if let reveal = store.importReveal {
+                    await snap("48-just-read", outDir, width: 380) { ImportReceipt(reveal: reveal).padding(24) }
+                    for line in reveal.lines { print("JUSTREAD \(line.text)") }
+                }
+                store.importReveal = nil
+            }
+            await snap("50-payees", outDir) { PlacesView(scrolls: false).environment(store) }
+            let sketches = store.payeeSketches()
+            print("SKETCHES \(sketches.count) of \(Set(store.transactions.map(\.merchant)).count) payees")
+            for (kind, count) in Dictionary(grouping: sketches.values, by: { $0.components(separatedBy: " ").prefix(2).joined(separator: " ") }).mapValues(\.count).sorted(by: { $0.value > $1.value }).prefix(14) { print("SKETCH KIND \(count) × \(kind)…") }
             await store.learnCardProducts()
             let cards = store.cardFacts()
             for account in store.accounts where BudgetStore.isCard(account) {

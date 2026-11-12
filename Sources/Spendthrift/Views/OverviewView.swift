@@ -604,8 +604,9 @@ struct OnThisDayLine: View {
     private var store: BudgetStore { .shared }
 
     var body: some View {
-        // When today's picture is already about this purchase, the picture says it; no second mention.
-        if let memory = store.onThisDay(), DailyPicture.shared.entry != memory.charge.id {
+        // One memory a day. When today's picture is itself an "on this day", the picture is the memory
+        // (whichever purchase it is of); this line is only for days when the picture is about something else.
+        if !DailyPicture.shared.showsMemory, let memory = store.onThisDay(), DailyPicture.shared.entry != memory.charge.id {
             let ago = ["One year", "Two years", "Three years", "Four years", "Five years", "Six years"]
             let when = memory.years <= ago.count ? ago[memory.years - 1] : "\(memory.years) years"
             Button { store.showPlace(memory.charge.merchant) } label: {

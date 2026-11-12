@@ -2,6 +2,28 @@ import SwiftUI
 
 /// Every payee money went to, with a box to find one by name: "barrys", "pastis".
 /// Click a payee for everything ever spent there.
+extension BudgetStore {
+    /// Each payee in a few words ("Tuesdays, mostly"), for those the dates say something about.
+    /// One pass over the charges, kept until the library changes.
+    func payeeSketches() -> [String: String] {
+        cached("payee-sketches") {
+            guard let asOf = transactions.last?.date else { return [:] }
+            var trip: [UUID: String] = [:]
+            for story in stories { for t in transactions(in: story) { trip[t.id] = story.name } }
+            var days: [String: [Date]] = [:], trips: [String: [String?]] = [:]
+            for t in transactions where t.amount > 0 && !t.isTransfer {
+                days[t.merchant, default: []].append(t.date)
+                trips[t.merchant, default: []].append(trip[t.id])
+            }
+            var out: [String: String] = [:]
+            for (name, list) in days where list.count >= 2 {
+                if let line = PayeeSketch.line(days: list, trips: trips[name] ?? [], asOf: asOf) { out[name] = line }
+            }
+            return out
+        }
+    }
+}
+
 struct PlacesView: View {
     @Environment(BudgetStore.self) private var store
     /// False when rendered for a test snapshot.
@@ -76,8 +98,9 @@ struct PlacesView: View {
             LazyVStack(spacing: 0) {
                 ForEach(Array(places.enumerated()), id: \.element.id) { index, p in
                     if index > 0 { Divider().padding(.leading, 56) }
+                    // What kind of payee it is, in a few words, when the dates say; else simply when.
                     PayeeLine(name: p.name, category: p.category,
-                              detail: "\(p.category.displayName) · \(p.visits == 1 ? "once" : "\(p.visits) times") · \(Self.when(p))",
+                              detail: "\(p.category.displayName) · \(p.visits == 1 ? "once" : "\(p.visits) times") · \(store.payeeSketches()[p.name] ?? Self.when(p))",
                               amount: abs(p.total), iconSize: 36,
                               amountFont: Theme.mono(14, .semibold), amountColor: p.total < 0 ? Theme.good : .primary,
                               help: "Open \(p.name): every charge, by month") { store.showPlace(p.name) }

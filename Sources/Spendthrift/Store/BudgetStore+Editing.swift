@@ -226,12 +226,20 @@ extension BudgetStore {
     /// Opens the page for one place: everything ever spent there.
     /// A charge from this same day in an earlier year, worth being reminded of: the largest that
     /// wasn't a bill or a subscription.
+    /// A payee that is only the bank's word for how money moved ("ACH Debit", "Wire Transfer", "Check 1042"):
+    /// nothing anyone remembers, and nothing to draw a picture of.
+    nonisolated static func isBankWords(_ payee: String) -> Bool {
+        let words = Set(payee.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init))
+        let bank: Set<String> = ["ach", "debit", "credit", "transfer", "wire", "withdrawal", "deposit", "payment", "check", "atm", "fee", "unknown", "online", "electronic", "bank", "misc", "miscellaneous"]
+        return !words.isEmpty && words.isSubset(of: bank)
+    }
+
     func onThisDay(_ today: Date = .now) -> (years: Int, charge: Transaction)? {
         let cal = Calendar.current
         let now = cal.dateComponents([.year, .month, .day], from: today)
         let routine = Set(subscriptions().map(\.merchant))
         var best: (years: Int, charge: Transaction)?
-        for t in transactions where t.countsAsSpending && t.amount >= 15 {
+        for t in transactions where t.countsAsSpending && t.amount >= 15 && !Self.isBankWords(t.merchant) {
             let c = cal.dateComponents([.year, .month, .day], from: t.date)
             guard c.month == now.month, c.day == now.day, let year = c.year, let thisYear = now.year, year < thisYear,
                   !routine.contains(t.merchant), ![Category.home, .bills, .fees].contains(t.category) else { continue }

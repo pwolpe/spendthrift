@@ -288,6 +288,8 @@ extension BudgetStore {
             withAnimation(.snappy) { changed() }
             showImportToast(added: added, accounts: touched, verified: verified, mismatches: mismatches, scanned: scanned,
                             automatic: automatic, skipped: skippedLines)
+            // A few statements get a receipt of what they brought; a pile gets the full show instead.
+            if stage == nil, added >= 3 { reveal(batch.entries, verified: verified > 0 && mismatches.isEmpty) }
             if selection == nil { selection = .overview }
             Task { await sortRemaining() }
             if automatic {
@@ -611,6 +613,17 @@ extension BudgetStore {
             return
         }
         originalPeek = OriginalPeek(entryID: id)
+    }
+
+    /// Puts up the receipt of what these new lines brought in.
+    func reveal(_ entries: Set<UUID>, verified: Bool) {
+        let new = transactions(withIDs: Array(entries))
+        guard !new.isEmpty else { return }
+        let before = transactions.filter { !entries.contains($0.id) }
+        let whose = Array(Set(new.map(\.accountID))).map(accountLabel).sorted()
+        let lines = ImportStory.lines(new: new, before: before, verified: verified)
+        guard lines.count >= 2 else { return }
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { importReveal = ImportReveal(title: whose.joined(separator: ", "), lines: lines) }
     }
 
     private func showImportToast(added: Int, accounts names: [String], verified: Int = 0, mismatches: [String] = [], scanned: Int = 0,

@@ -526,6 +526,13 @@ struct Toast: Identifiable, Equatable {
     var offersUndo = false
 }
 
+/// What a statement just brought in: whose it was, and a few lines worth reading.
+struct ImportReveal: Identifiable, Equatable {
+    let id = UUID()
+    var title: String
+    var lines: [ImportStory.Line]
+}
+
 enum SidebarItem: Hashable {
     case overview, stories, places, cards, orders, apart, transactions, statements, review, categories, accounts
 }

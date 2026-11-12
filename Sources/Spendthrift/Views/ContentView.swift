@@ -37,6 +37,13 @@ struct ContentView: View {
         .overlay {
             if boot.ready, store.stage != nil { ShowView().environment(store).transition(.opacity) }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if boot.ready, let reveal = store.importReveal {
+                ImportReceipt(reveal: reveal).id(reveal.id)
+                    .padding(.trailing, 24)
+                    .transition(.move(edge: .bottom))
+            }
+        }
         .overlay(alignment: .bottom) {
             if boot.ready, let toast = store.toast {
                 ToastView(toast: toast)
@@ -371,6 +378,83 @@ struct DropOverlay: View {
             }
         }
         .ignoresSafeArea()
+    }
+}
+
+/// What a statement just brought in, printed like a till receipt rising from the bottom of the
+/// window: a line at a time, each one a way to the charges behind it. It waits to be read, and goes
+/// when it is put away (or after a minute if nobody is looking).
+struct ImportReceipt: View {
+    let reveal: ImportReveal
+    private var store: BudgetStore { .shared }
+    /// (A rendered snapshot waits for nothing: there, the whole receipt is already printed.)
+    @State private var printed = ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil ? 99 : 0
+    @State private var pointed = false
+
+    private static let paper = Color(red: 0.99, green: 0.98, blue: 0.95), ink = Color(red: 0.17, green: 0.16, blue: 0.15)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("JUST READ").font(Theme.mono(10.5, .bold)).tracking(1.6)
+                Spacer()
+                Button { withAnimation(.easeIn(duration: 0.25)) { store.importReveal = nil } } label: { Image(systemName: "xmark").font(.caption.weight(.bold)) }
+                    .buttonStyle(.plain).opacity(0.55).help("Put this away").accessibilityLabel("Put this away")
+            }
+            Text(reveal.title).font(.system(size: 16, weight: .bold, design: .serif)).lineLimit(2).padding(.top, 2)
+            dashes.padding(.vertical, 9)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(reveal.lines.prefix(printed).enumerated()), id: \.element.id) { _, line in
+                    Button {
+                        guard !line.charges.isEmpty else { return }
+                        store.showCharges(TransactionFilter(ids: line.charges, title: line.text.components(separatedBy: ":").first ?? "Just read"))
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: line.symbol).font(.caption).frame(width: 16).foregroundStyle(line.isGood ? Color(red: 0.16, green: 0.46, blue: 0.33) : Self.ink.opacity(0.6))
+                            Text(line.text).font(.system(size: 12.5, design: .monospaced)).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(line.charges.isEmpty ? "" : "See these")
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            if printed >= reveal.lines.count {
+                dashes.padding(.vertical, 9)
+                Text("THANK YOU FOR YOUR STATEMENT").font(Theme.mono(9.5, .semibold)).tracking(1.2).opacity(0.5).frame(maxWidth: .infinity)
+                    .transition(.opacity)
+            }
+        }
+        .foregroundStyle(Self.ink)
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 18)
+        .frame(width: 330, alignment: .leading)
+        .background(Self.paper, in: UnevenRoundedRectangle(topLeadingRadius: 6, topTrailingRadius: 6, style: .continuous))
+        .shadow(color: .black.opacity(0.28), radius: 18, y: 6)
+        .onHover { pointed = $0 }
+        .task {
+            // Printed a line at a time.
+            for count in 1...max(reveal.lines.count, 1) {
+                try? await Task.sleep(for: .milliseconds(count == 1 ? 350 : 280))
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { printed = count }
+            }
+            // Left up to be read; taken down after a minute if the pointer is elsewhere.
+            try? await Task.sleep(for: .seconds(60))
+            while pointed { try? await Task.sleep(for: .seconds(2)) }
+            guard !Task.isCancelled, store.importReveal?.id == reveal.id else { return }
+            withAnimation(.easeIn(duration: 0.3)) { store.importReveal = nil }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("What the statement just added brought in")
+    }
+
+    private var dashes: some View {
+        Rectangle().fill(.clear).frame(height: 1)
+            .overlay { Line().stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3])).foregroundStyle(Self.ink.opacity(0.35)) }
+    }
+
+    private struct Line: Shape {
+        func path(in rect: CGRect) -> Path { var p = Path(); p.move(to: CGPoint(x: 0, y: rect.midY)); p.addLine(to: CGPoint(x: rect.maxX, y: rect.midY)); return p }
     }
 }
 
