@@ -33,6 +33,9 @@ final class BudgetStore {
     @ObservationIgnored var recurringCache: [RecurringEngine.Recurring]?
     @ObservationIgnored var awardCache: [Month: [Award]] = [:]
     @ObservationIgnored var reportCache: [ReportPeriod: ReportData] = [:]
+    /// Goes up by one every time the library changes and everything derived from it is rebuilt.
+    /// Anything worked out from transactions can be kept alongside the revision it was made at.
+    @ObservationIgnored private(set) var revision = 0
     @ObservationIgnored var storyCache: (stamp: [Int], stories: [Story])?
     @ObservationIgnored var storyOfEntry: [UUID: Int]?
     /// The charges an order history could explain, kept until the library next changes.
@@ -334,6 +337,7 @@ final class BudgetStore {
         transactions = list
         indexByID = nil
         storyCache = nil; storyOfEntry = nil
+        revision += 1
         orderChargeCache = nil
         insightCache = [:]; recurringCache = nil; awardCache = [:]; reportCache = [:]
         months = Array(Set(list.map(\.month))).sorted()
