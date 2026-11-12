@@ -8,7 +8,12 @@ extension BudgetStore {
     static let tidyModel = "google/gemini-decision-1"
 
     /// What was tidied automatically, newest first.
-    var tidyChanges: [TidyChange] { (library.tidy?.changes ?? []).reversed() }
+    /// (A split-off payee that the sorter then gave its old name back is no change at all, and is left out.)
+    var tidyChanges: [TidyChange] {
+        (library.tidy?.changes ?? []).reversed().filter { change in
+            change.kind == .combine || change.otherKey.flatMap { library.merchants[$0]?.name } != change.from
+        }
+    }
     var newTidyChanges: [TidyChange] { tidyChanges.filter { $0.isNew ?? false } }
 
     /// Looks for payees to combine or separate, and does it where the model is sure. Each pair is
