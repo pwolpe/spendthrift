@@ -50,7 +50,11 @@ extension BudgetStore {
         var asked: [(index: Int, issuer: String, files: [URL], fees: [Double], words: String, count: Int)] = []
         for (index, account) in library.accounts.enumerated() where Self.isCard(account) && account.productByHand != true {
             let mine = sources.filter { $0.accountID == account.id }
-            guard !mine.isEmpty, account.productLooked != mine.count, account.product?.isEmpty != false || account.productLooked == nil,
+            // Look when it has never been looked at, when it could not be told and more statements have
+            // come since, or when the name on file is one the catalogue no longer has.
+            let known = account.product.map { !$0.isEmpty && CardCatalog.product(titled: $0) != nil } ?? false
+            let stale = account.product?.isEmpty == false && !known
+            guard !mine.isEmpty, !known, account.product == nil || stale || account.productLooked != mine.count,
                   let issuer = Self.issuer(in: account.name) else { continue }
             let pdfs = mine.filter(\.isPDF).sorted { ($0.lastDate ?? "") > ($1.lastDate ?? "") }.prefix(2).map { paths.statementFile($0) }
             var fees: [Double] = [], words: Set<String> = []
@@ -119,9 +123,11 @@ struct CardFace: View {
                         .lineLimit(1).minimumScaleFactor(0.6).frame(maxWidth: .infinity)
                 } else {
                     HStack(alignment: .top) {
+                        // A name written small ("coinbase") is a wordmark: set larger and tight. Capitals are set small and spaced.
+                        let wordmark = product.map { $0.face == $0.face.lowercased() } ?? true
                         Text(product.map { $0.face.isEmpty ? "" : $0.face } ?? issuer)
-                            .font(.system(size: width * (product == nil ? 0.068 : 0.05), weight: product == nil ? .bold : .semibold, design: product == nil ? .rounded : .default))
-                            .tracking(product == nil ? 0 : width * 0.01).lineLimit(1).minimumScaleFactor(0.6)
+                            .font(.system(size: width * (wordmark ? 0.068 : 0.05), weight: wordmark ? .bold : .semibold, design: product == nil ? .rounded : .default))
+                            .tracking(wordmark ? 0 : width * 0.01).lineLimit(1).minimumScaleFactor(0.6)
                         Spacer(minLength: 4)
                         Image(systemName: "wave.3.right").font(.system(size: width * 0.06, weight: .semibold)).opacity(0.7)
                     }
@@ -139,14 +145,16 @@ struct CardFace: View {
                         .shadow(color: .black.opacity(look.darkInk ? 0 : 0.35), radius: 0.5, y: 0.5)
                     Spacer(minLength: 4)
                     // The issuer in the corner once the card's own name has taken the top; the card's name there on a framed one.
-                    if let product {
+                    if let product, framed || product.face.lowercased() != issuer.lowercased() {
                         Text(framed ? product.face : issuer.uppercased()).font(.system(size: width * 0.04, weight: .bold)).tracking(width * 0.006)
                             .lineLimit(1).minimumScaleFactor(0.5).opacity(0.85)
                     }
                 }
             }
             .foregroundStyle(ink)
-            .padding(width * (framed ? 0.095 : 0.07))
+            // Dark type on metal is stamped in: a line of light under each letter.
+            .shadow(color: .white.opacity(look.darkInk ? 0.55 : 0), radius: 0, y: 0.7)
+            .padding(width * (framed ? 0.105 : 0.07))
         }
         .frame(width: width, height: height)
         .overlay { shape.strokeBorder(.white.opacity(0.25), lineWidth: 0.75) }

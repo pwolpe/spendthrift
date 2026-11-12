@@ -8,7 +8,7 @@ import SwiftUI
 /// The drawings are the app's own: a colour and a pattern in the spirit of the card, with no
 /// issuer's logo or artwork copied.
 enum CardCatalog {
-    enum Pattern { case plain, waves, frame, arcs, bands, rings, weave }
+    enum Pattern { case plain, waves, facets, frame, code, arcs, bands, rings, weave }
 
     struct Look {
         var top: Color
@@ -40,7 +40,7 @@ enum CardCatalog {
     static let products: [Product] = [
         // Chase
         Product(title: "Chase Sapphire Reserve", face: "SAPPHIRE RESERVE", issuer: "Chase", phrases: ["sapphire reserve"], hints: ["ultimate rewards"], fees: [450, 550, 795],
-                look: Look(top: rgb(0.07, 0.15, 0.33), bottom: rgb(0.02, 0.05, 0.14), line: rgb(0.36, 0.56, 0.93), pattern: .waves)),
+                look: Look(top: rgb(0.06, 0.13, 0.31), bottom: rgb(0.02, 0.04, 0.13), line: rgb(0.38, 0.58, 0.95), pattern: .facets)),
         Product(title: "Chase Sapphire Preferred", face: "SAPPHIRE PREFERRED", issuer: "Chase", phrases: ["sapphire preferred"], hints: ["ultimate rewards"], fees: [95],
                 look: Look(top: rgb(0.13, 0.33, 0.66), bottom: rgb(0.05, 0.15, 0.4), line: rgb(0.6, 0.78, 1.0), pattern: .waves)),
         Product(title: "Chase Freedom Unlimited", face: "FREEDOM UNLIMITED", issuer: "Chase", phrases: ["freedom unlimited"],
@@ -87,8 +87,8 @@ enum CardCatalog {
         Product(title: "Citi AAdvantage", face: "AADVANTAGE", issuer: "Citi", phrases: ["aadvantage"],
                 look: Look(top: rgb(0.5, 0.55, 0.62), bottom: rgb(0.22, 0.26, 0.33), line: rgb(0.85, 0.25, 0.25), pattern: .bands)),
         // Others
-        Product(title: "Coinbase Card", face: "COINBASE", issuer: "Coinbase", phrases: ["coinbase"],
-                look: Look(top: rgb(0.1, 0.36, 0.95), bottom: rgb(0.03, 0.18, 0.62), line: .white, pattern: .rings)),
+        Product(title: "Coinbase One Card", face: "coinbase", issuer: "Coinbase", phrases: ["coinbase"],
+                look: Look(top: rgb(0.11, 0.11, 0.12), bottom: rgb(0.02, 0.02, 0.03), line: rgb(0.78, 0.8, 0.84), pattern: .code)),
         Product(title: "Apple Card", face: "", issuer: "Apple Card", phrases: ["apple card"],
                 look: Look(top: rgb(0.97, 0.97, 0.98), bottom: rgb(0.86, 0.87, 0.89), line: rgb(0.6, 0.6, 0.65), pattern: .plain, darkInk: true)),
         Product(title: "Discover it", face: "DISCOVER IT", issuer: "Discover", phrases: ["discover it"],
@@ -170,25 +170,97 @@ struct CardPattern: View {
                 sweep.addCurve(to: CGPoint(x: w * 0.66, y: h * 1.05), control1: CGPoint(x: w * 0.9, y: h * 0.6), control2: CGPoint(x: w * 0.76, y: h * 0.85))
                 sweep.closeSubpath()
                 context.fill(sweep, with: .linearGradient(Gradient(colors: [ink.opacity(0.0), ink.opacity(0.22)]), startPoint: CGPoint(x: w * 0.4, y: h), endPoint: CGPoint(x: w, y: h * 0.2)))
+            case .facets:
+                // The cut faces of a gem: a net of triangles, each catching the light a little differently.
+                let columns = 6, rows = 4
+                func noise(_ a: Int, _ b: Int) -> CGFloat { let v = sin(CGFloat(a) * 12.9898 + CGFloat(b) * 78.233) * 43758.5453; return v - v.rounded(.down) }
+                func point(_ c: Int, _ r: Int) -> CGPoint {
+                    let edge = c == 0 || r == 0 || c == columns || r == rows
+                    let dx = edge ? 0 : (noise(c, r) - 0.5) * 0.6, dy = edge ? 0 : (noise(r + 7, c + 3) - 0.5) * 0.6
+                    return CGPoint(x: (CGFloat(c) + dx) / CGFloat(columns) * w, y: (CGFloat(r) + dy) / CGFloat(rows) * h)
+                }
+                for c in 0..<columns {
+                    for r in 0..<rows {
+                        let a = point(c, r), b = point(c + 1, r), d = point(c, r + 1), e = point(c + 1, r + 1)
+                        let split = noise(c + 11, r + 5) > 0.5
+                        let triangles = split ? [[a, b, e], [a, e, d]] : [[a, b, d], [b, e, d]]
+                        for (n, triangle) in triangles.enumerated() {
+                            var path = Path()
+                            path.move(to: triangle[0]); path.addLine(to: triangle[1]); path.addLine(to: triangle[2]); path.closeSubpath()
+                            // Brighter toward the lower right, where the light falls.
+                            let lit = Double(noise(c * 3 + n, r * 5 + 1)) * (0.05 + 0.2 * Double(c + r) / Double(columns + rows))
+                            context.fill(path, with: .color(ink.opacity(lit)))
+                            context.stroke(path, with: .color(ink.opacity(0.13)), lineWidth: 0.5)
+                        }
+                    }
+                }
+            case .code:
+                // Rows of small type covering the face, as if engraved: the first block of the first chain, in hexadecimal.
+                let block = "0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4A29AB5F49FFFF001D1DAC2B7C0101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73"
+                let letters = Array(block), size = max(4.5, w * 0.024), perRow = Int(w / (size * 0.62)) + 2
+                var row = 0, y = size * 0.9
+                while y < h + size {
+                    let from = (row * perRow) % letters.count
+                    let text = String((0..<perRow).map { letters[(from + $0) % letters.count] })
+                    // Some rows are cut a little deeper than others.
+                    let depth = 0.1 + 0.12 * Double((row * 7) % 5) / 4
+                    context.draw(Text(text).font(.system(size: size, weight: .medium, design: .monospaced)).foregroundColor(ink.opacity(depth)),
+                                 at: CGPoint(x: 0, y: y), anchor: .leading)
+                    y += size * 1.28; row += 1
+                }
+                // A soft band of light across the metal.
+                var band = Path()
+                band.move(to: CGPoint(x: w * 0.5, y: 0)); band.addLine(to: CGPoint(x: w * 0.78, y: 0)); band.addLine(to: CGPoint(x: w * 0.42, y: h)); band.addLine(to: CGPoint(x: w * 0.14, y: h)); band.closeSubpath()
+                context.fill(band, with: .color(.white.opacity(0.045)))
             case .frame:
-                // An engraved border, fine ruled lines inside it, and an oval at the centre, like a banknote.
-                for (inset, strength) in [(0.045, 0.5), (0.065, 0.25)] {
-                    let rect = CGRect(x: w * inset, y: w * inset, width: w - 2 * w * inset, height: h - 2 * w * inset)
-                    context.stroke(Path(roundedRect: rect, cornerRadius: w * 0.03), with: .color(ink.opacity(strength)), lineWidth: 0.8)
+                // Brushed metal: hairlines of uneven strength, edge to edge.
+                var by: CGFloat = 0, n = 0
+                while by < h {
+                    let v = sin(CGFloat(n) * 91.7) * 43758.5453, strength = Double(v - v.rounded(.down))
+                    context.fill(Path(CGRect(x: 0, y: by, width: w, height: 0.6)), with: .color((strength > 0.5 ? Color.white : ink).opacity(0.05 + strength * 0.07)))
+                    by += 1.3; n += 1
                 }
-                var y = h * 0.14
-                while y < h * 0.88 {
-                    var path = Path()
-                    path.move(to: CGPoint(x: w * 0.085, y: y))
-                    var x = w * 0.085
-                    while x < w * 0.915 { x += 3; path.addLine(to: CGPoint(x: x, y: y + sin(x / w * 28) * 1.2)) }
-                    context.stroke(path, with: .color(ink.opacity(0.09)), lineWidth: 0.5)
-                    y += 4.5
+                // An engraved border: a rule, a row of beads, a second rule, like the edge of a banknote.
+                let outer = CGRect(x: w * 0.04, y: w * 0.04, width: w - w * 0.08, height: h - w * 0.08)
+                context.stroke(Path(roundedRect: outer, cornerRadius: w * 0.032), with: .color(ink.opacity(0.55)), lineWidth: 0.9)
+                let beads = outer.insetBy(dx: w * 0.014, dy: w * 0.014), bead = w * 0.009
+                var bx = beads.minX + bead
+                while bx < beads.maxX - bead {
+                    for byEdge in [beads.minY, beads.maxY] { context.fill(Path(ellipseIn: CGRect(x: bx - bead / 2, y: byEdge - bead / 2, width: bead, height: bead)), with: .color(ink.opacity(0.35))) }
+                    bx += bead * 1.9
                 }
-                let oval = CGRect(x: w * 0.37, y: h * 0.26, width: w * 0.26, height: h * 0.48)
-                context.fill(Path(ellipseIn: oval), with: .color(look.top.opacity(0.55)))
-                context.stroke(Path(ellipseIn: oval), with: .color(ink.opacity(0.4)), lineWidth: 0.9)
-                context.stroke(Path(ellipseIn: oval.insetBy(dx: w * 0.012, dy: w * 0.012)), with: .color(ink.opacity(0.2)), lineWidth: 0.6)
+                var bEdge = beads.minY + bead * 1.9
+                while bEdge < beads.maxY - bead {
+                    for bxEdge in [beads.minX, beads.maxX] { context.fill(Path(ellipseIn: CGRect(x: bxEdge - bead / 2, y: bEdge - bead / 2, width: bead, height: bead)), with: .color(ink.opacity(0.35))) }
+                    bEdge += bead * 1.9
+                }
+                let inner = outer.insetBy(dx: w * 0.028, dy: w * 0.028)
+                context.stroke(Path(roundedRect: inner, cornerRadius: w * 0.02), with: .color(ink.opacity(0.3)), lineWidth: 0.6)
+                // Fans in the corners.
+                for corner in [CGPoint(x: inner.minX, y: inner.minY), CGPoint(x: inner.maxX, y: inner.minY), CGPoint(x: inner.minX, y: inner.maxY), CGPoint(x: inner.maxX, y: inner.maxY)] {
+                    for i in 1...4 {
+                        let r = w * 0.022 * CGFloat(i)
+                        var fan = context
+                        fan.clip(to: Path(inner))
+                        fan.stroke(Path(ellipseIn: CGRect(x: corner.x - r, y: corner.y - r, width: r * 2, height: r * 2)), with: .color(ink.opacity(0.22)), lineWidth: 0.5)
+                    }
+                }
+                // The medallion: a rosette of fine loops, such as a lathe engraves, around a plain boss.
+                let centre = CGPoint(x: w * 0.5, y: h * 0.52), reach = h * 0.27
+                for i in 0..<48 {
+                    let angle = CGFloat(i) / 48 * 2 * .pi
+                    var petal = context
+                    petal.translateBy(x: centre.x, y: centre.y)
+                    petal.rotate(by: .radians(angle))
+                    petal.stroke(Path(ellipseIn: CGRect(x: 0, y: -reach * 0.2, width: reach, height: reach * 0.4)), with: .color(ink.opacity(0.2)), lineWidth: 0.45)
+                }
+                for (scale, strength) in [(1.04, 0.45), (0.5, 0.35), (0.44, 0.2)] {
+                    let r = reach * scale
+                    context.stroke(Path(ellipseIn: CGRect(x: centre.x - r, y: centre.y - r, width: r * 2, height: r * 2)), with: .color(ink.opacity(strength)), lineWidth: 0.7)
+                }
+                let boss = reach * 0.42
+                context.fill(Path(ellipseIn: CGRect(x: centre.x - boss, y: centre.y - boss, width: boss * 2, height: boss * 2)),
+                             with: .linearGradient(Gradient(colors: [.white.opacity(0.55), look.bottom.opacity(0.5)]), startPoint: CGPoint(x: centre.x - boss, y: centre.y - boss), endPoint: CGPoint(x: centre.x + boss, y: centre.y + boss)))
             case .arcs:
                 for i in 1...6 {
                     let r = w * 0.16 * CGFloat(i)
