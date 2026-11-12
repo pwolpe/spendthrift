@@ -54,7 +54,6 @@ if [ -f "$CARTOON" ]; then cp "$CARTOON" "$APP/Contents/Resources/tony-cartoon.p
 cp "$ROOT/Resources/tony.jpg" "$APP/Contents/Resources/tony.jpg"
 if [ -f "$ROOT/Resources/paul.jpg" ]; then cp "$ROOT/Resources/paul.jpg" "$APP/Contents/Resources/paul.jpg"; fi
 cp "$ROOT/Resources/tony-avatar.png" "$APP/Contents/Resources/tony-avatar.png"
-if [ -f "$ROOT/Resources/paul-avatar.png" ]; then cp "$ROOT/Resources/paul-avatar.png" "$APP/Contents/Resources/paul-avatar.png"; fi
 mkdir -p "$APP/Contents/Resources/Starters" && cp "$ROOT/Resources/Starters/"* "$APP/Contents/Resources/Starters/"
 mkdir -p "$APP/Contents/Resources/Art" && cp "$ROOT/Resources/Art/"* "$APP/Contents/Resources/Art/"
 
