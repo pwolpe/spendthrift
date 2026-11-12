@@ -3,6 +3,11 @@ import Foundation
 /// Stopwatch for starting up. With SPENDTHRIFT_TIMING set, each mark prints how long since the
 /// process began, so a slow start can be traced to the step that caused it.
 enum Launch {
+    /// True once the first page has been drawn; after that nothing needs holding back.
+    nonisolated(unsafe) static var hasDrawn = false
+    /// How long held-back pieces wait after appearing: long enough for the first page to reach the
+    /// screen first, short enough that nobody sees them arrive late.
+    static let settle = 0.08
     static let enabled = ProcessInfo.processInfo.environment["SPENDTHRIFT_TIMING"] != nil
     private static let began = Date.now
     nonisolated(unsafe) private static var last = Date.now

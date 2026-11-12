@@ -48,7 +48,7 @@ enum Huncher {
         """
         var lines: [String] = []
         for (i, s) in subjects.enumerated() {
-            lines.append("\(i + 1). \(s.name) | statement line: \(s.line) | sorted as: \(s.category) | account: \(s.account) | \(s.count) in all | \(s.charges.joined(separator: "; "))")
+            lines.append("\(i + 1). \(s.name) | statement line: \(Redactor.scrub(s.line)) | sorted as: \(s.category) | account: \(Redactor.accountLabel(s.account)) | \(s.count) in all | \(s.charges.joined(separator: "; "))")
         }
         let context = notes.isEmpty ? "" : "\n\nNotes the person has written about other things (context only):\n" + notes.joined(separator: "\n")
         let reply = await Timeout.run(90) {

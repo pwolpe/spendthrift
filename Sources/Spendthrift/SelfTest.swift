@@ -111,6 +111,327 @@ enum SelfTest {
         // Answers may only quote amounts the app computed.
         check("dollar amounts are read out of an answer", ChatAnalyst.dollarAmounts(in: "You spent $1,234.56, then $80.") == ["$1,234.56", "$80"])
         check("months step across a year", Month(year: 2026, month: 1).adding(-1) == Month(year: 2025, month: 12) && Month(year: 2025, month: 12) < Month(year: 2026, month: 1))
+        readingFiles()
+        knownNames()
+        privacy()
+        engines()
+        orderChecks()
+        pdfStatements()
+        storage()
+    }
+
+    // MARK: Reading what a bank hands over
+
+    private static func csv(_ s: String) -> CSVTable? { try? CSVTable(data: Data(s.utf8)) }
+    private static func readDay(_ s: String, _ format: String) -> String? { DateParsing.parse(s, format: format).map { DateParsing.iso.string(from: $0) } }
+
+    private static func readingFiles() {
+        check("csv: quotes, a comma inside quotes and CRLF", CSV.parse("a,\"b,c\",d\r\n1,2,3\n") == [["a", "b,c", "d"], ["1", "2", "3"]])
+        check("csv: a byte-order mark, doubled quotes", CSV.parse("\u{FEFF}\"say \"\"hi\"\"\",x") == [["say \"hi\"", "x"]])
+        check("csv: blank lines are dropped", CSV.parse("a,b\n\n,\nc,d") == [["a", "b"], ["c", "d"]])
+        check("csv: the delimiter is sniffed", CSV.detectDelimiter("Datum;Betrag;Text\n01.02.2026;12,50;Shop") == ";" && CSV.detectDelimiter("a\tb\tc\n1\t2\t3") == "\t")
+
+        check("money: parentheses, a trailing minus, a sign before the currency",
+              MoneyParsing.parse("(1,234.56)") == -1234.56 && MoneyParsing.parse("12.50-") == -12.5 && MoneyParsing.parse("-$5.00") == -5)
+        check("money: a decimal comma and a euro sign", MoneyParsing.parse("1.234,56") == 1234.56 && MoneyParsing.parse("€ 7,50") == 7.5)
+        check("money: words and nothing are not an amount", MoneyParsing.parse("abc") == nil && MoneyParsing.parse("") == nil)
+        check("money: a number too big for a Double is not an amount", MoneyParsing.parse("1e999") == nil && MoneyParsing.parse("-1e999") == nil)
+
+        let formats: [(String, String)] = [("03/09/2026", "MM/dd/yyyy"), ("3/9/2026", "M/d/yyyy"), ("2026-03-09", "yyyy-MM-dd"), ("03/09/26", "MM/dd/yy"),
+                                           ("3/9/26", "M/d/yy"), ("03-09-2026", "MM-dd-yyyy"), ("2026/03/09", "yyyy/MM/dd"), ("09 Mar 2026", "dd MMM yyyy"),
+                                           ("Mar 9, 2026", "MMM d, yyyy"), ("Mar 09, 2026", "MMM dd, yyyy"), ("9 Mar 2026", "d MMM yyyy"), ("09/03/2026", "dd/MM/yyyy")]
+        check("dates: every listed format reads the same day", formats.allSatisfy { readDay($0.0, $0.1) == "2026-03-09" })
+        check("dates: a time after the day is shed", readDay("09/02/2026 12:00:00 AM", "MM/dd/yyyy") == "2026-09-02" && readDay("2026-03-09T10:00:00Z", "yyyy-MM-dd") == "2026-03-09")
+        check("dates: impossible days are refused", readDay("13/01/2026", "MM/dd/yyyy") == nil && readDay("2026-02-30", "yyyy-MM-dd") == nil)
+        check("dates: the US order wins a tie, evidence overrides it",
+              DateParsing.guessFormat(for: ["01/02/2026", "03/04/2026"]) == "MM/dd/yyyy"
+              && DateParsing.guessFormat(for: ["13/01/2026", "25/02/2026", "01/03/2026"]) == "dd/MM/yyyy"
+              && DateParsing.guessFormat(for: ["01/02/1850"]) == nil)
+
+        let chase = "Transaction Date,Post Date,Description,Category,Type,Amount,Memo\n11/03/2026,11/04/2026,STARBUCKS #1,Food & Drink,Sale,-4.50,\n11/05/2026,11/06/2026,PAYMENT THANK YOU,,Payment,100.00,\n"
+        check("columns: a Chase-style file reads, and the payment line fixes the sign",
+              csv(chase).flatMap { t in ColumnDetector.detect(t).map { Normalizer.rows(from: t, mapping: $0).rows } }
+              == [CanonicalRow(date: "2026-11-03", description: "STARBUCKS #1", amount: 4.5, bankCategory: "Food & Drink"),
+                  CanonicalRow(date: "2026-11-05", description: "PAYMENT THANK YOU", amount: -100, bankCategory: nil)])
+        check("columns: whole-number amounts are still amounts", csv("Date,Description,Amount\n2026-03-01,Rent,-1500\n2026-03-02,Coffee,-4\n").flatMap(ColumnDetector.detect)?.amountColumn == 2)
+        check("columns: a column of whole numbers under another name is not money",
+              csv("Date,Description,Check Number\n2026-03-01,Rent,1500\n2026-03-02,Coffee,1501\n").flatMap(ColumnDetector.detect) == nil)
+
+        let mapping = { (amount: Int?, debit: Int?, credit: Int?, type: Int?, negative: Bool) in
+            ColumnMapping(dateColumn: 0, dateFormat: "MM/dd/yyyy", descriptionColumn: 1, amountColumn: amount, debitColumn: debit, creditColumn: credit,
+                          purchasesAreNegative: negative, typeColumn: type)
+        }
+        let split = Normalizer.rows(from: CSVTable(header: ["Date", "D", "Debit", "Credit"],
+                                                   rows: [["03/01/2026", "COFFEE", "4.50", ""], ["03/02/2026", "PAYROLL", "", "2000.00"], ["bad", "X", "1.00", ""]],
+                                                   signature: nil, suggestedName: nil), mapping: mapping(nil, 2, 3, nil, false))
+        check("normalize: debit and credit columns, a bad date counted as skipped", split.rows.map(\.amount) == [4.5, -2000] && split.skipped == 1)
+        let typed = Normalizer.rows(from: CSVTable(header: ["Date", "D", "Amt", "Type"], rows: [["03/01/2026", "A", "10.00", "Debit"], ["03/02/2026", "B", "5.00", "Credit"]],
+                                                   signature: nil, suggestedName: nil), mapping: mapping(2, nil, nil, 3, false))
+        check("normalize: a Debit or Credit word gives the direction", typed.rows.map(\.amount) == [10, -5])
+        let zero = Normalizer.rows(from: CSVTable(header: nil, rows: [["03/01/2026", "A", "0.00"]], signature: nil, suggestedName: nil), mapping: mapping(2, nil, nil, nil, true))
+        check("normalize: no negative zero", zero.rows.first?.amount.sign == .plus)
+
+        // A description with an unquoted comma makes a row of the wrong width: it is left out, and counted.
+        let ragged = csv("Date,Description,Amount\n2026-03-01,Coffee,-4.00\n2026-03-02,Lunch, with Sam,-12.00\n2026-03-03,Rent,-1500.00\n")
+        let raggedRows = ragged.flatMap { t in ColumnDetector.detect(t).map { Normalizer.rows(from: t, mapping: $0) } }
+        check("csv: a row of the wrong width is counted as skipped, not lost silently", ragged?.droppedRows == 1 && raggedRows?.rows.count == 2 && raggedRows?.skipped == 1)
+
+        let ofx = "OFXHEADER:100\n<OFX>\n<FI><ORG>Chase</FI>\n<ACCTID>000123456789\n<STMTTRN><DTPOSTED>20261103120000[-5:EST]<TRNAMT>-4.50<NAME>STARBUCKS &amp; CO<MEMO>NEW YORK</STMTTRN>\n<STMTTRN><DTPOSTED>20261105<TRNAMT>1000.00<NAME>PAYROLL</STMTTRN>\n</OFX>"
+        let parsed = try? OFX.parse(Data(ofx.utf8), fallbackName: "x")
+        check("ofx: signs flip and entities decode", parsed?.rows == [CanonicalRow(date: "2026-11-03", description: "STARBUCKS & CO", amount: 4.5, bankCategory: nil),
+                                                                       CanonicalRow(date: "2026-11-05", description: "PAYROLL", amount: -1000, bankCategory: nil)])
+        check("ofx: the account is named from ORG and ACCTID", parsed?.signature == "ofx:chase:6789" && parsed?.suggestedName == "Chase ••6789")
+        check("ofx: a file with no transactions is an error", (try? OFX.parse(Data("<OFX></OFX>".utf8), fallbackName: "x")) == nil)
+
+        let file = { (name: String) in URL(fileURLWithPath: "/x/" + name) }
+        check("names: card digits and the account name come from a file name",
+              StatementReader.cardDigits(in: file("Chase4090_Activity_20261109.csv")) == "4090"
+              && StatementReader.accountName(for: file("Chase4090_Activity_20261109.csv")) == "Chase ••4090")
+        check("names: a date in the name is not a card", StatementReader.cardDigits(in: file("Coinbase_2026-10-12.csv")) == nil)
+        check("names: a year is not a card, unless a word says it is one",
+              StatementReader.cardDigits(in: file("transactions_2026.csv")) == nil && StatementReader.cardDigits(in: file("Visa ending 2026.csv")) == "2026"
+              && StatementReader.accountName(for: file("transactions_2026.csv")) == "Account")
+        check("names: Marcus is not March, March is", StatementReader.accountName(for: file("Marcus_Savings.csv")) == "Marcus Savings"
+              && StatementReader.accountName(for: file("Statement_Mar_2026.csv")) == "Account"
+              && StatementReader.accountName(for: file("Junction_Decatur.csv")) == "Junction Decatur")
+
+        check("keyword: a processor prefix and a store number come off",
+              KeywordExtractor.keyword(for: "TST* BLUE DOOR CAFE #42 SEATTLE WA") == "BLUE DOOR CAFE"
+              && KeywordExtractor.displayName(for: "TST* BLUE DOOR CAFE #42 SEATTLE WA") == "Blue Door Cafe"
+              && KeywordExtractor.keyword(for: "SQ *JOE'S PIZZA 12345") == "JOE'S PIZZA")
+        check("keyword: a wire is named by its recipient",
+              KeywordExtractor.wireRecipient("DOMESTIC MANUAL WIRE ACME DESIGN LLC") == "ACME DESIGN LLC"
+              && KeywordExtractor.wireRecipient("Consumer Online International Wire Via: X A/C: Hsbc Uk Bank Plc Birmingham REF: 123") == "HSBC UK BANK PLC"
+              && KeywordExtractor.wireRecipient("WIRE TRANSFER FEE") == nil)
+    }
+
+    // MARK: Who a line belongs to
+
+    private static func knownNames() {
+        check("known: names, direction-dependent rules and card payments",
+              KnownMerchants.match("STARBUCKS #1234 NEW YORK NY", generic: false)?.name == "Starbucks"
+              && KnownMerchants.match("TOTAL WINE & MORE #123", generic: false)?.category == .wine
+              && KnownMerchants.match("ACME DISTRIBUTION", amount: -900, generic: false)?.category == .investmentIncome
+              && KnownMerchants.match("ACME DISTRIBUTION", amount: 900, generic: false) == nil
+              && KnownMerchants.match("CHASE CREDIT CRD AUTOPAY 1234", amount: 500, generic: false)?.name == "Chase Card Payment")
+        check("known: the bank's own category, and places joining places",
+              BankCategory.map("Food & Drink") == .dining && BankCategory.map("Gas/Automotive") == .transportation
+              && BankCategory.map("Bills & Utilities") == .bills && BankCategory.map("Zzz") == nil
+              && MerchantResolver.key(for: "DICKSON'S FARMSTAND M", amount: 10, existingKeys: ["DICKSON'S FARMSTAND"]) == "DICKSON'S FARMSTAND")
+        check("known: T-Mobile is not Mobil", KnownMerchants.match("T-MOBILE*BILL 800-937-8997", generic: false)?.name == "T-Mobile"
+              && KnownMerchants.match("MOBIL 12345 NEWARK NJ", generic: false)?.name == "Mobil")
+        check("known: a brand must be a word of its own",
+              KnownMerchants.match("MARCO'S PIZZA 123", generic: false) == nil && KnownMerchants.match("ARCO #123", generic: false)?.name == "ARCO"
+              && KnownMerchants.match("CONSULTANT GROUP", generic: false) == nil && KnownMerchants.match("DAVIS HARDWARE", generic: false) == nil
+              && KnownMerchants.match("AVIS RENT A CAR 123", generic: false)?.name == "Avis")
+        check("known: STAIRS are not the IRS, the IRS is", KnownMerchants.match("ACME STAIRS & RAILS", amount: 50, generic: false) == nil
+              && KnownMerchants.match("IRS TREAS 310 TAX REF", amount: -50, generic: false)?.category == .taxes
+              && KnownMerchants.match("ACH PYMT IRS PAYMENT", amount: 50, generic: false)?.name == "IRS")
+        check("known: a lookalike is not an investment firm", KnownMerchants.match("MERRILL'S BAKERY", amount: 5, generic: false) == nil
+              && KnownMerchants.match("VANGUARDIA CAFE", amount: 5, generic: false) == nil && KnownMerchants.match("MERRILL LYNCH", amount: 5, generic: false)?.name == "Merrill")
+        // What banks print, still found: processor marks, store numbers, names run into more letters.
+        let real: [(String, String)] = [
+            ("STARBUCKS #1234", "Starbucks"), ("WHOLEFDS MKT 10234", "Whole Foods"), ("AMZN MKTP US*2K4AB1", "Amazon"), ("AMAZON.COM*1A2B3", "Amazon"),
+            ("APPLE.COM/BILL", "Apple"), ("PARAMOUNT+ CA", "Paramount+"), ("MCDONALDS F1234", "McDonald's"), ("MCDONALD'S 12345", "McDonald's"),
+            ("EXXONMOBIL 4412", "Exxon"), ("UBER *EATS HELP.UBER.COM", "Uber Eats"), ("UBEREATS", "Uber Eats"), ("UBER *TRIP", "Uber"),
+            ("TRADER JOES #123", "Trader Joe's"), ("BINNY'S BEVERAGE", "Binny's"), ("TRADER JOE'S #123", "Trader Joe's"), ("DUNKIN #123", "Dunkin'"), ("DUNKIN' DONUTS", "Dunkin'"),
+            ("AMERICAN AIRLINES 0012", "American Airlines"), ("DELTA AIR LINES 0062", "Delta"), ("CON EDISON PAYMENT", "Con Edison"), ("STOP & SHOP 123", "Stop & Shop"),
+            ("AT&T*BILL PAYMENT", "AT&T"), ("CVS/PHARMACY #123", "CVS"), ("GOOGLE *YOUTUBEPREMIUM", "YouTube"), ("GOOGLE *SERVICES", "Google"),
+            ("NETFLIX.COM", "Netflix"), ("PAYPAL *NETFLIX", "Netflix"), ("HOME DEPOT #1234", "Home Depot"), ("LOWE'S #0123", "Lowe's"), ("WAL-MART SUPERCENTER", "Walmart"),
+            ("COSTCO WHSE #0123", "Costco"), ("SHELL OIL 57444", "Shell"), ("CHICK-FIL-A #01234", "Chick-fil-A"), ("DOORDASH*CHIPOTLE", "DoorDash"),
+            ("E-ZPASS NY 1234", "E-ZPass"), ("MTA*NYCT PAYGO", "MTA"), ("SPOTIFY USA", "Spotify"), ("TOTAL WINE & MORE", "Total Wine"), ("WINE & SPIRITS OF NYC", "Wine & Spirits Shop"),
+        ]
+        let missed = real.filter { KnownMerchants.match($0.0, amount: 10, generic: false)?.name != $0.1 }.map(\.0)
+        check("known: every kind of line a bank prints is still found" + (missed.isEmpty ? "" : " (missed: \(missed.joined(separator: "; ")))"), missed.isEmpty)
+        check("known: a place of a kind is still found by its word", KnownMerchants.match("NYU HOSPITAL CAFE", generic: true) != nil
+              && KnownMerchants.match("MAMMA'S PIZZERIA", generic: true) == nil && KnownMerchants.match("JOES PIZZA", generic: true)?.category == .dining
+              && KnownMerchants.match("CITY PHARMACY", generic: true)?.category == .health && KnownMerchants.match("PHARMACYST CAFE", generic: true) != nil)
+        check("issuers: a whole word, so a bank that merely starts like one is not it",
+              BudgetStore.issuer(in: "Chase Sapphire ••1234") == "Chase" && BudgetStore.issuer(in: "Amex Gold") == "American Express"
+              && BudgetStore.issuer(in: "Citi Double Cash") == "Citi" && BudgetStore.issuer(in: "Citizens Bank ••1234") == nil
+              && BudgetStore.issuer(in: "Purchase Plus") == nil && BudgetStore.issuer(in: "Monzo") == nil && BudgetStore.issuer(in: "US Bank Checking") == "U.S. Bank")
+        check("issuers: signatures and names give the last digits",
+              BudgetStore.digits(ofSignature: "pdf:chase:4090") == "4090" && BudgetStore.digits(ofSignature: "date|desc|amount|#4090") == "4090"
+              && BudgetStore.digits(inName: "Chase ••4090") == "4090")
+        let table = PhraseTable([("AVIS", "a"), ("IRS ", "b"), (" DDS", "c"), ("MCDONALD", "d"), ("TST*", "e")], openEnded: ["MCDONALD"])
+        check("whole words: a name matches only where no letter or digit touches it",
+              table.firstMatch(in: "AVIS 12") == "a" && table.firstMatch(in: "DAVIS") == nil && table.firstMatch(in: "AVISO") == nil && table.firstMatch(in: "STAIRS X") == nil
+              && table.firstMatch(in: "PAY IRS NOW") == "b" && table.firstMatch(in: "DR JONES DDS") == "c" && table.firstMatch(in: "ADDS") == nil
+              && table.firstMatch(in: "MCDONALDS") == "d" && table.firstMatch(in: "AMCDONALD") == nil && table.firstMatch(in: "TST*CAFE") == "e")
+        check("whole words: the earliest name in the list wins", PhraseTable([("MOBIL", "x"), ("T-MOBILE", "y")]).firstMatch(in: "T-MOBILE") == "y"
+              && PhraseTable([("UBER EATS", "x"), ("UBER", "y")]).firstMatch(in: "UBER EATS") == "x")
+    }
+
+    // MARK: What leaves the Mac
+
+    private static func privacy() {
+        check("scrub: phones, emails and long ids leave a merchant line", Redactor.scrub("AMZN MKTP US*2K4AB1 800-555-1212") == "AMZN MKTP US*2K4AB1"
+              && Redactor.scrub("CHECKCARD 000652456372 JOE'S PIZZA") == "CHECKCARD JOE'S PIZZA" && Redactor.scrub("ZELLE TO jane.doe@example.com") == "ZELLE TO")
+        check("scrub: an SSN leaves, and a line that is all ids survives", Redactor.scrub("SSN 123-45-6789") == "SSN" && Redactor.scrub("0006524563 12") == "0006524563 12")
+        check("account names sent to a model have no digits", Redactor.accountLabel("Chase ••4090") == "Chase" && Redactor.accountLabel("Checking 000123456789") == "Checking"
+              && Redactor.accountLabel("Amex Gold") == "Amex Gold")
+        check("blank: name, address, city line, card and account digits are replaced",
+              Redactor.blank("JANE Q PUBLIC\n123 MAIN STREET\nNEW YORK, NY 10001\nCard 4111 1111 1111 1111 Account ending in 4321")
+              == "[name]\n[address]\n[city, state, zip]\nCard [number] Account ending in [number]")
+        check("blank: the holder is the capitalized words before the rest of the line", Redactor.holderNames(in: "ANA LOPEZ  We accept relay calls\n12 OAK ST") == ["ANA LOPEZ"])
+        check("blank: a name in Title Case is still a name", !Redactor.blank("Jane Q Public\n123 Main Street\nNew York, NY 10001").contains("Jane")
+              && !Redactor.blank("Jane Q Public\n123 Main Street\nNew York, NY 10001").contains("Public"))
+        check("blank: a heading above an address is not taken for a name", Redactor.blank("Customer Service\n123 Main Street").hasPrefix("Customer Service")
+              && Redactor.blank("Payment Address\n123 Main Street").hasPrefix("Payment Address"))
+        let identity = Redactor.blank("SSN: 123-45-6789 EIN 12-3456789 call 212-555-0199 or (212) 555-0100")
+        check("blank: SSNs, EINs and phone numbers do not leave the Mac", !identity.contains("6789") && !identity.contains("3456789") && !identity.contains("0199") && !identity.contains("0100"))
+        check("blank: an amount or a date is not a phone number", Redactor.blank("10/14 BEST BUY 1,249.99\nTotal 2026-11-03 100.00") == "10/14 BEST BUY 1,249.99\nTotal 2026-11-03 100.00")
+
+        // Statements taken out of a zip are not left in the temporary folder.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SpendthriftZip-selftest-\(UUID().uuidString)", isDirectory: true)
+        let inside = folder.appendingPathComponent("a.csv")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? Data("x".utf8).write(to: inside)
+        let waiting = PendingImport(fileURL: inside, fileHash: "h", table: CSVTable(header: nil, rows: [], signature: nil, suggestedName: nil), mapping: nil, candidates: [], suggestedName: "n", signature: "s")
+        BudgetStore.removeUnpacked([folder], keepingThoseUsedBy: [waiting])
+        let keptForPicker = FileManager.default.fileExists(atPath: inside.path)
+        check("a zip's folder is found from a file inside it", BudgetStore.unpackedFolder(containing: inside)?.lastPathComponent == folder.lastPathComponent)
+        BudgetStore.removeUnpacked([folder])
+        check("unpacked zip folders are removed, unless a file in one waits for its columns", keptForPicker && !FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    // MARK: Findings
+
+    private static let acct = UUID()
+    private static let nov = Month(year: 2026, month: 11)
+    private static func tx(_ d: String, _ amount: Double, _ merchant: String, _ category: Category) -> Transaction {
+        Transaction(id: UUID(), date: DateParsing.isoDay(d)!, month: Month(isoDay: d)!, description: merchant.uppercased(), amount: amount, merchant: merchant,
+                    merchantKey: merchant, category: category, account: "Card", accountID: acct, source: .user, needsCheck: false, isOverride: false)
+    }
+
+    private static func engines() {
+        let netflix = [tx("2026-09-05", 15.49, "Netflix", .subscriptions), tx("2026-10-05", 15.49, "Netflix", .subscriptions), tx("2026-11-05", 15.49, "Netflix", .subscriptions)]
+        check("subscriptions: monthly, steady and still running", InsightEngine.subscriptions(asOf: nov, in: netflix).map(\.merchant) == ["Netflix"])
+        let twice = [tx("2026-10-01", 4, "Cafe", .dining), tx("2026-10-02", 4, "Cafe", .dining), tx("2026-11-01", 4, "Cafe", .dining)]
+        check("subscriptions: not twice a month", InsightEngine.subscriptions(asOf: nov, in: twice).isEmpty)
+        let swing = [tx("2026-09-01", 20, "Gym", .health), tx("2026-10-01", 30, "Gym", .health), tx("2026-11-01", 20, "Gym", .health)]
+        check("subscriptions: not a swing of more than 20 percent", InsightEngine.subscriptions(asOf: nov, in: swing).isEmpty)
+        // Charges are kept oldest first, as the store keeps them.
+        let quiet = [tx("2026-08-05", 9, "Old", .subscriptions), tx("2026-09-05", 9, "Old", .subscriptions), tx("2026-11-01", 4, "Other", .dining)]
+        check("subscriptions: not one that has gone quiet", InsightEngine.subscriptions(asOf: nov, in: quiet).isEmpty)
+
+        let found = InsightEngine.insights(for: nov, in: [tx("2026-09-05", 15, "Netflix", .subscriptions), tx("2026-10-05", 15, "Netflix", .subscriptions), tx("2026-11-05", 17, "Netflix", .subscriptions),
+                                                          tx("2026-11-10", 12, "Cafe", .dining), tx("2026-11-11", 12, "Cafe", .dining), tx("2026-11-12", 800, "Gadget Shop", .shopping)])
+        check("insights: a price rise", found.contains { $0.kind == .priceIncrease && $0.title == "Netflix went up" })
+        check("insights: a double charge", found.contains { $0.kind == .duplicate && $0.title == "Possible double charge at Cafe" })
+        check("insights: an unusually large purchase", found.contains { $0.kind == .unusual && $0.title == "Bigger than usual: Gadget Shop" })
+        check("awards: the biggest categories lead", AwardEngine.awards(for: nov, in: [tx("2026-11-02", 100, "Market", .groceries), tx("2026-11-03", 30, "Bar", .dining),
+                                                                                       tx("2026-11-04", 30, "Bar", .dining)]).prefix(2).map(\.winner) == ["Groceries", "Dining"])
+        check("insights ignore transfers and unsorted deposits", InsightEngine.insights(for: nov, in: [tx("2026-11-02", 5000, "Brokerage", .transfer), tx("2026-11-03", -900, "Mystery", .unsorted)]).isEmpty)
+    }
+
+    private static func orderChecks() {
+        func item(_ order: String, _ cents: Int, _ date: String) -> OrderItem {
+            OrderItem(orderID: order, shop: .store, date: date, shipment: date + "T10:00", name: "Thing from \(order)", cents: cents, quantity: 1)
+        }
+        check("shops: Amazon's ways of signing a charge", OrderMatcher.shop(of: "AMAZON MKTPL*AB12 SEATTLE WA") == .store && OrderMatcher.shop(of: "AMZN Mktp US*2K4AB1") == .store
+              && OrderMatcher.shop(of: "WHOLEFDS MKT 10234") == .groceries && OrderMatcher.shop(of: "AMAZON PRIME*1A2B3") == .digital && OrderMatcher.shop(of: "KINDLE SVCS") == .digital)
+        check("shops: nobody else's charge is Amazon's", OrderMatcher.shop(of: "STARBUCKS #12") == nil && OrderMatcher.shop(of: "SAM'S CLUB #44") == nil)
+        check("day numbers count whole days", OrderMatcher.dayNumber("1970-01-01") == 719_468 && OrderMatcher.dayNumber("2024-03-01") - OrderMatcher.dayNumber("2024-02-28") == 2
+              && OrderMatcher.dayNumber("garbage") == 0)
+        let twin = [item("A", 1999, "2026-03-01"), item("B", 1999, "2026-03-05")]
+        let c1 = OrderMatcher.Charge(id: UUID(), date: "2026-03-02", cents: 1999, shop: .store), c2 = OrderMatcher.Charge(id: UUID(), date: "2026-03-06", cents: 1999, shop: .store)
+        let m = OrderMatcher.match([c2, c1], to: twin)
+        check("orders: equal charges take their own orders, nearest first", m[c1.id.uuidString]?.items == [0] && m[c2.id.uuidString]?.items == [1])
+        let refund = OrderMatcher.Charge(id: UUID(), date: "2026-03-02", cents: -1999, shop: .store), other = OrderMatcher.Charge(id: UUID(), date: "2026-03-02", cents: 1999, shop: .groceries)
+        check("orders: refunds and other shops never match", OrderMatcher.match([refund, other], to: [item("A", 1999, "2026-03-01")]).isEmpty)
+        var g = item("G", 4000, "2026-03-01"); g.shop = .groceries; g.listedCents = 4400
+        let gid = UUID()
+        check("orders: groceries match by the listed total", OrderMatcher.match([OrderMatcher.Charge(id: gid, date: "2026-03-02", cents: 4500, shop: .groceries)], to: [g])[gid.uuidString]?.kind == .approximate)
+    }
+
+    // MARK: PDF statements
+
+    private static func pdfStatements() {
+        let closing = DateParsing.isoDay("2026-11-03")!
+        let text = "Purchases\n10/14 BEST BUY 00012 1,249.99\n10/15 TRADER JOE'S #123 45.20\nPayments and Credits\n10/20 PAYMENT THANK YOU 500.00"
+        let p = PDFStatement.parseLines(text, closing: closing)
+        check("pdf: lines under headings, credits turn negative", p.rows.map(\.amount) == [1249.99, 45.2, -500] && p.rows.map(\.date) == ["2026-10-14", "2026-10-15", "2026-10-20"]
+              && p.rows[0].description == "BEST BUY 00012")
+        check("pdf: a December charge on a January statement is last year", PDFStatement.parseLines("12/28 SHELL OIL 40.00", closing: DateParsing.isoDay("2026-01-05")!).rows.first?.date == "2025-12-28")
+        check("pdf: a merchant named Total is a merchant and an ampersand stays",
+              PDFStatement.parseLines("10/14 TOTAL WINE & MORE 88.00", closing: closing).rows.map(\.description) == ["TOTAL WINE & MORE"]
+              && PDFStatement.parseLines("10/14 BALANCE BAR COMPANY 12.00\n10/15 MINIMUM WAGE CAFE 9.00\n10/16 PREVIOUS LIFE BOOKS 8.00", closing: closing).rows.count == 3)
+        check("pdf: summary lines that begin with those words are still left out",
+              PDFStatement.parseLines("10/14 TOTAL FEES CHARGED 0.00\n10/14 PREVIOUS BALANCE 1,200.00\n10/14 MINIMUM PAYMENT DUE 35.00\n10/14 BALANCE FORWARD 90.00", closing: closing).rows.isEmpty)
+        check("pdf: a bare ampersand in a name is kept", PDFStatement.parseLines("10/14 STOP & SHOP 123 41.00", closing: closing).rows.map(\.description) == ["STOP & SHOP 123"])
+
+        let d = { (x: Date?) in x.map { DateParsing.iso.string(from: $0) } }
+        check("pdf: the billing period", PDFStatement.statementPeriod("Statement Period: Oct 4 – Nov 3, 2026").map { [d($0.start), d($0.end)] } == ["2026-10-04", "2026-11-03"]
+              && PDFStatement.statementPeriod("09/26/26 - 10/25/26").map { d($0.end) } == "2026-10-25" && PDFStatement.statementPeriod("Jan 1 – Jun 30, 2026") == nil
+              && PDFStatement.statementMonths("Statement Period: Oct 4 – Nov 3, 2026") == ["2026-10", "2026-11"])
+        check("pdf: the closing date and the last digits", d(PDFStatement.detectClosingDate("Opening/Closing Date 10/04/26 - 11/03/26")) == "2026-11-03"
+              && PDFStatement.detectLast4("Account ending in 4090") == "4090" && PDFStatement.detectLast4("Primary Account: 000012345678901") == "8901")
+        // No printed closing date: the period, then the file name, then nothing (and the reading is marked).
+        check("pdf: a statement with no closing date is dated from its period or its file name, never from today",
+              d(PDFStatement.closingDate(text: "Billing cycle Oct 4 - Nov 3, 2026", fileName: "x.pdf")) == "2026-11-03"
+              && d(PDFStatement.closingDate(text: "10/14 SHELL 4.00", fileName: "20260125-statements-1234-.pdf")) == "2026-01-25"
+              && d(PDFStatement.closingDate(text: "10/14 SHELL 4.00", fileName: "Statement_2025-10.pdf")) == "2025-10-31"
+              && d(PDFStatement.closingDate(text: "10/14 SHELL 4.00", fileName: "Card 2025.pdf")) == "2025-12-31"
+              && PDFStatement.closingDate(text: "10/14 SHELL 4.00", fileName: "statement.pdf") == nil
+              && PDFStatement.closingDate(text: "10/14 SHELL 4.00", fileName: "Chase4090.pdf") == nil)
+
+        let rows = [CanonicalRow(date: "2026-10-05", description: "A", amount: 100), CanonicalRow(date: "2026-10-05", description: "PAYMENT", amount: -40)]
+        check("pdf: printed totals vouch for a reading", PDFStatement.matchesAccountSummary("Purchases $100.00\nPayments and Credits $40.00", rows: rows)
+              && !PDFStatement.matchesAccountSummary("Purchases $100.00\nPayments and Credits $41.00", rows: rows))
+        check("pdf: a quiet month is vouched for", PDFStatement.emptyStatement("Statement Period: Oct 4 – Nov 3, 2026 Beginning balance $100.00 Ending balance $100.00") == .verified)
+        check("pdf: purchases paid with points are removed",
+              PDFStatement.removePointsPaid([CanonicalRow(date: "2026-10-05", description: "AMAZON.COM", amount: 25)], text: "Shop with Points Activity\n10/05 AMAZON.COM 25.00 2,500").isEmpty)
+    }
+
+    // MARK: What is kept on disk
+
+    private static func storage() {
+        let a = UUID().uuidString, stray = UUID().uuidString
+        let json = "{\"accounts\":[{\"id\":\"\(a)\",\"name\":\"A\",\"signature\":\"s\"},{\"id\":\"\(a)\",\"name\":\"Twin\",\"signature\":\"t\"}],\"entries\":["
+            + "{\"accountID\":\"\(a)\",\"date\":\"2026-01-02\",\"description\":\"STARBUCKS #1\",\"amount\":5},{\"bogus\":1},"
+            + "{\"accountID\":\"\(stray)\",\"date\":\"2026-01-03\",\"description\":\"ORPHAN\",\"amount\":7}]}"
+        let lib = try? JSONDecoder().decode(Library.self, from: Data(json.utf8))
+        check("library: a damaged line is skipped and a missing key is rebuilt", lib?.entries.first?.merchantKey == "known:Starbucks" && lib?.version == 1)
+        check("library: a line whose account is missing is kept, under Recovered, not deleted",
+              lib?.entries.count == 2 && lib?.accounts.first(where: { $0.name == Library.recoveredName }).map { recovered in lib?.entries.last?.accountID == recovered.id } == true)
+        check("library: two accounts with one id become one", lib?.accounts.filter { $0.id.uuidString == a }.count == 1 && lib?.accounts.count == 2)
+        let doubled = lib.map { Dictionary($0.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }) }
+        check("library: looking accounts up by id cannot fail", doubled?.count == lib?.accounts.count)
+        check("library: a new stored field must be added to the decoder (21 today)", Mirror(reflecting: Library()).children.count == 21)
+
+        // Saving says whether it worked.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SpendthriftTest-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        check("saving: a library written to a folder reports success", lib?.save(paths: BudgetPaths(root: folder)) == true
+              && Library.load(paths: BudgetPaths(root: folder)).0.entries.count == 2)
+        check("saving: a library that cannot be written reports failure", lib?.save(paths: BudgetPaths(root: URL(fileURLWithPath: "/dev/null/nowhere"))) == false)
+
+        // The order history.
+        check("orders file: an older file without every key still loads", (try? JSONDecoder().decode(OrderBook.self, from: Data("{\"items\":[]}".utf8))) != nil
+              && (try? JSONDecoder().decode(OrderBook.self, from: Data("{}".utf8))) != nil)
+        let odd = "{\"items\":[{\"orderID\":\"A\",\"shop\":\"newshop\",\"date\":\"2026-01-01\",\"shipment\":\"x\",\"name\":\"n\",\"cents\":1,\"quantity\":1},"
+            + "{\"orderID\":\"B\",\"shop\":\"store\",\"date\":\"2026-01-02\",\"name\":\"kept\",\"cents\":250}],"
+            + "\"matches\":{\"x\":{\"items\":[0],\"kind\":\"aNewKind\"},\"y\":{\"items\":[1],\"kind\":\"exact\"}},\"refunds\":{\"B\":100}}"
+        let book = try? JSONDecoder().decode(OrderBook.self, from: Data(odd.utf8))
+        check("orders file: a word this version does not know costs that part, not the file",
+              book?.items.map(\.orderID) == ["B"] && book?.items.first?.quantity == 1 && book?.matches.keys.sorted() == ["y"] && book?.refunds == ["B": 100])
+        let ordersFile = folder.appendingPathComponent("orders.json")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? Data("{ this is not json".utf8).write(to: ordersFile)
+        let fromBroken = OrderBook.load(ordersFile)
+        let aside = ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).filter { $0.hasPrefix("orders-damaged-") }
+        check("orders file: one that cannot be read is moved aside, not treated as empty and written over",
+              fromBroken.items.isEmpty && !FileManager.default.fileExists(atPath: ordersFile.path) && aside.count == 1)
+        check("orders file: no file is an empty book", OrderBook.load(folder.appendingPathComponent("nothing.json")).items.isEmpty)
+        // Writes go through one queue: the last one asked for is the one that stays.
+        var growing = OrderBook()
+        for n in 1...20 {
+            growing.items.append(OrderItem(orderID: "O\(n)", shop: .store, date: "2026-01-01", shipment: "x", name: "n", cents: n, quantity: 1))
+            growing.save(to: ordersFile)
+        }
+        OrderBook.flushSaves()
+        check("orders file: saves land in the order they were asked for", OrderBook.load(ordersFile).items.count == 20)
     }
 
     // MARK: Sums that must agree, whatever the library holds

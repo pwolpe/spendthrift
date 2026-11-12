@@ -27,6 +27,7 @@ struct PlaceView: View {
                     orderLink(all)
                     noteField
                     tiles(all)
+                    trips(all)
                     if Set(all.map(\.month)).count > 1 { monthly(all) }
                     spellings(all)
                     list(all)
@@ -133,6 +134,44 @@ struct PlaceView: View {
         }.sorted().prefix(10).map { $0 }
     }
 
+    /// The trips and events this payee was part of, each a way into that trip.
+    @ViewBuilder private func trips(_ all: [Transaction]) -> some View {
+        let touched = store.stories(touching: all)
+        if !touched.isEmpty {
+            Card {
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionHeader(title: touched.count == 1 ? "Part of a trip or event" : "Part of \(touched.count) trips and events")
+                    ForEach(touched.prefix(8), id: \.story.id) { item in
+                        Button { store.showCharges(TransactionFilter(storyID: item.story.id)) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: item.story.kind == .trip ? "airplane.departure" : "sparkles")
+                                    .font(.title3).foregroundStyle(Theme.accent).frame(width: 30)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(item.story.name).font(.body.weight(.medium)).lineLimit(1)
+                                    Text(Self.span(item.story) + (item.during ? " · while you were away" : ""))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(Money.format(item.charges.reduce(0) { $0 + $1.amount })).monospacedDigit()
+                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open \(item.story.name): everything spent on it")
+                    }
+                    if touched.count > 8 { Text("and \(touched.count - 8) more").font(.caption).foregroundStyle(.tertiary) }
+                }
+            }
+        }
+    }
+
+    private static func span(_ story: Story) -> String {
+        guard let from = DateParsing.isoDay(story.start), let to = DateParsing.isoDay(story.end) else { return story.start }
+        let style = Date.FormatStyle.dateTime.month(.abbreviated).day().year()
+        return story.start == story.end ? from.formatted(style) : "\(from.formatted(.dateTime.month(.abbreviated).day())) to \(to.formatted(style))"
+    }
+
     private func tiles(_ all: [Transaction]) -> some View {
         let total = all.reduce(0) { $0 + $1.amount }
         let received = total < 0
@@ -226,7 +265,11 @@ struct PlaceView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(t.account).font(.callout).foregroundStyle(.secondary).lineLimit(1)
                             if let trip = store.story(containing: t.id) {
-                                Label(trip.name, systemImage: "airplane.departure").font(.caption).foregroundStyle(Theme.accent)
+                                Button { store.showCharges(TransactionFilter(storyID: trip.id)) } label: {
+                                    Label(trip.name, systemImage: "airplane.departure").font(.caption).foregroundStyle(Theme.accent)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Open \(trip.name)")
                             }
                         }
                         Spacer()

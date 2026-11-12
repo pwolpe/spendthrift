@@ -313,27 +313,52 @@ struct SpotArt: View {
     var height: CGFloat = 200
 
     @MainActor private static var cache: [String: NSImage] = [:]
-    @MainActor static func image(_ name: String) -> NSImage? {
-        if let hit = cache[name] { return hit }
+    /// The picture, read at the size it will be drawn. The files are large; decoding one in full to
+    /// show it two inches tall costs a noticeable slice of the time the app takes to open.
+    @MainActor static func image(_ name: String, height: CGFloat = 200) -> NSImage? {
+        let pixels = Int((height * 2 * 1.6 / 100).rounded(.up)) * 100      // sharp on a Retina screen, in steps of 100
+        let key = "\(name)@\(pixels)"
+        if let hit = cache[key] { return hit }
         var url = Bundle.main.resourceURL?.appendingPathComponent("Art/\(name).jpg")
         if url.map({ FileManager.default.fileExists(atPath: $0.path) }) != true {
             url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
                 .deletingLastPathComponent().appendingPathComponent("Resources/Art/\(name).jpg")
         }
-        guard let url, let image = NSImage(contentsOf: url) else { return nil }
-        cache[name] = image
+        guard let url, let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: pixels,
+                                        kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true]
+        guard let small = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return NSImage(contentsOf: url) }
+        let image = NSImage(cgImage: small, size: NSSize(width: small.width, height: small.height))
+        cache[key] = image
         return image
     }
 
+    @State private var shown = Launch.hasDrawn
+
     var body: some View {
-        if let image = Self.image(name) {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(height: height)
-                .clipShape(.rect(cornerRadius: height * 0.11, style: .continuous))
-                .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
-                .accessibilityHidden(true)
+        if let image = Self.image(name, height: height) {
+            // Its place is kept from the start, but the picture itself is put up a moment after the
+            // page first draws: showing an image is the single slowest thing on the opening page.
+            let width = height * image.size.width / max(image.size.height, 1)
+            ZStack {
+                if shown {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(.rect(cornerRadius: height * 0.11, style: .continuous))
+                        .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
+                        .transition(.opacity)
+                }
+            }
+            .frame(width: width, height: height)
+            .accessibilityHidden(true)
+            .onAppear {
+                guard !shown else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + Launch.settle) {
+                    Launch.hasDrawn = true
+                    withAnimation(.easeOut(duration: 0.25)) { shown = true }
+                }
+            }
         } else {
             TonyFigure(height: height)
         }
@@ -663,6 +688,26 @@ struct BigFigure: View {
                 .contentTransition(.numericText(value: amount))
                 .monospacedDigit()
             if let subtitle { Text(subtitle).font(.callout).foregroundStyle(.secondary) }
+        }
+    }
+}
+
+/// Holds something back until the page has drawn once. For cards below the first screenful that
+/// take a moment to lay out: the window opens without waiting for them, and they fade in after.
+struct AfterFirstFrame<Content: View>: View {
+    @ViewBuilder var content: Content
+    @State private var ready = Launch.hasDrawn
+
+    var body: some View {
+        Group {
+            if ready { content.transition(.opacity) }
+        }
+        .onAppear {
+            guard !ready else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + Launch.settle) {
+                Launch.hasDrawn = true
+                withAnimation(.easeOut(duration: 0.2)) { ready = true }
+            }
         }
     }
 }

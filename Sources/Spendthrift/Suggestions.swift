@@ -127,6 +127,74 @@ enum KeywordExtractor {
     }
 }
 
+// MARK: - Finding a name in a line, as a word
+
+/// A list of names to look for in a statement line, found only as whole words: "MOBIL" is not in
+/// "T-MOBILE", "IRS " is not in "STAIRS", "ARCO" is not in "MARCO'S", "AVIS" is not in "DAVIS".
+/// A name matches when no letter or digit (or the apostrophe-s of a possessive) touches it where it begins and ends. A name that begins or
+/// ends in a space or a mark ("TST*", " DDS", "AMC ") needs no boundary on that side, and a name in
+/// `openEnded` may run on into more letters ("MCDONALD" is "MCDONALDS", "PHARMAC" is "PHARMACY").
+/// Built once; a line is looked through once, so this is cheap enough for every line of an import.
+struct PhraseTable: Sendable {
+    private struct Entry: Sendable {
+        let bytes: [UInt8]
+        let boundaryBefore: Bool
+        let boundaryAfter: Bool
+    }
+    private let entries: [Entry]
+    /// The names whose first letter is each byte, in list order.
+    private let byFirstByte: [[Int]]
+    /// What each name stands for, by position in the list given.
+    let labels: [String]
+
+    /// - items: (name, label) in order of preference: the earliest in the list that is found wins.
+    /// - openEnded: names that may be the beginning of a longer word.
+    init(_ items: [(String, String)], openEnded: Set<String> = []) {
+        func isWordByte(_ b: UInt8) -> Bool { PhraseTable.isWordByte(b) }
+        var entries: [Entry] = []
+        var first = [[Int]](repeating: [], count: 256)
+        for (i, item) in items.enumerated() {
+            let bytes = Array(item.0.uppercased().utf8)
+            entries.append(Entry(bytes: bytes, boundaryBefore: bytes.first.map(isWordByte) ?? false,
+                                 boundaryAfter: !openEnded.contains(item.0) && (bytes.last.map(isWordByte) ?? false)))
+            if let b = bytes.first { first[Int(b)].append(i) }
+        }
+        self.entries = entries
+        self.byFirstByte = first
+        self.labels = items.map(\.1)
+    }
+
+    static func isWordByte(_ b: UInt8) -> Bool {
+        (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b >= 128
+    }
+
+    /// The position in the list of the earliest name found as a whole word in `text` (any case),
+    /// among those `allowed` lets through.
+    func firstIndex(in text: String, where allowed: (Int) -> Bool = { _ in true }) -> Int? {
+        let t = Array(text.uppercased().utf8)
+        var best: Int?
+        for position in t.indices {
+            for i in byFirstByte[Int(t[position])] where best == nil || i < best! {
+                let e = entries[i]
+                guard position + e.bytes.count <= t.count, allowed(i) else { continue }
+                if e.boundaryBefore, position > 0, PhraseTable.isWordByte(t[position - 1]) { continue }
+                let end = position + e.bytes.count
+                if e.boundaryAfter, end < t.count {
+                    if PhraseTable.isWordByte(t[end]) { continue }
+                    // A possessive is part of the word: "MERRILL'S BAKERY" is not Merrill.
+                    if t[end] == 39, end + 1 < t.count, PhraseTable.isWordByte(t[end + 1]) { continue }
+                }
+                var same = true
+                for k in 1..<max(1, e.bytes.count) where t[position + k] != e.bytes[k] { same = false; break }
+                if same { best = i }
+            }
+        }
+        return best
+    }
+
+    func firstMatch(in text: String) -> String? { firstIndex(in: text).map { labels[$0] } }
+}
+
 // MARK: - Built-in list of well-known merchants (instant and works offline)
 
 enum KnownMerchants {
@@ -304,19 +372,34 @@ enum KnownMerchants {
     /// These are filed as guesses, so they show up in Double-Check instead of being trusted silently.
     static let tentativeNames: Set<String> = ["Loan Payment"]
 
+    /// Names that may run on into a longer word ("MCDONALDS", "PHARMACY", "EXXONMOBIL", "AMERICAN AIRLINES"):
+    /// every other name has to be a whole word of its own.
+    private static let openEnded: Set<String> = [
+        "MCDONALD", "WENDY", "DOMINO", "KOHL", "MACY", "DUNKIN", "BINNY", "EXXON", "UBER", "YOUTUBE", "TRADER JOE", "CON ED",
+        "DELTA AIR", "AMERICAN AIR", "ALASKA AIR", "HOTEL", "PIZZA", "CAFE", "COFFEE", "RESTAURANT", "GRILL", "BAKERY", "SUSHI",
+        "SALON", "BARBER", "CINEMA", "THEATER", "THEATRE", "DONATION", "CHURCH", "DENTAL", "ORTHODONT", "PEDIATRIC", "DERMATOLOG",
+        "OPTOMETR", "PHARMAC", "AUTOPAY", "EPAY", "TRANSFER", "PAYROLL", "OVERDRAFT",
+        "INTERACTIVE BROK", "CARDMEMBER SERV", "TAX REF", "DIVIDEND", "DISTRIBUTION", "CAPITAL GAIN", "ATM WITHDRAW",
+    ]
+    private static let listTable = PhraseTable(list.map { ($0.pattern, $0.name) }, openEnded: openEnded)
+    private static let flowTable = PhraseTable(flows.map { ($0.pattern, $0.name) }, openEnded: openEnded)
+
     /// `generic: false` returns only specific businesses (Starbucks, Con Edison…); `true` only generic words.
     /// - amount: positive = money out. Needed for the direction-dependent rules above.
     static func match(_ description: String, amount: Double? = nil, generic: Bool) -> Suggestion? {
         var d = description.uppercased()
         // Words that merely begin like a brand: a "MOBILE DEPOSIT" is not a Mobil station.
         d = d.replacingOccurrences(of: "MOBILE DEPOSIT", with: "DEPOSIT BY PHONE")
-        if !generic, let hit = flows.first(where: { rule in
-            d.contains(rule.pattern) && (rule.flow == 0 || amount == nil || (rule.flow > 0) == ((amount ?? 0) > 0))
+        if !generic, let found = flowTable.firstIndex(in: d, where: { i in
+            let rule = flows[i]
+            return rule.flow == 0 || amount == nil || (rule.flow > 0) == ((amount ?? 0) > 0)
         }) {
+            let hit = flows[found]
             return Suggestion(name: hit.name, category: hit.category, source: .knownMerchant)
         }
-        guard let hit = list.first(where: { d.contains($0.pattern) }),
-              genericNames.contains(hit.name) == generic else { return nil }
+        guard let found = listTable.firstIndex(in: d) else { return nil }
+        let hit = list[found]
+        guard genericNames.contains(hit.name) == generic else { return nil }
         let name = generic ? KeywordExtractor.displayName(for: description) : hit.name
         return Suggestion(name: name, category: hit.category, source: .knownMerchant)
     }

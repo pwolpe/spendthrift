@@ -124,7 +124,7 @@ extension BudgetStore {
         if reads.count > 200 { reads = Dictionary(uniqueKeysWithValues: Array(reads).suffix(150)) }
         orders.reads = reads
         let book = orders, file = paths.ordersFile
-        Task.detached { book.save(to: file) }
+        book.save(to: file)
         return clean
     }
 
@@ -190,7 +190,7 @@ extension BudgetStore {
         orders.matches = matches
         refreshOrderRows()
         let book = orders
-        Task.detached { book.save(to: file) }
+        book.save(to: file)
     }
 
     /// Has the model read every product listing it hasn't yet: what each thing is, and its budget category.
@@ -215,7 +215,7 @@ extension BudgetStore {
                     orders.sorted = (orders.sorted ?? [:]).merging(answer) { _, new in new }
                     refreshOrderRows()
                     let book = orders
-                    Task.detached { book.save(to: file) }
+                    book.save(to: file)
                 } else {
                     failures += 1
                 }

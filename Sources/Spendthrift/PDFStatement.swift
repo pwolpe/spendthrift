@@ -52,7 +52,11 @@ enum PDFStatement {
         let fromFileName = url.lastPathComponent.range(of: #"statements-\d{4}-"#, options: .regularExpression)
             .map { String(url.lastPathComponent[$0].filter(\.isNumber)) }
         let last4 = fromFileName ?? detectLast4(text) ?? StatementReader.cardDigits(in: url)
-        let closing = detectClosingDate(text) ?? .now
+        // A statement that prints no full date still says when it closes in its period or its file name. If
+        // nothing does, today stands in, and the reading is marked as needing a look: the year of every
+        // dated line is then a guess, and wrong dates must not be stored as if they were right.
+        let printedClosing = closingDate(text: text, fileName: url.lastPathComponent)
+        let closing = printedClosing ?? .now
 
         // PDFs store text in whatever order the bank's software wrote it. Usually that's reading
         // order; sometimes (Chase checking) amounts come out detached from their descriptions.
@@ -164,6 +168,9 @@ enum PDFStatement {
             table.check = .scanned
         }
         if let emptyCheck { table.check = emptyCheck }
+        if printedClosing == nil, !rows.isEmpty {
+            table.check = .mismatch("the statement prints no closing date, so the year of each date is a guess")
+        }
         return table
     }
 
@@ -416,6 +423,29 @@ enum PDFStatement {
         return dates.filter { $0 <= limit && Calendar.current.component(.year, from: $0) >= 2000 }.max()
     }
 
+    /// When the statement closes: the date it prints, else the end of its period, else a date in its file name
+    /// ("20260125-statements-1234-.pdf", "Statement_2026-01.pdf", "2026"). Nil when nothing says.
+    static func closingDate(text: String, fileName: String) -> Date? {
+        if let printed = detectClosingDate(text) ?? statementPeriod(text)?.end { return printed }
+        let limit = Date.now.addingTimeInterval(45 * 24 * 3600)
+        func group(_ m: NSTextCheckingResult, _ i: Int) -> Int? { Range(m.range(at: i), in: fileName).flatMap { Int(fileName[$0]) } }
+        let cal = Calendar.current
+        let range = NSRange(fileName.startIndex..., in: fileName)
+        var found: Date?
+        if let re = try? NSRegularExpression(pattern: #"(?<!\d)(20\d{2})[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?!\d)"#),
+           let m = re.firstMatch(in: fileName, range: range), let y = group(m, 1), let mo = group(m, 2), let d = group(m, 3) {
+            found = cal.date(from: DateComponents(year: y, month: mo, day: d))
+        } else if let re = try? NSRegularExpression(pattern: #"(?<!\d)(20\d{2})[-_.](0[1-9]|1[0-2])(?!\d)"#),
+                  let m = re.firstMatch(in: fileName, range: range), let y = group(m, 1), let mo = group(m, 2),
+                  let first = cal.date(from: DateComponents(year: y, month: mo, day: 1)) {
+            found = cal.date(byAdding: DateComponents(month: 1, day: -1), to: first)
+        } else if let re = try? NSRegularExpression(pattern: #"(?<!\d)(20\d{2})(?!\d)"#),
+                  let m = re.firstMatch(in: fileName, range: range), let y = group(m, 1) {
+            found = cal.date(from: DateComponents(year: y, month: 12, day: 31))
+        }
+        return found.flatMap { $0 <= limit ? $0 : nil }
+    }
+
     /// "11/03/26" or "11/03/2026" (a plain "M/d/yyyy" parse would read "26" as the year 26).
     static func slashDate(_ s: String) -> Date? {
         guard let year = s.split(separator: "/").last else { return nil }
@@ -427,8 +457,16 @@ enum PDFStatement {
     /// "1,234.56", "$12.00", "(45.00)", "12.00CR", and amounts under a dollar written ".79" or "-.79".
     private static let moneyToken = #"^\(?-?\$?-?(?:[\d,]*\d)?\.\d{2}\)?(?:CR|DR)?-?$"#
     private static let monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
-    private static let skipWords = ["total", "balance", "payment due", "minimum", "credit limit", "available credit",
-                                    "previous", "new balance", "interest charged", "annual percentage", "page "]
+    private static let skipWords = ["payment due", "credit limit", "available credit", "new balance", "interest charged",
+                                    "annual percentage", "page "]
+    /// "Total", "Balance", "Minimum" and "Previous" begin summary labels ("Total fees charged", "Previous balance") and
+    /// also merchants (Total Wine, Balance Bar, Minimum Wage Cafe): only the label wording is skipped.
+    private static let summaryLabel = try! NSRegularExpression(pattern: #"^(?:total|balance|minimum|previous)(?:$|\s+(?:(?:new|fees?|interest|purchases?|payments?|credits?|charges?|cash|balance|amount|activity|for|this|the|new|deposits?|withdrawals?|checks?|debits?|additions?|subtractions?|account|days?|rewards?|points|due|forward|summary|last|from|as|owed|ending|beginning|brought|at|on|previous|statement|transfers?|finance|monthly|annual|credit|limit|adjustments?|billing|period|year|ytd|\d|\$)\b))"#, options: .caseInsensitive)
+    private static func isSummaryLine(_ description: String) -> Bool {
+        let lower = description.lowercased()
+        if skipWords.contains(where: lower.hasPrefix) { return true }
+        return summaryLabel.firstMatch(in: description, range: NSRange(description.startIndex..., in: description)) != nil
+    }
 
     struct Parsed {
         var rows: [CanonicalRow] = []
@@ -500,7 +538,7 @@ enum PDFStatement {
             }
             // (A ledger abbreviates: "CK# 104" is a whole description there.)
             guard description.filter(\.isLetter).count >= (ledgerStyle ? 2 : 3),
-                  !skipWords.contains(where: description.lowercased().hasPrefix) else { return }
+                  !isSummaryLine(description) else { return }
             // "February 11, 2026" in a sentence is a date, not a charge dated Feb 11 called "2026 …".
             if description.range(of: #"^(19|20)\d\d\b"#, options: .regularExpression) != nil { return }
             // A sentence that happens to begin with a date ("February 11, 2026 on the statement closing
@@ -552,7 +590,7 @@ enum PDFStatement {
             guard !line.isEmpty else { continue }
             // Drop markers like Amex's "⧫" (Pay Over Time) so the amount is the last word.
             var tokens = line.split(whereSeparator: \.isWhitespace).map(String.init)
-                .filter { $0.contains(where: { $0.isLetter || $0.isNumber || "$-().,/*".contains($0) }) }
+                .filter { $0.contains(where: { $0.isLetter || $0.isNumber || "$-().,/*&".contains($0) }) }
             // A ledger's minus can stand apart from the amount: "$12,543.00 -".
             if ledgerStyle, tokens.count >= 2, tokens.last == "-", isMoney(tokens[tokens.count - 2]) { tokens.removeLast() }
             let hasMoney = tokens.contains(where: isMoney)

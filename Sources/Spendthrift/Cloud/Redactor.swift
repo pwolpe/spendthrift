@@ -31,6 +31,12 @@ enum Redactor {
         return description.split(whereSeparator: \.isWhitespace).map(String.init).joined(separator: " ")
     }
 
+    /// An account's name for a model: the kind of account, never its digits ("Chase ••4090" is "Chase").
+    static func accountLabel(_ name: String) -> String {
+        let kept = name.unicodeScalars.filter { !CharacterSet.decimalDigits.contains($0) && $0 != "•" && $0 != "*" }
+        return String(String.UnicodeScalarView(kept)).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
     /// The account holder's name as printed on a statement: it sits on the line above the street
     /// address. Other text can share that line ("JANE DOE  We accept operator relay calls"), so
     /// only the leading capitalized words are taken.
@@ -42,7 +48,8 @@ enum Redactor {
         // Words that appear in capitals on statements but are never part of a person's name.
         let notNames: Set<String> = ["PAYMENT", "BALANCE", "DUE", "DATE", "STATEMENT", "ACCOUNT", "NEW", "MINIMUM", "TOTAL", "AMOUNT",
                                      "ENCLOSED", "SUMMARY", "CARD", "CARDS", "CASH", "CREDIT", "PAGE", "PERIOD", "BANK", "BOX", "PO",
-                                     "MEMBER", "SINCE", "CUSTOMER", "SERVICE", "PLATINUM", "CHECKING", "SAVINGS", "PLEASE", "YOUR", "THE"]
+                                     "MEMBER", "SINCE", "CUSTOMER", "SERVICE", "PLATINUM", "CHECKING", "SAVINGS", "PLEASE", "YOUR", "THE",
+                                     "ADDRESS", "MAIL", "SEND", "REMIT", "CENTER", "DEPARTMENT", "BILLING", "OFFICE", "PAYMENTS", "INQUIRIES"]
         var names: Set<String> = []
         for i in lines.indices {
             let line = lines[i]
@@ -63,9 +70,25 @@ enum Redactor {
                 if words.count >= 2, words.contains(where: { $0.count >= 3 }), above == i - 1 || wholeLine {
                     names.insert(words.joined(separator: " ")); break
                 }
+                // "Jane Q Public" in capitals and lower case: only a line that is nothing but a name directly above the address.
+                if above == i - 1, let name = titleCaseName(lines[above], notNames: notNames) { names.insert(name); break }
             }
         }
         return names
+    }
+
+    /// A line that is only two to four Capitalized words ("Jane Q Public", "Mary-Ann O'Neil Jr."), or nil.
+    private static func titleCaseName(_ line: String, notNames: Set<String>) -> String? {
+        let words = line.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard (2...4).contains(words.count) else { return nil }
+        for word in words {
+            let letters = word.filter(\.isLetter)
+            guard let first = letters.first, first.isUppercase, word.allSatisfy({ $0.isLetter || $0 == "." || $0 == "'" || $0 == "-" }),
+                  !notNames.contains(word.uppercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))) else { return nil }
+            // "Jane", "Q" or "Q.": one capital, then lower case. Not "USA" or "NYC" (those are not names).
+            if letters.count > 1, !letters.dropFirst().allSatisfy(\.isLowercase) { return nil }
+        }
+        return words.contains(where: { $0.filter(\.isLetter).count >= 3 }) ? words.joined(separator: " ") : nil
     }
 
     /// For a whole statement: the holder's name, street address, city/ZIP, email, phone and
@@ -116,6 +139,9 @@ enum Redactor {
         text = replace(text, #"\b\d{4}[ -]\d{6}[ -]\d{5}\b"#, "[number]")
         text = replace(text, #"\b[A-Za-z]*\d[A-Za-z0-9]{7,}\b"#, "[number]")
         text = replace(text, #"\b\d-\d{5}\b"#, "[number]")                 // Amex "0-44003"
+        text = replace(text, #"\b\d{3}-\d{2}-\d{4}\b"#, "[number]")         // a Social Security number
+        text = replace(text, #"\b\d{2}-\d{7}\b"#, "[number]")                // an employer ID number
+        text = replace(text, #"(?<![\d-])\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}\b"#, "[phone]")  // a US phone number
         return text
     }
 }

@@ -89,6 +89,7 @@ struct FlowHero: View {
                         ForEach(parts) { figure($0.name, $0.amount, $0.color) }
                         if left > 0.5 { figure("Left to keep or invest", left, Theme.goldDeep) }
                     }
+                    payAlone
                 }
             }
         }
@@ -128,6 +129,41 @@ struct FlowHero: View {
         }
         return text + (data.built > 0.5 ? " Money you invested is never counted as spending." : "")
     }
+
+    /// The stricter question: never mind what investments paid out, did pay alone cover how you lived?
+    /// Shown whenever there is pay to measure against.
+    @ViewBuilder
+    private var payAlone: some View {
+        let pay = data.income, lived = data.spending
+        if pay > 0.5, lived > 0.5 {
+            let kept = pay - lived
+            let share = lived / pay
+            Divider()
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("ON YOUR PAY ALONE").font(Theme.mono(10, .bold)).tracking(1.2).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(kept >= 0 ? "\(Self.percent(kept / pay)) of your pay kept" : "\(Self.percent(-kept / pay)) over your pay")
+                        .font(.callout.weight(.semibold)).foregroundStyle(kept >= 0 ? Theme.good : Theme.spent)
+                }
+                GeometryReader { geo in
+                    let width = geo.size.width, scale = max(pay, lived)
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Theme.good.opacity(0.18)).frame(width: width * pay / scale)
+                        Capsule().fill(Theme.spent.gradient).frame(width: max(4, width * lived / scale))
+                        if lived > pay { Rectangle().fill(Color.primary).frame(width: 2, height: 16).offset(x: width * pay / scale - 1) }
+                    }
+                }
+                .frame(height: 8)
+                Text(kept >= 0
+                     ? "Your pay was \(Money.format(pay, cents: false)) and you lived on \(Money.format(lived, cents: false)), \(Self.percent(share)) of it. \(Money.format(kept, cents: false)) of your pay was left to save."
+                     : "Your pay was \(Money.format(pay, cents: false)) and you lived on \(Money.format(lived, cents: false)). The other \(Money.format(-kept, cents: false)) came from what your investments paid out, or from savings.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    static func percent(_ fraction: Double) -> String { fraction.formatted(.percent.precision(.fractionLength(0))) }
 
     private func figure(_ name: String, _ amount: Double, _ color: Color?) -> some View {
         VStack(alignment: .leading, spacing: 2) {

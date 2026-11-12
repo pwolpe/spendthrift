@@ -65,7 +65,7 @@ extension BudgetStore {
         let recent = stretch.filter { !$0.isTransfer && !$0.isUnknown && $0.lane != .investments }.suffix(3_000)
         let lines = recent.map { t in
             StoryFinder.Line(id: t.id, date: DateParsing.iso.string(from: t.date),
-                             text: t.note.map { "\(t.merchant) (\(t.description)) [note: \($0.prefix(120))]" } ?? "\(t.merchant) (\(t.description.prefix(40)))",
+                             text: t.note.map { "\(t.merchant) (\(Redactor.scrub(t.description))) [note: \(Redactor.scrub(String($0.prefix(120))))]" } ?? "\(t.merchant) (\(Redactor.scrub(t.description).prefix(40)))",
                              amount: t.amount, category: t.category.displayName)
         }
         guard let found = await Discoverer.find(lines, notes: allNotes(limit: 20)) else { return nil }
@@ -148,7 +148,7 @@ extension BudgetStore {
     private func storyLines() -> [StoryFinder.Line] {
         transactions.filter { $0.countsAsSpending && !$0.isUnknown }.map { t in
             StoryFinder.Line(id: t.id, date: DateParsing.iso.string(from: t.date),
-                             text: t.note.map { "\(t.description) [the person's note: \($0.prefix(160))]" } ?? t.description,
+                             text: t.note.map { "\(Redactor.scrub(t.description)) [the person's note: \(Redactor.scrub(String($0.prefix(160))))]" } ?? Redactor.scrub(t.description),
                              amount: t.amount, category: t.category.displayName)
         }
     }

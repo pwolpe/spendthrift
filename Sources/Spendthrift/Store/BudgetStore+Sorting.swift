@@ -26,7 +26,7 @@ extension BudgetStore {
             return d
         }
         func text(_ day: Int) -> String { DateParsing.iso.string(from: Date(timeIntervalSinceReferenceDate: Double(day) * 86_400 + 43_200)) }
-        let names = Dictionary(uniqueKeysWithValues: library.accounts.map { ($0.id, $0.name) })
+        let names = Dictionary(library.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
 
         struct Payment { let id: UUID; let day: Int; let amount: Double; let issuer: String; var billed = false; var lineAccount: UUID? }
         struct Credit { let day: Int; let amount: Double; let account: UUID; var used = false }

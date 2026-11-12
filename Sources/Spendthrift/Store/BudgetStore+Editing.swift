@@ -88,11 +88,11 @@ extension BudgetStore {
         var lines: [String] = []
         var seen: Set<String> = []
         for info in library.merchants.values {
-            if let note = info.note, !note.isEmpty, seen.insert(info.name).inserted { lines.append("\(info.name): \(note)") }
+            if let note = info.note, !note.isEmpty, seen.insert(info.name).inserted { lines.append("\(info.name): \(Redactor.scrub(note))") }
         }
         for t in transactions.reversed() {
             if let note = t.note, !note.isEmpty {
-                lines.append("\(t.merchant), \(DateParsing.iso.string(from: t.date)), \(Money.format(t.amount)): \(note)")
+                lines.append("\(t.merchant), \(DateParsing.iso.string(from: t.date)), \(Money.format(t.amount)): \(Redactor.scrub(note))")
             }
             if lines.count >= limit { break }
         }

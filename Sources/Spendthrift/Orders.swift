@@ -114,13 +114,74 @@ struct OrderBook: Codable {
         matches = [:]
     }
 
-    static func load(_ url: URL) -> OrderBook {
-        (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(OrderBook.self, from: $0) } ?? OrderBook()
+    init() {}
+
+    /// Reading is as forgiving as the library's: every part may be missing, a part that cannot be
+    /// read is left out rather than failing the whole file, and a newer file with words this version
+    /// doesn't know still opens. (A file that failed to open used to be taken for an empty book and
+    /// written over, losing what the model had read and the pins and refunds.)
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        items = (try? c.decodeIfPresent(Lossy<OrderItem>.self, forKey: .items))?.values ?? []
+        matches = (try? c.decodeIfPresent(LossyDictionary<OrderMatch>.self, forKey: .matches))?.values ?? [:]
+        sorted = (try? c.decodeIfPresent(LossyDictionary<ItemSort>.self, forKey: .sorted))?.values
+        refunds = try? c.decodeIfPresent([String: Int].self, forKey: .refunds)
+        pins = (try? c.decodeIfPresent(LossyDictionary<Pin>.self, forKey: .pins))?.values
+        reads = try? c.decodeIfPresent([String: String].self, forKey: .reads)
     }
 
+    /// The book saved at `url`. No file is an empty book. A file that is there but cannot be read is
+    /// moved aside (kept, like a damaged library) and the book starts empty: it is never left in
+    /// place to be written over.
+    static func load(_ url: URL) -> OrderBook {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return OrderBook() }
+        if let data = try? Data(contentsOf: url), !data.isEmpty, let book = try? JSONDecoder().decode(OrderBook.self, from: data) { return book }
+        let stamp = DateParsing.formatter("yyyy-MM-dd-HHmmss").string(from: .now)
+        try? fm.moveItem(at: url, to: url.deletingLastPathComponent().appendingPathComponent("orders-damaged-\(stamp).json"))
+        return OrderBook()
+    }
+
+    /// Every write of the book goes through this one queue, so an older snapshot can never land after a newer one.
+    nonisolated private static let saving = DispatchQueue(label: "spendthrift.save-orders", qos: .utility)
+
+    /// Writes the book soon, off the calling thread, after any write already waiting.
     func save(to url: URL) {
-        guard let data = try? JSONEncoder().encode(self) else { return }
-        try? data.write(to: url, options: .atomic)
+        let book = self
+        Self.saving.async { _ = book.write(to: url) }
+    }
+
+    /// Waits until every write asked for so far has finished.
+    static func flushSaves() { saving.sync {} }
+
+    private func write(to url: URL) -> Bool {
+        guard let data = try? JSONEncoder().encode(self) else { return false }
+        return (try? data.write(to: url, options: .atomic)) != nil
+    }
+}
+
+extension OrderItem {
+    /// An item with a word this version doesn't know for its shop is left out; any other field that is
+    /// missing or unreadable gets a plain default.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let raw = try c.decodeIfPresent(String.self, forKey: .shop) {
+            guard let known = Shop(rawValue: raw) else {
+                throw DecodingError.dataCorruptedError(forKey: .shop, in: c, debugDescription: "a shop this version doesn't know")
+            }
+            shop = known
+        } else { shop = .store }
+        orderID = (try? c.decodeIfPresent(String.self, forKey: .orderID)) ?? ""
+        date = (try? c.decodeIfPresent(String.self, forKey: .date)) ?? ""
+        shipment = (try? c.decodeIfPresent(String.self, forKey: .shipment)) ?? date
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        department = try? c.decodeIfPresent(String.self, forKey: .department)
+        cents = (try? c.decodeIfPresent(Int.self, forKey: .cents)) ?? 0
+        quantity = (try? c.decodeIfPresent(Int.self, forKey: .quantity)) ?? 1
+        listedCents = try? c.decodeIfPresent(Int.self, forKey: .listedCents)
+        who = try? c.decodeIfPresent(String.self, forKey: .who)
+        asin = try? c.decodeIfPresent(String.self, forKey: .asin)
+        giftPart = try? c.decodeIfPresent(Bool.self, forKey: .giftPart)
     }
 }
 

@@ -53,7 +53,7 @@ struct OverviewView: View {
         if store.months.count > 1 { scopePicker }
         if let data = flowData {
             // The judgment that matters most comes first: did living stay within income?
-            FlowHero(data: data) { store.stepInto(.flow) }
+            if !DebugHooks.off("hero") { FlowHero(data: data) { store.stepInto(.flow) } }
             let figures = Figures(store: store, data: data, month: store.overviewShowsYear ? nil : currentMonth)
             HStack(alignment: .top, spacing: 16) {
                 SummaryCard(title: "Spending", symbol: "creditcard.fill", color: Theme.spent,
@@ -74,7 +74,7 @@ struct OverviewView: View {
                 }
             }
             HStack(alignment: .top, spacing: 16) {
-                noticed
+                if !DebugHooks.off("noticed") { AfterFirstFrame { noticed } }
                 if !DebugHooks.off("coming") { recurringCard }
             }
             if !store.overviewShowsYear, let m = currentMonth, !DebugHooks.off("stories") { storiesThisMonth(m) }
@@ -190,7 +190,12 @@ struct OverviewView: View {
 
     // MARK: Month or year
 
-    private var periods: [ReportPeriod] { ReportData.periods(for: store) }
+    /// The last twelve months first: a whole year of living, never a half-finished month or a year
+    /// that has only just begun. Then each calendar year, newest first.
+    private var periods: [ReportPeriod] {
+        let all = ReportData.periods(for: store)
+        return all.filter { $0 == .last12 } + all.filter { $0 != .last12 }
+    }
     private var currentPeriod: ReportPeriod? { store.overviewPeriod.flatMap { periods.contains($0) ? $0 : nil } ?? periods.first }
 
     private var scopePicker: some View {

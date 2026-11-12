@@ -33,6 +33,8 @@ final class BudgetStore {
     @ObservationIgnored var recurringCache: [RecurringEngine.Recurring]?
     @ObservationIgnored var awardCache: [Month: [Award]] = [:]
     @ObservationIgnored var reportCache: [ReportPeriod: ReportData] = [:]
+    @ObservationIgnored var storyCache: (stamp: [Int], stories: [Story])?
+    @ObservationIgnored var storyOfEntry: [UUID: Int]?
     /// The charges an order history could explain, kept until the library next changes.
     @ObservationIgnored var orderChargeCache: [OrderMatcher.Charge]?
 
@@ -110,7 +112,8 @@ final class BudgetStore {
     /// What is typed in the box on the Transactions page (kept while a payee opened from it is on screen).
     var transactionSearch = ""
     /// The Overview looks at one month or at a whole year; the same page either way.
-    var overviewShowsYear = ProcessInfo.processInfo.environment["SPENDTHRIFT_YEAR"] != nil
+    /// The Overview opens on the long view (the last twelve months); a single month is one click away.
+    var overviewShowsYear = ProcessInfo.processInfo.environment["SPENDTHRIFT_MONTH"] == nil
     var pendingImports: [PendingImport] = []
     /// Something the person must be told at launch (e.g. data restored from a backup).
     var startupNotice: String?
@@ -126,11 +129,9 @@ final class BudgetStore {
     var importIssues: [ImportIssue] = []
     /// "Reading 5 of 18" while several statements are being read.
     var importProgress: (done: Int, total: Int)?
-    /// Kept for views that wait on the first load; the library loads instantly at launch.
-    let hasLoadedTransactions = true
-
     let paths = BudgetPaths()
     @ObservationIgnored var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var saveFailureShown = false
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored var aiAttempted: Set<String> = []
     @ObservationIgnored var cloudAttempted: Set<String> = []
@@ -190,9 +191,13 @@ final class BudgetStore {
             startupNotice = "Your saved data couldn't be opened and there was no backup to restore, so this is a fresh start. The damaged file was kept in the data folder. Dropping your statements in again will rebuild everything."
         case .fresh, .loaded: break
         }
+        if Library.recoveredOnLoad > 0, startupNotice == nil {
+            let n = Library.recoveredOnLoad
+            startupNotice = "\(n) \(n == 1 ? "line belonged" : "lines belonged") to an account that was damaged in the saved file. Nothing was deleted: \(n == 1 ? "it was" : "they were") put in an account called Recovered, where you can move or remove \(n == 1 ? "it" : "them")."
+        }
         refreshDownloads()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { BudgetStore.shared.saveNow(); CloudSpend.shared.saveNow() }
+            MainActor.assumeIsolated { BudgetStore.shared.saveNow(); BudgetStore.shared.saveOrdersNow(); CloudSpend.shared.saveNow() }
         }
         Task { await sortRemaining() }
         Task { await notePeriodsIfNeeded() }
@@ -211,8 +216,19 @@ final class BudgetStore {
             // Writing the file takes long enough to feel if it holds up the window, so a copy is
             // written from another thread. One queue, so two saves can never land out of order.
             let snapshot = library, paths = paths
-            Self.saving.async { snapshot.save(paths: paths) }
+            Self.saving.async {
+                let saved = snapshot.save(paths: paths)
+                Task { @MainActor in BudgetStore.shared.noteSave(succeeded: saved) }
+            }
         }
+    }
+
+    /// One toast when saving fails (and again only after a save has worked in between), not one per change.
+    func noteSave(succeeded: Bool) {
+        if succeeded { saveFailureShown = false; return }
+        guard !saveFailureShown else { return }
+        saveFailureShown = true
+        showToast("Your changes could not be saved to disk. Check that the disk has room. Quitting now would lose them.", symbol: "exclamationmark.triangle.fill")
     }
 
     nonisolated private static let saving = DispatchQueue(label: "spendthrift.save", qos: .utility)
@@ -224,7 +240,17 @@ final class BudgetStore {
     func saveNow() {
         saveTask?.cancel()
         let snapshot = library, paths = paths
-        Self.saving.sync { snapshot.save(paths: paths) }
+        let saved = Self.saving.sync { snapshot.save(paths: paths) }
+        noteSave(succeeded: saved)
+    }
+
+    /// Writes the order history before returning, after any save already under way. Never writes an
+    /// empty book: it may simply not have been read yet, and the file on disk is the only copy.
+    func saveOrdersNow() {
+        OrderBook.flushSaves()
+        guard !orders.items.isEmpty else { return }
+        orders.save(to: paths.ordersFile)
+        OrderBook.flushSaves()
     }
 
     // MARK: - Deriving what the screens show
@@ -236,13 +262,12 @@ final class BudgetStore {
         ("Apple Card", ["apple card"]), ("Barclays", ["barclays"]), ("Bank of America", ["bank of america"]),
         ("Wells Fargo", ["wells fargo"]), ("Synchrony", ["synchrony"]), ("U.S. Bank", ["u.s. bank", "us bank"]),
     ]
-    static func issuer(in text: String) -> String? {
-        let t = text.lowercased()
-        return issuers.first { $0.words.contains(where: t.contains) }?.name
-    }
+    /// Whole words only: "Citizens Bank" is not Citi, and a purchase is not a Chase.
+    private static let issuerTable = PhraseTable(issuers.flatMap { issuer in issuer.words.map { ($0, issuer.name) } })
+    static func issuer(in text: String) -> String? { issuerTable.firstMatch(in: text) }
 
     private func rebuild() {
-        let accountNames = Dictionary(uniqueKeysWithValues: library.accounts.map { ($0.id, $0.name) })
+        let accountNames = Dictionary(library.accounts.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         func date(_ s: String) -> Date? {
             if let cached = dateCache[s] { return cached }
             guard let parsed = DateParsing.parse(s, format: "yyyy-MM-dd") else { return nil }
@@ -308,6 +333,7 @@ final class BudgetStore {
         domainByName = domains
         transactions = list
         indexByID = nil
+        storyCache = nil; storyOfEntry = nil
         orderChargeCache = nil
         insightCache = [:]; recurringCache = nil; awardCache = [:]; reportCache = [:]
         months = Array(Set(list.map(\.month))).sorted()
@@ -388,7 +414,4 @@ final class BudgetStore {
         return Array(rows.prefix(limit))
     }
 
-    func income(in month: Month) -> Double {
-        transactions.filter { $0.isIncome && $0.month == month }.reduce(0) { $0 + abs($1.amount) }
-    }
 }

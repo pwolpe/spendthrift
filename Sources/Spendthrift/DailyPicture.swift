@@ -390,10 +390,10 @@ struct BannerCard: View {
             .padding(.horizontal, 6)
         }
         // Once the statements are in, quietly get the next picture ready.
-        .task(id: "\(store.hasLoadedTransactions)-\(store.isImporting)-\(store.transactions.count)") {
+        .task(id: "\(store.isImporting)-\(store.transactions.count)") {
             // Tomorrow's picture can wait until today's page is on screen and settled.
             try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled, store.hasLoadedTransactions, !store.isImporting else { return }
+            guard !Task.isCancelled, !store.isImporting else { return }
             await daily.prepareNext(highlights: store.recentHighlights(), trips: store.tripHighlights(), memories: store.memoryHighlights())
         }
     }

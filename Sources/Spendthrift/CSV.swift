@@ -78,6 +78,9 @@ struct CSVTable {
     var check: StatementCheck = .none
     /// The months a statement says it covers ("2026-05", "2026-06"), even if nothing was bought in one of them.
     var months: [String] = []
+    /// Rows whose number of fields was not the table's (an unquoted comma in a description, a summary line):
+    /// left out of `rows`, and counted so they are reported as skipped instead of vanishing.
+    var droppedRows = 0
 
     init(header: [String]?, rows: [[String]], signature: String?, suggestedName: String?) {
         self.header = header
@@ -110,6 +113,7 @@ struct CSVTable {
             ?? all.map(\.count).max() ?? 0
         guard let start = all.firstIndex(where: { $0.count == width }) else { throw ReadError.empty }
         var body = Array(all[start...]).filter { $0.count == width }
+        droppedRows = all.count - start - body.count
         guard !body.isEmpty else { throw ReadError.empty }
 
         // Header if the first row has no dates and no money values.
@@ -256,7 +260,7 @@ enum MoneyParsing {
         }
         s = s.replacingOccurrences(of: ",", with: "")
         if s.hasPrefix("+") { s.removeFirst() }
-        guard s.contains(where: \.isNumber), let v = Double(s) else { return nil }
+        guard s.contains(where: \.isNumber), let v = Double(s), v.isFinite else { return nil }
         return negative ? -v : v
     }
 }
@@ -289,7 +293,10 @@ enum ColumnDetector {
                 return isDebit(names[i]) || isCredit(names[i])
             }
             let ok = vals.filter { MoneyParsing.parse($0) != nil }.count
-            return ok * 10 >= vals.count * 9 && vals.contains { $0.contains(".") || $0.contains("$") }
+            // A column of whole numbers (yen, won, or dollars to the dollar) is money only when its heading says so:
+            // otherwise check numbers and reference numbers would be.
+            let wholeNumbersOK = ["amount", "debit", "credit", "withdraw", "deposit", "money", "price", "cost", "paid", "spent"].contains(where: names[i].contains)
+            return ok * 10 >= vals.count * 9 && vals.contains { $0.contains(".") || $0.contains("$") || wholeNumbersOK }
         }
         var amount: Int? = moneyColumns.first { names[$0].contains("amount") }
         let debit = moneyColumns.first { isDebit(names[$0]) }
@@ -390,7 +397,7 @@ enum Normalizer {
 
     static func rows(from table: CSVTable, mapping m: ColumnMapping) -> (rows: [CanonicalRow], skipped: Int) {
         var out: [CanonicalRow] = []
-        var skipped = 0
+        var skipped = table.droppedRows
         let categoryColumn = BankCategory.column(in: table, mapping: m)
         for r in table.rows {
             guard let rawDate = r[safe: m.dateColumn],

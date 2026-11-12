@@ -425,7 +425,11 @@ enum DebugHooks {
         store.confirm(confirmedForThePicture)
         try? await Task.sleep(for: .seconds(8))   // let the daily picture and the recap finish
         await settle()
+        // The page as it opens (the last twelve months), then one month and that month's pages.
+        store.overviewShowsYear = true
         await snap("04-overview", outDir) { OverviewView(scrolls: false) }
+        store.overviewShowsYear = false
+        await snap("04-overview-month", outDir) { OverviewView(scrolls: false) }
         for detail in [BudgetStore.OverviewDetail.spending, .income, .investing, .flow, .recurring] {
             store.overviewDetail = detail
             await snap("04-overview-\(detail.rawValue)", outDir) { OverviewView(scrolls: false) }
@@ -435,7 +439,8 @@ enum DebugHooks {
         // SPENDTHRIFT_YEAR=2023 picks the year; any other value shows the latest.
         if let year = env["SPENDTHRIFT_YEAR"].flatMap(Int.init) { store.overviewPeriod = .year(year) }
         await snap("04-overview-year", outDir) { OverviewView(scrolls: false) }
-        store.overviewShowsYear = false
+        store.overviewShowsYear = true
+        store.overviewPeriod = nil
         if let p = ReportData.periods(for: store).first {
             let data = ReportData(store: store, period: p)
             await snap("07-report", outDir) { ReportContent(data: data, interactive: false).padding(28) }

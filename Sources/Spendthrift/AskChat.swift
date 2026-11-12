@@ -128,7 +128,7 @@ enum ChatAnalyst {
         - show: the single query whose rows are most useful to look at. chart: "bar", "line" (for months or weeks), or "none".
 
         Today is \(Date.now.formatted(.dateTime.year().month(.wide).day())). The data covers \(first) to \(last). \
-        "This year" is \(Month(date: .now).year). Accounts: \(store.accounts.map(\.name).joined(separator: "; ")).
+        "This year" is \(Month(date: .now).year). Accounts: \(store.accounts.map { Redactor.accountLabel($0.name) }.joined(separator: "; ")).
         Trips and events on record: \(trips.isEmpty ? "none" : trips).
         """ + itemsPrompt(store: store) + screenPrompt(store: store)
     }
@@ -256,7 +256,7 @@ enum ChatAnalyst {
             case "day_of_week":
                 let d = Calendar.current.component(.weekday, from: t.date)
                 return (String(d), Calendar.current.weekdaySymbols[d - 1])
-            case "account": return (t.account, t.account)
+            case "account": return (t.account, Redactor.accountLabel(t.account))
             case "trip": return storyOf[t.id].map { ($0, $0) }
             default: return nil
             }

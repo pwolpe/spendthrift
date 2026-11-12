@@ -11,6 +11,16 @@ extension BudgetStore {
 
     /// Trips and events, newest first, without the ones the person said weren't.
     var stories: [Story] {
+        // Pages ask for these constantly; they only change when the library does.
+        let stamp = [library.stories?.count ?? 0, library.storyChoices?.count ?? 0, library.storyNames?.count ?? 0, library.dismissedStories?.count ?? 0]
+        if let kept = storyCache, kept.stamp == stamp { return kept.stories }
+        let made = assembleStories()
+        storyCache = (stamp, made)
+        storyOfEntry = nil
+        return made
+    }
+
+    private func assembleStories() -> [Story] {
         let dismissed = library.dismissedStories ?? []
         var list = (library.stories ?? []).filter { !dismissed.contains($0.fingerprint) }
         // A name given by hand goes back on whichever trip covers those days, however it was found this time.
@@ -76,7 +86,30 @@ extension BudgetStore {
     }
 
     func story(containing id: Transaction.ID) -> Story? {
-        stories.first { $0.entryIDs.contains(id) }
+        let all = stories
+        if storyOfEntry == nil {
+            var index: [UUID: Int] = [:]
+            for (i, story) in all.enumerated() { for entry in story.entryIDs where index[entry] == nil { index[entry] = i } }
+            storyOfEntry = index
+        }
+        return storyOfEntry?[id].flatMap { all.indices.contains($0) ? all[$0] : nil }
+    }
+
+    /// The trips and events a set of charges touches: those the charges belong to, and those whose
+    /// days a charge falls in even though it was not counted as part of them.
+    func stories(touching charges: [Transaction]) -> [(story: Story, charges: [Transaction], during: Bool)] {
+        var part: [UUID: [Transaction]] = [:], during: [UUID: [Transaction]] = [:]
+        let all = stories
+        for t in charges {
+            if let story = story(containing: t.id) { part[story.id, default: []].append(t); continue }
+            let day = DateParsing.iso.string(from: t.date)
+            if let story = all.first(where: { $0.kind == .trip && $0.start <= day && $0.end >= day }) { during[story.id, default: []].append(t) }
+        }
+        return all.compactMap { story in
+            if let list = part[story.id] { return (story, list + (during[story.id] ?? []), false) }
+            if let list = during[story.id] { return (story, list, true) }
+            return nil
+        }
     }
 
     /// Puts charges in a trip or event (or in none), whatever the model thought. Remembered for good.

@@ -13,6 +13,12 @@ struct BudgetPaths {
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
+    /// A data folder of your choosing (a temporary one, for checks).
+    init(root: URL) {
+        self.root = root
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
     /// The real data folder. The first time it is asked for, data kept under the app's earlier
     /// name is brought along (unless there is already something under the new one).
     static let realRoot: URL = {
@@ -112,10 +118,26 @@ struct Library: Codable {
         sources = (try? c.decodeIfPresent(Lossy<SourceFile>.self, forKey: .sources))?.values
         discoveriesByYear = try? c.decodeIfPresent([String: YearFindings].self, forKey: .discoveriesByYear)
         adopted = try? c.decodeIfPresent(Set<String>.self, forKey: .adopted)
-        // Every line must belong to an account that still exists.
+        // Two accounts with one id (a hand-merged or damaged file) would make every lookup by id trap.
+        var seen: Set<UUID> = []
+        accounts = accounts.filter { seen.insert($0.id).inserted }
+        // Every line must belong to an account that still exists. A line whose account record was damaged
+        // is kept, under an account of its own, rather than deleted by the next save.
         let known = Set(accounts.map(\.id))
-        entries.removeAll { !known.contains($0.accountID) }
+        let orphans = entries.indices.filter { !known.contains(entries[$0].accountID) }
+        if !orphans.isEmpty {
+            let recovered = accounts.first { $0.signature == Library.recoveredSignature }
+                ?? Account(name: Library.recoveredName, signature: Library.recoveredSignature)
+            if !accounts.contains(where: { $0.id == recovered.id }) { accounts.append(recovered) }
+            for i in orphans { entries[i].accountID = recovered.id }
+            Library.recoveredOnLoad += orphans.count
+        }
     }
+
+    static let recoveredName = "Recovered"
+    static let recoveredSignature = "recovered"
+    /// How many lines the last decode had to move into the "Recovered" account (for the notice at launch).
+    nonisolated(unsafe) static var recoveredOnLoad = 0
 
     enum LoadResult {
         case fresh                       // no file yet
@@ -168,11 +190,13 @@ struct Library: Codable {
         return try? JSONDecoder().decode(Library.self, from: data)
     }
 
-    /// Saves atomically, keeping one backup per day for two weeks.
-    func save(paths: BudgetPaths) {
+    /// Saves atomically, keeping one backup per day for two weeks. False when the file could not be written
+    /// (a full disk, a folder that can't be written to): the caller says so, so nobody thinks it is safe.
+    @discardableResult
+    func save(paths: BudgetPaths) -> Bool {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(self) else { return }
+        guard let data = try? encoder.encode(self) else { return false }
         let fm = FileManager.default
         let today = paths.backupFolder.appendingPathComponent("library-\(DateParsing.iso.string(from: .now)).json")
         if fm.fileExists(atPath: paths.libraryFile.path), !fm.fileExists(atPath: today.path) {
@@ -180,7 +204,7 @@ struct Library: Codable {
             try? fm.copyItem(at: paths.libraryFile, to: today)
             for old in paths.backups().dropFirst(14) { try? fm.removeItem(at: old) }
         }
-        try? data.write(to: paths.libraryFile, options: .atomic)
+        return (try? data.write(to: paths.libraryFile, options: .atomic)) != nil
     }
 }
 

@@ -35,8 +35,9 @@ extension BudgetStore {
     }
 
     /// A dropped folder means "everything in here": look inside (two levels) for statements.
-    nonisolated private static func expand(_ urls: [URL]) -> (files: [URL], fromFolder: Set<URL>, orders: [URL]) {
+    nonisolated private static func expand(_ urls: [URL]) -> (files: [URL], fromFolder: Set<URL>, orders: [URL], unpacked: [URL]) {
         var files: [URL] = [], fromFolder: Set<URL> = [], orders: [URL] = []
+        var unpackedFolders: [URL] = []
         let fm = FileManager.default
 
         /// Banks often hand over a year of statements as one zip. Opens it; nil if it isn't one.
@@ -48,7 +49,9 @@ extension BudgetStore {
             unzip.standardOutput = FileHandle.nullDevice; unzip.standardError = FileHandle.nullDevice
             guard (try? unzip.run()) != nil else { return nil }
             unzip.waitUntilExit()
-            return unzip.terminationStatus == 0 ? unpacked : nil
+            unpackedFolders.append(unpacked)
+            guard unzip.terminationStatus == 0 else { try? fm.removeItem(at: unpacked); return nil }
+            return unpacked
         }
         /// Everything readable inside a folder (or an opened zip), a few levels down, zips included.
         func walk(_ folder: URL, depth: Int) {
@@ -82,7 +85,25 @@ extension BudgetStore {
                 files.append(url)
             }
         }
-        return (files.sorted { $0.lastPathComponent < $1.lastPathComponent }, fromFolder, orders)
+        return (files.sorted { $0.lastPathComponent < $1.lastPathComponent }, fromFolder, orders, unpackedFolders)
+    }
+
+    /// Statements taken out of a zip sit unencrypted in the temporary folder until this removes them.
+    /// A folder still holding a file that is waiting for the person to pick its columns stays until that is done.
+    static func removeUnpacked(_ folders: [URL], keepingThoseUsedBy pending: [PendingImport] = []) {
+        for folder in folders where !pending.contains(where: { $0.fileURL.path.hasPrefix(folder.path + "/") }) {
+            try? FileManager.default.removeItem(at: folder)
+        }
+    }
+
+    /// The unpacked zip folder a file sits in, if it came out of one.
+    nonisolated static func unpackedFolder(containing url: URL) -> URL? {
+        var folder = url.deletingLastPathComponent()
+        while folder.path != "/" {
+            if folder.lastPathComponent.hasPrefix("SpendthriftZip-") { return folder }
+            folder = folder.deletingLastPathComponent()
+        }
+        return nil
     }
 
     /// Asks for a locked PDF's password. Nothing is stored: it's used once to open the file.
@@ -112,13 +133,14 @@ extension BudgetStore {
     /// - automatic: the app found these in Downloads by itself. Nothing may interrupt the person then:
     ///   no password prompt, no column picker, no error sheet. Anything that needs him waits in the banner.
     func importFilesAsync(_ dropped: [URL], automatic: Bool = false) async {
-        let (urls, fromFolder, orderFiles) = Self.expand(dropped)
+        let (urls, fromFolder, orderFiles, unpacked) = Self.expand(dropped)
+        defer { Self.removeUnpacked(unpacked, keepingThoseUsedBy: pendingImports) }
         if !orderFiles.isEmpty {
             await addOrders(from: orderFiles, quietly: automatic)
             if urls.isEmpty { return }
         }
         var issues: [ImportIssue] = []
-        var added = 0, touched: [String] = [], verified = 0, mismatches: [String] = [], scanned = 0
+        var added = 0, touched: [String] = [], verified = 0, mismatches: [String] = [], scanned = 0, skippedLines = 0
         var batch: (entries: Set<UUID>, accounts: Set<UUID>, hashes: Set<String>) = ([], [], [])
         var attached = 0
         // Statements already read, whose originals were never kept: re-read without the model, only to link them.
@@ -176,6 +198,7 @@ extension BudgetStore {
                 case .ready(let statement):
                     let (accountID, isNew) = account(for: statement.signature, name: statement.suggestedName)
                     let ids = add(statement.rows, to: accountID, source: hash)
+                    skippedLines += statement.skipped
                     keep(data, hash: hash, url: url, accountID: accountID, rows: statement.rows, check: statement.check)
                     if !statement.months.isEmpty, let a = library.accounts.firstIndex(where: { $0.id == accountID }) {
                         library.accounts[a].statementMonths = (library.accounts[a].statementMonths ?? []).union(statement.months)
@@ -264,7 +287,7 @@ extension BudgetStore {
             lastImport = batch
             withAnimation(.snappy) { changed() }
             showImportToast(added: added, accounts: touched, verified: verified, mismatches: mismatches, scanned: scanned,
-                            automatic: automatic)
+                            automatic: automatic, skipped: skippedLines)
             if selection == nil { selection = .overview }
             Task { await sortRemaining() }
             if automatic {
@@ -301,6 +324,7 @@ extension BudgetStore {
         }
         let ids = add(rows, to: accountID, source: pending.fileHash)
         if let data = try? Data(contentsOf: pending.fileURL) { keep(data, hash: pending.fileHash, url: pending.fileURL, accountID: accountID, rows: rows) }
+        Self.removeUnpacked(Self.unpackedFolder(containing: pending.fileURL).map { [$0] } ?? [], keepingThoseUsedBy: pendingImports)
         library.importedHashes.insert(pending.fileHash)
         lastImport = (ids, isNew ? [accountID] : [], [pending.fileHash])
         withAnimation(.snappy) { changed() }
@@ -311,6 +335,7 @@ extension BudgetStore {
 
     func cancelImport(_ pending: PendingImport) {
         pendingImports.removeAll { $0.id == pending.id }
+        Self.removeUnpacked(Self.unpackedFolder(containing: pending.fileURL).map { [$0] } ?? [], keepingThoseUsedBy: pendingImports)
     }
 
     func undoLastImport() {
@@ -589,7 +614,9 @@ extension BudgetStore {
     }
 
     private func showImportToast(added: Int, accounts names: [String], verified: Int = 0, mismatches: [String] = [], scanned: Int = 0,
-                                 automatic: Bool = false) {
+                                 automatic: Bool = false, skipped: Int = 0) {
+        let extra = skipped > 0 ? " \(skipped) \(skipped == 1 ? "line" : "lines") in the file could not be read and \(skipped == 1 ? "was" : "were") left out." : ""
+        func showToast(_ message: String, symbol: String, offersUndo: Bool = false) { self.showToast(message + extra, symbol: symbol, offersUndo: offersUndo) }
         let where_ = names.joined(separator: ", ")
         if automatic, mismatches.isEmpty, scanned == 0 {
             showToast("Found a new statement in Downloads and added \(added) \(added == 1 ? "transaction" : "transactions") to \(where_).",

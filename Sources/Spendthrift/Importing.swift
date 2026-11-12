@@ -9,6 +9,8 @@ struct ParsedStatement {
     var check: StatementCheck = .none
     /// Months the statement covers by its own printed dates, when it prints them.
     var months: [String] = []
+    /// Lines of the file that could not be read and were left out.
+    var skipped = 0
 }
 
 /// Reads whatever a bank lets you download: CSV/TSV exports, PDF statements, and
@@ -71,16 +73,16 @@ enum StatementReader {
             let signature = table.signature + (digits.map { "|#\($0)" } ?? "")
             let name = accountName(for: url)
             if let mapping = ColumnDetector.detect(table) {
-                let rows = Normalizer.rows(from: table, mapping: mapping).rows
-                if !rows.isEmpty { return .ready(ParsedStatement(rows: rows, signature: signature, suggestedName: name)) }
+                let (rows, skipped) = Normalizer.rows(from: table, mapping: mapping)
+                if !rows.isEmpty { return .ready(ParsedStatement(rows: rows, signature: signature, suggestedName: name, skipped: skipped)) }
             }
             // Only offer "pick the columns" for something that is actually a table with dates in it.
             let hasDates = (0..<table.columnCount).contains { DateParsing.guessFormat(for: table.values($0)) != nil }
             guard hasDates, table.columnCount >= 2 else { throw ReadError.notAStatement }
             // Before asking the person to pick columns, let the powerful model work them out.
             if CloudAI.isEnabled, let mapping = await CloudColumnMapper.mapping(for: table) {
-                let rows = Normalizer.rows(from: table, mapping: mapping).rows
-                if !rows.isEmpty { return .ready(ParsedStatement(rows: rows, signature: signature, suggestedName: name)) }
+                let (rows, skipped) = Normalizer.rows(from: table, mapping: mapping)
+                if !rows.isEmpty { return .ready(ParsedStatement(rows: rows, signature: signature, suggestedName: name, skipped: skipped)) }
             }
             return .needsMapping(table, signature: signature, suggestedName: name)
         }
@@ -91,7 +93,15 @@ enum StatementReader {
         var stem = url.deletingPathExtension().lastPathComponent
         // A date in the name ("…_2026-10-12_Coinbase") is not a card number.
         stem = stem.replacingOccurrences(of: #"(?<![0-9])(19|20)[0-9]{2}[-_.][0-9]{2}[-_.][0-9]{2}(?![0-9])"#, with: " ", options: .regularExpression)
-        if let r = stem.range(of: #"(?<![0-9])[0-9]{4}(?![0-9])"#, options: .regularExpression) { return String(stem[r]) }
+        // Four digits that are a year ("transactions_2026") are not a card, unless a word says it is one.
+        var search = stem.startIndex..<stem.endIndex
+        while let r = stem.range(of: #"(?<![0-9])[0-9]{4}(?![0-9])"#, options: .regularExpression, range: search) {
+            let digits = String(stem[r])
+            let year = (1990...2099).contains(Int(digits) ?? 0)
+            let before = stem[..<r.lowerBound].lowercased()
+            if !year || ["ending", "card", "acct", "account", "x", "xx", "•", "*", "#"].contains(where: { before.trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: "-_.:"))).hasSuffix($0) }) { return digits }
+            search = r.upperBound..<stem.endIndex
+        }
         // A whole account number in the name: its last four digits.
         if let r = stem.range(of: #"(?<![0-9])[0-9]{12,19}(?![0-9])"#, options: .regularExpression) { return String(stem[r].suffix(4)) }
         return nil
@@ -102,9 +112,11 @@ enum StatementReader {
         let stem = url.deletingPathExtension().lastPathComponent
         let noise: Set<String> = ["activity", "transactions", "transaction", "statement", "statements", "export", "download",
                                   "stmt", "csv", "since", "to", "and", "history", "account", "report", "data"]
-        let months = Set((1...12).map { Month(year: 2000, month: $0).shortName.lowercased() })
+        // A month is a word that is a month's name ("Mar", "March"), not one that merely starts like one ("Marcus").
+        let months: Set<String> = ["jan", "january", "feb", "february", "mar", "march", "apr", "april", "may", "jun", "june", "jul", "july",
+                                   "aug", "august", "sep", "sept", "september", "oct", "october", "nov", "november", "dec", "december"]
         let words = stem.split { !$0.isLetter }.map(String.init)
-            .filter { $0.count > 1 && !noise.contains($0.lowercased()) && !months.contains(String($0.lowercased().prefix(3))) }
+            .filter { $0.count > 1 && !noise.contains($0.lowercased()) && !months.contains($0.lowercased()) }
         let banks = ["bofa": "Bank of America", "boa": "Bank of America", "usaa": "USAA", "amex": "American Express", "wf": "Wells Fargo",
                      "citi": "Citi", "pnc": "PNC", "td": "TD Bank", "hsbc": "HSBC", "bmo": "BMO", "jpm": "J.P. Morgan", "cap": "Capital"]
         var name = words.prefix(2).map { banks[$0.lowercased()] ?? ($0.prefix(1).uppercased() + $0.dropFirst().lowercased()) }.joined(separator: " ")

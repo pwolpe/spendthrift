@@ -165,7 +165,7 @@ enum CloudSorter {
             if let bank = item.bankCategory { entry["bank_category"] = bank }
             if item.amounts.count > 1 { entry["amounts"] = item.amounts.map { ($0 * 100).rounded() / 100 } }
             if let guess = item.appGuess { entry["app_guess"] = guess }
-            if !item.notes.isEmpty { entry["notes"] = item.notes }
+            if !item.notes.isEmpty { entry["notes"] = item.notes.map(Redactor.scrub) }
             return entry
         }
         guard let body = try? JSONSerialization.data(withJSONObject: ["items": payload]),
