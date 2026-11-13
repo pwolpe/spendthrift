@@ -529,6 +529,7 @@ enum DebugHooks {
         // SPENDTHRIFT_PLACE="DoorDash" picks the payee; otherwise the busiest one.
         if let busiest = env["SPENDTHRIFT_PLACE"] ?? Dictionary(grouping: store.transactions.filter(\.countsAsSpending), by: \.merchant).max(by: { $0.value.count < $1.value.count })?.key {
             await snap("12-place", outDir) { PlaceView(name: busiest, scrolls: false).frame(width: 1000) }
+            await snap("12-place-same-as", outDir, width: 400) { SamePayeePicker(name: busiest, scrolls: false) }
         }
         if let trip = store.stories.max(by: { store.transactions(in: $0).count < store.transactions(in: $1).count }) {
             await snap("13-charges", outDir) { ChargesView(filter: TransactionFilter(storyID: trip.id), scrolls: false).frame(width: 1000) }

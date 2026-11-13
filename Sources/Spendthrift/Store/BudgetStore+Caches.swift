@@ -135,6 +135,83 @@ extension BudgetStore {
         cached("payee-names") { Set(chargesByPayee.keys) }
     }
 
+    /// Every way each payee is written on statements, for finding a payee by what a statement calls it.
+    private var spellingsByPayee: [String: [String]] {
+        cached("payee-spellings") {
+            chargesByPayee.mapValues { Set($0.map { MerchantResolver.spelling($0.description) }).sorted() }
+        }
+    }
+
+    /// A payee another one could be folded into, and why it is offered.
+    struct MergeChoice: Identifiable, Equatable {
+        let name: String
+        /// The statement spelling that matched the search, when the name itself did not.
+        var writtenAs: String?
+        var id: String { name }
+    }
+
+    /// The payees `name` could be the same as. With nothing typed: the ones whose names look alike
+    /// (`likely`), then every other payee, those filed under the same category first. With a search:
+    /// every payee whose name or statement spelling holds each word typed, the best matches first.
+    func mergeChoices(for name: String, search: String) -> (likely: [MergeChoice], rest: [MergeChoice]) {
+        let others = allPayeeNames.subtracting([name])
+        let typed = search.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        if typed.isEmpty {
+            let likely = Set(payees(resembling: name))
+            let category = charges(at: name).first?.category
+            let rest = others.subtracting(likely).sorted {
+                let a = charges(at: $0).first?.category == category, b = charges(at: $1).first?.category == category
+                return a != b ? a : $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+            }
+            return (likely.sorted().map { MergeChoice(name: $0) }, rest.map { MergeChoice(name: $0) })
+        }
+        var found: [(rank: Int, choice: MergeChoice)] = []
+        for other in others {
+            let lowered = other.lowercased()
+            if typed.allSatisfy({ lowered.contains($0) }) {
+                found.append((lowered.hasPrefix(typed[0]) ? 0 : 1, MergeChoice(name: other)))
+            } else if let spelling = spellingsByPayee[other]?.first(where: { s in typed.allSatisfy { s.lowercased().contains($0) } }) {
+                found.append((2, MergeChoice(name: other, writtenAs: spelling)))
+            }
+        }
+        found.sort { ($0.rank, $0.choice.name.lowercased()) < ($1.rank, $1.choice.name.lowercased()) }
+        return ([], found.map(\.choice))
+    }
+
+    /// What the model is told about a payee when asked which others it could be.
+    private func guessable(_ name: String) -> SamePayeeGuesser.Payee {
+        let all = charges(at: name)
+        let amounts = all.map { abs($0.amount) }.sorted()
+        let written = Dictionary(grouping: all) { MerchantResolver.spelling($0.description) }
+            .sorted { ($0.value.count, $1.key) > ($1.value.count, $0.key) }.map(\.key)
+        return .init(name: name, category: all.first?.category.displayName ?? "", spellings: written, count: all.count,
+                     typical: amounts.isEmpty ? 0 : amounts[amounts.count / 2],
+                     last: all.first.map { "\($0.month.year)-\(String(format: "%02d", $0.month.month))" } ?? "")
+    }
+
+    /// The model's picks for which other payees `name` most likely is, likeliest first: for names that
+    /// share nothing (a person and their initials). Empty without a model. Only ever a suggestion.
+    func likelySamePayees(as name: String) async -> [String] {
+        let choices = mergeChoices(for: name, search: "")
+        // Those that look alike or are filed alike go first, so they are the ones kept if the list must be cut.
+        let others = (choices.likely + choices.rest).map { guessable($0.name) }
+        let picks = await SamePayeeGuesser.guess(for: guessable(name), among: others)
+        return picks.filter { allPayeeNames.contains($0) && $0 != name }
+    }
+
+    /// Other payees whose names look like this one: likely the same business under another spelling.
+    private func payees(resembling name: String) -> [String] {
+        func words(_ s: String) -> [String] {
+            s.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count > 2 }
+        }
+        let mine = words(name)
+        guard let lead = mine.first else { return [] }
+        return allPayeeNames.subtracting([name]).filter { other in
+            let theirs = words(other)
+            return theirs.first == lead || !Set(theirs).intersection(mine).isEmpty && (other.localizedCaseInsensitiveContains(name) || name.localizedCaseInsensitiveContains(other))
+        }.sorted().prefix(10).map { $0 }
+    }
+
     /// The payee names a sentence can link to, longest first so "Westside Market NYC" beats "Westside Market".
     var linkablePayeeNames: [String] {
         cached("linker-names") {

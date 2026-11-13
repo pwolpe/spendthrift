@@ -1092,6 +1092,14 @@ enum SelfTest {
             store.renamePlace(t.merchantKey, to: new)
             check("a rename is seen at once by everything kept", !store.charges(at: new).isEmpty && store.allPayeeNames.contains(new))
             store.renamePlace(t.merchantKey, to: old)
+            // Any payee can be chosen to combine with, whatever its name looks like: found by name or by a statement's spelling.
+            if let other = store.transactions.first(where: { $0.merchant != old }) {
+                let all = store.mergeChoices(for: old, search: "")
+                check("combining: every other payee is offered, once", (all.likely + all.rest).map(\.name).sorted() == store.allPayeeNames.subtracting([old]).sorted())
+                check("combining: a payee is found by its name", store.mergeChoices(for: old, search: other.merchant.lowercased()).rest.contains { $0.name == other.merchant })
+                check("combining: a payee is found by how a statement writes it",
+                      store.mergeChoices(for: old, search: MerchantResolver.spelling(other.description)).rest.contains { $0.name == other.merchant })
+            }
         }
         if let a = store.accounts.first {
             let mine = store.transactions.filter { $0.accountID == a.id }

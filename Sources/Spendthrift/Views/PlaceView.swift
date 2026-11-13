@@ -13,6 +13,8 @@ struct PlaceView: View {
     @State private var note = ""
     /// The statement spelling being made into a payee of its own, while its editor is open.
     @State private var separating: String?
+    /// Whether the picker for combining this payee with another is open.
+    @State private var combining = false
 
     private var charges: [Transaction] {
         store.charges(at: name)
@@ -87,17 +89,12 @@ struct PlaceView: View {
                         .fixedSize()
                         .help("Whether spending here counts as chosen (it then shows under Where to trim) or needed. Change it if the app has it wrong.")
                     }
-                    let others = similar()
-                    if !others.isEmpty {
-                        Menu("Same Payee As…") {
-                            ForEach(others, id: \.self) { other in
-                                Button(other) { store.combinePlaces(other, into: name) }
-                            }
+                    Button("Same Payee As…") { combining = true }
+                        .buttonStyle(.borderless)
+                        .help("Combine this payee with any other one: search by name or by how a statement writes it")
+                        .popover(isPresented: $combining, arrowEdge: .bottom) {
+                            SamePayeePicker(name: name) { combining = false }
                         }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-                        .help("Fold another spelling of this payee into this one")
-                    }
                 }
             }
             Spacer()
@@ -130,20 +127,6 @@ struct PlaceView: View {
         guard !new.isEmpty, new != name else { return }
         for key in keys { store.renamePlace(key, to: new) }
         store.placeRenamed(to: new)
-    }
-
-    /// Other places whose names look like this one: likely the same business under another spelling.
-    private func similar() -> [String] {
-        func words(_ s: String) -> [String] {
-            s.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count > 2 }
-        }
-        let mine = words(name)
-        guard let lead = mine.first else { return [] }
-        let names = store.allPayeeNames.subtracting([name])
-        return names.filter { other in
-            let theirs = words(other)
-            return theirs.first == lead || !Set(theirs).intersection(mine).isEmpty && (other.localizedCaseInsensitiveContains(name) || name.localizedCaseInsensitiveContains(other))
-        }.sorted().prefix(10).map { $0 }
     }
 
     /// A few things worth knowing about this payee, each a sentence built from sums.
@@ -473,5 +456,129 @@ struct OriginalButton: View {
             .foregroundStyle(.tertiary)
             .help("Show this charge in its original statement")
             .accessibilityLabel("Show in original statement")
+    }
+}
+
+/// Says that the payee on screen and some other payee are one and the same. Any payee can be
+/// chosen, not only those with a name like this one (an accountant billed under his initials):
+/// the likely ones come first, and a search finds the rest by name or by how a statement writes them.
+struct SamePayeePicker: View {
+    @Environment(BudgetStore.self) private var store
+    let name: String
+    var done: () -> Void = {}
+    /// False when rendered for a test snapshot.
+    var scrolls = true
+    @State private var search = ""
+    /// The payee picked, while the person says which name to keep.
+    @State private var picked: String?
+    @State private var kept = ""
+    /// The model's picks for which payees this most likely is; nil while it is still looking.
+    @State private var guesses: [String]?
+
+    var body: some View {
+        Group {
+            if let picked { confirm(picked) } else { choose }
+        }
+        .padding(16)
+        .frame(width: 400)
+        .task { guesses = CloudAI.isEnabled ? await store.likelySamePayees(as: name) : [] }
+    }
+
+    private var choose: some View {
+        let all = store.mergeChoices(for: name, search: search)
+        let searching = !search.trimmingCharacters(in: .whitespaces).isEmpty
+        // The model's picks lead, and are not then repeated lower down. A search looks through everything alike.
+        let guessed = searching ? [] : (guesses ?? []).filter { store.allPayeeNames.contains($0) && $0 != name }
+        let choices = (likely: all.likely.filter { !guessed.contains($0.name) }, rest: all.rest.filter { !guessed.contains($0.name) })
+        let looking = !searching && guesses == nil
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Which payee is \(name) the same as?").font(.headline).fixedSize(horizontal: false, vertical: true)
+            SearchField(prompt: "Search every payee", text: $search, large: false, autofocus: true) {
+                if searching, let first = choices.rest.first { pick(first.name) }
+            }
+            MaybeScroll(scrolls: scrolls) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if looking {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Looking for the likeliest matches…").font(.callout).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 8)
+                    }
+                    if !guessed.isEmpty {
+                        heading("Most likely", symbol: "sparkles")
+                        ForEach(guessed, id: \.self) { row(.init(name: $0)) }
+                    }
+                    if !choices.likely.isEmpty {
+                        heading("Names like this one")
+                        ForEach(choices.likely) { row($0) }
+                    }
+                    if !searching, looking || !guessed.isEmpty || !choices.likely.isEmpty, !choices.rest.isEmpty {
+                        heading("Every other payee")
+                    }
+                    ForEach(choices.rest) { row($0) }
+                    if guessed.isEmpty && choices.likely.isEmpty && choices.rest.isEmpty {
+                        Text(searching ? "No payee has “\(search.trimmingCharacters(in: .whitespaces))” in its name or on a statement line."
+                                       : "There are no other payees yet.")
+                            .font(.callout).foregroundStyle(.secondary).padding(.vertical, 20).frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .frame(height: 300, alignment: .top).clipped()
+            Text("Finds a payee by its name or by how it is written on a statement.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func heading(_ title: String, symbol: String? = nil) -> some View {
+        HStack(spacing: 4) {
+            if let symbol { Image(systemName: symbol).foregroundStyle(Theme.accent) }
+            Text(title.uppercased()).foregroundStyle(.tertiary)
+        }
+        .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 2)
+    }
+
+    private func row(_ choice: BudgetStore.MergeChoice) -> some View {
+        let charges = store.charges(at: choice.name)
+        let count = charges.count == 1 ? "1 charge" : "\(charges.count) charges"
+        return PayeeLine(name: choice.name, category: charges.first?.category ?? .other,
+                         detail: choice.writtenAs.map { "written as \($0)" } ?? count,
+                         amount: charges.reduce(0) { $0 + $1.amount }, iconSize: 26,
+                         help: "\(name) and \(choice.name) are the same payee") { pick(choice.name) }
+    }
+
+    private func pick(_ other: String) {
+        // The name with more history behind it is the likelier one to keep; the person has the last word.
+        kept = store.charges(at: other).count > store.charges(at: name).count ? other : name
+        picked = other
+    }
+
+    private func confirm(_ other: String) -> some View {
+        let total = store.charges(at: name).count + store.charges(at: other).count
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Combine these two payees?").font(.headline)
+            Picker("Keep the name", selection: $kept) {
+                ForEach([name, other], id: \.self) { each in
+                    let n = store.charges(at: each).count
+                    Text("\(each)  ") + Text(n == 1 ? "1 charge" : "\(n) charges").foregroundStyle(.secondary)
+                }
+            }
+            .pickerStyle(.radioGroup)
+            Text("All \(total) charges will be under \(kept), and so will anything on a future statement written either way. A line that doesn't belong can be separated again from the payee's page.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Back") { picked = nil }
+                Spacer()
+                Button("Cancel", action: done).keyboardShortcut(.cancelAction)
+                Button("Combine") { combine(other) }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    private func combine(_ other: String) {
+        done()
+        store.combinePlaces(kept == name ? other : name, into: kept)
+        if kept != name { store.placeRenamed(to: kept) }
     }
 }
