@@ -86,7 +86,7 @@ struct TransactionsView: View {
                 CategoryPill(category: t.isUnknown ? nil : t.category, sparkle: t.needsCheck && !t.isUnknown) { c in
                     store.setCategory(c, for: [t.id], wholePlace: true)
                 }
-                .help(t.needsCheck ? (t.source == .ai ? "Sorted by Apple Intelligence. Click to change." : "Smarter AI's best guess. Click to change.") : "Click to change the category for \(t.merchant)")
+                .help(t.needsCheck ? "The AI's best guess. Click to change." : "Click to change the category for \(t.merchant)")
             }
             .width(min: 150, ideal: 190)
 
@@ -242,9 +242,9 @@ struct TransactionInspector: View {
         case .known: return ("A well-known business.", "building.2.fill")
         case .bank: return ("Your bank's own category.", "building.columns.fill")
         case .generic: return ("Guessed from the name.", "text.magnifyingglass")
-        case .ai: return (transaction.isUnknown ? "Not sorted yet." : "Sorted by Apple Intelligence, on this Mac.", "apple.intelligence")
+        case .ai: return (transaction.isUnknown ? "Not sorted yet." : "Sorted by AI.", transaction.isUnknown ? "questionmark.circle" : "sparkles")
         case .cloud: return ("Sorted by AI.", "sparkles")
-        case .cloudGuess: return ("Smarter AI's best guess. Change it if it's wrong.", "sparkles")
+        case .cloudGuess: return ("The AI's best guess. Change it if it's wrong.", "sparkles")
         }
     }
 

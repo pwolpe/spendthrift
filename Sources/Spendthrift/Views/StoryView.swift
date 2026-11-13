@@ -7,8 +7,11 @@ struct StoryView: View {
     /// False when rendered for a test snapshot.
     var scrolls = true
 
+    /// There are no version numbers; a build is known by the day it was made ("Built November 12, 2026").
     private var version: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map { "Version \($0)" } ?? ""
+        guard let stamp = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+              let day = DateParsing.parse(stamp, format: "yyyy.MM.dd") else { return "" }
+        return "Built \(day.formatted(date: .long, time: .omitted))"
     }
 
     var body: some View {

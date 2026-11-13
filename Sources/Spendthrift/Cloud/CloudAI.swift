@@ -3,27 +3,20 @@ import PDFKit
 import AppKit
 import Observation
 
-/// Optional: a powerful cloud model (through OpenRouter) for the jobs where Apple's small
-/// on-device model struggles. Off until a key is entered in Settings. When it's on:
+/// The models the app runs on, reached through OpenRouter with the person's own key:
 ///
-///  - places the built-in rules don't know are sorted by the cloud model (merchant text and amounts only);
-///  - statements the app can't read are read by it, after name, address and account numbers are blanked;
-///  - it understands questions in Ask and writes the monthly note and the picture captions.
+///  - places the built-in rules don't know are sorted by a model (merchant text and amounts only);
+///  - statements the app can't read are read by one, after name, address and account numbers are blanked;
+///  - one understands questions in Ask and writes the short notes and the picture captions.
 ///
-/// Totals are always computed in code. If the cloud can't be reached, everything falls back to
-/// the on-device paths, so the app never depends on it.
+/// Totals are always computed in code. If the models can't be reached, an import still finishes on
+/// the built-in rules and what they couldn't place waits for the next try.
 enum CloudAI {
-    static let defaultModel = Models.writing
-    static let models = Models.writingChoices
-
-    /// For comparing models: use this one for everything inside the task, whatever Setup says.
+    /// For comparing models: use this one for everything inside the task.
     @TaskLocal static var modelOverride: String?
 
-    static var model: String {
-        // A choice saved before the list changed is no longer a choice: the current default stands in.
-        get { modelOverride ?? UserDefaults.standard.string(forKey: "cloudModel").flatMap { saved in models.contains { $0.id == saved } ? saved : nil } ?? defaultModel }
-        set { UserDefaults.standard.set(newValue, forKey: "cloudModel") }
-    }
+    /// The writing model. Which model does which job is decided in `Models`, not by the person.
+    static var model: String { modelOverride ?? Models.writing }
     /// Reading whole statements sends more than merchant names, so it has its own switch.
     static var readsStatements: Bool {
         get { UserDefaults.standard.object(forKey: "cloudReadsStatements") as? Bool ?? true }
@@ -37,6 +30,8 @@ enum CloudAI {
         !offline && ProcessInfo.processInfo.environment["SPENDTHRIFT_NO_CLOUD"] == nil && CloudKey.exists
     }
     static var canReadStatements: Bool { isEnabled && readsStatements }
+    /// The app needs a key before it takes a statement. (The self-test runs offline, on purpose, without one.)
+    static var hasKeyOrIsTest: Bool { CloudKey.exists || ProcessInfo.processInfo.environment["SPENDTHRIFT_NO_CLOUD"] != nil }
 
     enum CloudError: LocalizedError {
         case noKey, badKey, outOfCredit, unreachable, server(Int), badReply
@@ -71,7 +66,6 @@ enum CloudAI {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Spendthrift", forHTTPHeaderField: "X-Title")
         var body: [String: Any] = [
-            // A decision model can't write text; jobs that need writing use the default model.
             "model": model,
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
             "max_tokens": maxTokens,

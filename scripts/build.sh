@@ -5,13 +5,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$ROOT/build"
 APP="$BUILD/Spendthrift.app"
-CARTOON="$ROOT/Resources/tony-cartoon.png"   # made once by Image Playground, then reused
+CARTOON="$ROOT/Resources/tony-cartoon.png"
 
 mkdir -p "$BUILD"
 
-# Sign with the maintainer's own certificate when it's in the keychain. That gives every build the same
-# identity, so macOS keeps users' permissions across updates and the app can verify its updates.
-# Without it, fall back to a throwaway signature (the app runs, but can't update itself).
+# Sign with your own certificate when it's in the keychain. That gives every build the same identity,
+# so macOS keeps permissions such as Downloads access from one build to the next.
+# Without it, fall back to a throwaway signature (the app runs; macOS asks again after each build).
 SIGN_NAME="Spendthrift Signing"
 if security find-certificate -c "$SIGN_NAME" >/dev/null 2>&1; then SIGN="$SIGN_NAME"; else SIGN="-"; fi
 
@@ -26,19 +26,13 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Spendthrift"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
-# Version: the number in the VERSION file (what users see in About), plus a build number from the clock.
-VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" -c "Set :CFBundleVersion $(date +%Y%m%d%H%M)" "$APP/Contents/Info.plist"
+# There are no version numbers: everyone builds their own, so a build is known by the day it was made.
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(date +%Y.%m.%d)" -c "Set :CFBundleVersion $(date +%Y%m%d%H%M)" "$APP/Contents/Info.plist"
 codesign --force --sign "$SIGN" --timestamp=none "$APP"
 
-# 3. Cartoon + icon (Image Playground runs on this Mac; falls back to the photo).
-echo "→ Drawing icon (cartoon via Image Playground)"
-# Image Playground only runs in a foreground app, so launch the bundle normally.
+# 3. Icon.
 rm -f "$BUILD/icon-1024.png"
-# A finished icon in Resources wins (drawn by an image model);
-# otherwise the app draws its own.
 if [ -f "$ROOT/Resources/icon-1024.png" ]; then cp "$ROOT/Resources/icon-1024.png" "$BUILD/icon-1024.png"; fi
-[ -f "$BUILD/icon-1024.png" ] || open -W -n "$APP" --args --make-icon "$BUILD/icon-1024.png" --cartoon "$ROOT/Resources/tony-avatar.png" || true
 if [ -f "$BUILD/icon-1024.png" ]; then
   ICONSET="$BUILD/AppIcon.iconset"
   rm -rf "$ICONSET"; mkdir -p "$ICONSET"
@@ -67,7 +61,4 @@ rm -f "$BUILD/Spendthrift.zip"
 ditto -c -k --keepParent --norsrc --noextattr "$APP" "$BUILD/Spendthrift.zip"
 
 echo "✓ Built $APP (signed: $SIGN)"
-echo "✓ Zipped $BUILD/Spendthrift.zip (version $VERSION)"
-if [ ! -f "$CARTOON" ]; then
-  echo "ℹ︎ No cartoon yet (Apple Intelligence unavailable here). The app will make one on first launch."
-fi
+echo "✓ Zipped $BUILD/Spendthrift.zip"

@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 
 // MARK: - Turning "TST* BLUE DOOR CAFE #42 SEATTLE WA" into a stable keyword
 
@@ -440,8 +439,7 @@ enum BankCategory {
 
 // MARK: - Never wait forever on the model
 
-/// Runs an on-device model call with a time limit. The model occasionally stalls (while it is
-/// still downloading, or under memory pressure); the app must carry on without it.
+/// Runs a model call with a time limit. A request occasionally stalls; the app must carry on without it.
 enum Timeout {
     private final class Gate: @unchecked Sendable {
         private let lock = NSLock()
@@ -465,45 +463,9 @@ enum Timeout {
     }
 }
 
-// MARK: - Apple Intelligence (free, on-device, private)
-
-struct SuggestionInput {
-    let keyword: String
-    let description: String
-    let averageAmount: Double
-}
+// MARK: - Reading a payee from the bank's text
 
 enum CategorySuggester {
-    static var isAvailable: Bool { SystemLanguageModel.default.isAvailable }
-
-    /// Why Apple Intelligence can't help right now, in words the person can act on. Nil when it's working.
-    static var unavailableReason: String? {
-        switch SystemLanguageModel.default.availability {
-        case .available: return nil
-        case .unavailable(.appleIntelligenceNotEnabled):
-            return "Apple Intelligence is turned off. Turn it on in System Settings → Apple Intelligence & Siri and I'll sort new payees for you."
-        case .unavailable(.modelNotReady):
-            return "Apple Intelligence is still getting ready on this Mac (it downloads in the background). I'll sort the rest as soon as it's done."
-        case .unavailable(.deviceNotEligible):
-            return "This Mac doesn't support Apple Intelligence, so payees I don't recognize need a category from you."
-        case .unavailable:
-            return "Apple Intelligence isn't available right now, so payees I don't recognize need a category from you."
-        }
-    }
-
-    private static let instructions = """
-    You help someone sort their credit card and bank transactions into budget categories.
-    Give one guess for every numbered transaction.
-    Restaurants, cafes, cafeterias, bars, delis and coffee shops are Dining. Supermarkets, markets, butchers and food shops are Groceries.
-    Software, apps, websites and online services billed every month are Subscriptions. Dry cleaners and laundry are Personal Care.
-    Radio stations, public media and nonprofits are Gifts & Giving. Newsstands and convenience stores are Shopping.
-    Distributions, dividends and interest are Investment Income. Capital calls and brokerage or crypto purchases are Investing & Capital Calls.
-    Payments to the IRS or a state tax department are Income Taxes. Paying a credit card bill or moving money between own accounts is Payments & Transfers.
-    A refund or credit belongs in the category of what was bought.
-    For the name, use the business name as written in the transaction, tidied up. Never guess a different business.
-    Do not use apostrophes or quotation marks in names (write Joes Pizza, not Joe's Pizza).
-    """
-
     /// Words that suggest money moving between accounts rather than a purchase.
     private static let moneyMovementWords = [
         "PAYMENT", "TRANSFER", "XFER", "ZELLE", "VENMO", "PAYPAL", "CASH APP", "DEPOSIT", "ACH", "WIRE",
@@ -516,86 +478,6 @@ enum CategorySuggester {
         return moneyMovementWords.contains { d.contains($0) }
     }
 
-    /// - examples: places the person already categorized, so the model follows their habits.
-    static func suggest(_ items: [SuggestionInput], examples: [MerchantRule] = []) async -> [String: Suggestion] {
-        guard isAvailable, !items.isEmpty else { return [:] }
-        // Purchases can't be "Payments & Transfers" or "Income": the small on-device model reaches for
-        // those when unsure, so only offer them when the bank's text mentions a payment or transfer.
-        let (movement, purchases) = (items.filter { mightBeMoneyMovement($0.description) },
-                                     items.filter { !mightBeMoneyMovement($0.description) })
-        var out: [String: Suggestion] = [:]
-        let limit = 30.0 + 12.0 * Double(items.count)
-        if !purchases.isEmpty {
-            out.merge(await Timeout.run(limit) { await ask(purchases, examples: examples, purchasesOnly: true) } ?? [:]) { a, _ in a }
-        }
-        if !movement.isEmpty {
-            out.merge(await Timeout.run(limit) { await ask(movement, examples: examples, purchasesOnly: false) } ?? [:]) { a, _ in a }
-        }
-        // If a batch fails or skips some, try the stragglers one at a time.
-        if items.count > 1 {
-            for item in items where out[item.keyword] == nil {
-                out.merge(await suggest([item], examples: examples)) { a, _ in a }
-            }
-        }
-        return out
-    }
 
-    private static func ask(_ items: [SuggestionInput], examples: [MerchantRule], purchasesOnly: Bool) async -> [String: Suggestion] {
-        guard let schema = AISchemas.merchantGuesses(count: items.count, purchasesOnly: purchasesOnly) else { return [:] }
-        let list = items.enumerated().map { i, item in
-            let kind = item.averageAmount < 0 ? "refund or credit" : "spent"
-            return "\(i + 1). \(item.description) (\(kind) \(Money.format(abs(item.averageAmount))))"
-        }.joined(separator: "\n")
-        var prompt = list
-        // Your own categories: the model won't reach for them unless told they exist.
-        let own = Category.custom.map(\.rawValue)
-        let ownNote = own.isEmpty ? "" : "This person made their own categories: \(own.joined(separator: ", ")). "
-            + "Prefer one of them whenever a transaction fits it (for example anything for pets goes in a Pets category).\n\n"
-        if examples.isEmpty, !own.isEmpty { prompt = ownNote + "Transactions to sort:\n" + list }
-        if !examples.isEmpty {
-            let lines = examples.suffix(20).map { "\($0.name): \($0.category.rawValue)" }.joined(separator: "\n")
-            prompt = ownNote + "Places this person already sorted (follow the same habits):\n\(lines)\n\nTransactions to sort:\n\(list)"
-        }
-        var out: [String: Suggestion] = [:]
-        do {
-            let session = LanguageModelSession(instructions: instructions)
-            let response = try await session.respond(to: prompt, schema: schema,
-                                                     options: GenerationOptions(temperature: 0.2, maximumResponseTokens: 80 * items.count + 50))
-            for guess in try response.content.value([GeneratedContent].self, forProperty: "guesses") {
-                guard let number = try? guess.value(Int.self, forProperty: "number"), (1...items.count).contains(number),
-                      let categoryName = try? guess.value(String.self, forProperty: "category"),
-                      let category = matchCategory(categoryName) else { continue }
-                let item = items[number - 1]
-                let name = ((try? guess.value(String.self, forProperty: "name")) ?? "").trimmingCharacters(in: .whitespaces)
-                out[item.keyword] = Suggestion(name: honestName(name, for: item.description),
-                                               category: category, source: .appleIntelligence)
-            }
-        } catch {
-            if ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] != nil { print("DEBUG AI suggest error: \(error)") }
-        }
-        return out
-    }
 
-    /// Uses the model's tidier name only if it's really the same business: every letter of it must
-    /// appear, in order, in the bank's text. This stops "HUMM" becoming "Hummus" or "DICKSON'S" "Dixon's".
-    static func honestName(_ name: String, for description: String) -> String {
-        let fallback = KeywordExtractor.displayName(for: description)
-        // The model sometimes keeps the processor prefix ("SP Rancho Gordo").
-        let stripped = KeywordExtractor.stripPrefixes(name.uppercased())
-        let name = stripped.count < name.count ? String(name.suffix(stripped.count)) : name
-        let letters = { (s: String) in s.lowercased().filter { $0.isLetter || $0.isNumber } }
-        let n = letters(name), d = letters(description.replacingOccurrences(of: "&amp;", with: "&"))
-        guard n.count >= 3, d.contains(n) else { return fallback }
-        // "GDP Essen" or "Westside Market- 77": the model kept junk around the plain name, so use that.
-        let f = letters(fallback)
-        if n.count > f.count, n.contains(f) { return fallback }
-        return String(name.prefix(40))
-    }
-
-    private static func matchCategory(_ s: String) -> Category? {
-        let lower = s.lowercased()
-        return Category.pickable.first { $0.rawValue.lowercased() == lower }
-            ?? Category.pickable.first { lower.contains($0.rawValue.lowercased()) }
-            ?? Category.pickable.first { $0.rawValue.lowercased().contains(lower) && lower.count >= 4 }
-    }
 }

@@ -258,7 +258,7 @@ struct LossyDictionary<T: Decodable>: Decodable {
 
 /// Turns a bank's text into a stable "place" and, when it can, an instant category.
 /// Order of trust: well-known businesses, then the bank's own category, then generic words.
-/// Anything left over goes to Apple Intelligence (see `BudgetStore.sortRemaining`).
+/// Anything left over goes to the model (see `BudgetStore.sortRemaining`).
 enum MerchantResolver {
     /// - existingKeys: places already known, so "DICKSON'S FARMSTAND M" joins "DICKSON'S FARMSTAND".
     /// A statement line with what changes from one charge to the next (long runs of digits, reference

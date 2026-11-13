@@ -1,9 +1,8 @@
 import Foundation
 import PDFKit
-import FoundationModels
 
 /// Turns a bank/credit card PDF statement into the same table shape as a CSV.
-/// Pattern matching handles most statements; Apple's on-device model is the fallback.
+/// Pattern matching handles most statements; the cloud reader takes the rest.
 enum PDFStatement {
     enum PDFError: LocalizedError {
         case unreadable, locked, lockedAndSkipped, noTransactions
@@ -126,12 +125,6 @@ enum PDFStatement {
                                            + differ.prefix(8).joined(separator: "; ") + (differ.count > 8 ? "; and more" : ""))
                 }
             }
-        }
-        // Without the cloud, and only when pattern matching found nothing, try the on-device model.
-        if rows.isEmpty, !quiet, CategorySuggester.isAvailable {
-            // Slow (several seconds a page), so only read pages that look like they list transactions.
-            let candidates = pages.filter(looksLikeTransactions)
-            rows = await Timeout.run(60 + 45 * Double(candidates.count)) { await aiExtract(pages: candidates, closing: closing) } ?? []
         }
         // Whoever read it, a purchase paid with points is not a charge.
         rows = removePointsPaid(rows, text: positionalText ?? text)
@@ -733,15 +726,6 @@ enum PDFStatement {
         return out
     }
 
-    /// At least a few dated lines and some amounts: worth asking the AI to read.
-    static func looksLikeTransactions(_ page: String) -> Bool {
-        let dates = (try? NSRegularExpression(pattern: #"(?m)^\s*\d{1,2}/\d{1,2}"#))?
-            .numberOfMatches(in: page, range: NSRange(page.startIndex..., in: page)) ?? 0
-        let money = (try? NSRegularExpression(pattern: #"\d\.\d{2}\b"#))?
-            .numberOfMatches(in: page, range: NSRange(page.startIndex..., in: page)) ?? 0
-        return dates >= 3 && money >= 3
-    }
-
     private static func parseMoney(_ token: String) -> Double? {
         var t = token
         var credit = false
@@ -789,43 +773,5 @@ enum PDFStatement {
         return nil
     }
 
-    // MARK: AI fallback
 
-    private static func aiExtract(pages: [String], closing: Date) async -> [CanonicalRow] {
-        let year = Calendar.current.component(.year, from: closing)
-        var rows: [CanonicalRow] = []
-        for page in pages {
-            for chunk in chunks(of: page, size: 3000) {
-                let session = LanguageModelSession(instructions: """
-                You extract transactions from bank and credit card statement text.
-                For every transaction, output one line: MM/DD/YYYY | description | amount
-                Use a negative amount for payments, refunds, credits and deposits; positive for purchases, fees and withdrawals.
-                If a date has no year, the statement ends in \(year).
-                Skip totals, balances and summaries. If there are no transactions, output nothing.
-                """)
-                guard let reply = try? await session.respond(to: chunk, options: GenerationOptions(temperature: 0)) else { continue }
-                for line in reply.content.split(whereSeparator: \.isNewline) {
-                    let parts = line.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }
-                    guard parts.count == 3,
-                          let date = DateParsing.parse(parts[0], format: "MM/dd/yyyy"),
-                          let amount = MoneyParsing.parse(parts[2]),
-                          parts[1].filter(\.isLetter).count >= 3 else { continue }
-                    // Only keep what really appears in the statement text.
-                    guard chunk.localizedCaseInsensitiveContains(String(parts[1].prefix(8))) else { continue }
-                    rows.append(CanonicalRow(date: DateParsing.iso.string(from: date), description: parts[1], amount: amount))
-                }
-            }
-        }
-        return rows
-    }
-
-    private static func chunks(of text: String, size: Int) -> [String] {
-        var out: [String] = [], current = ""
-        for line in text.components(separatedBy: .newlines) {
-            if current.count + line.count > size, !current.isEmpty { out.append(current); current = "" }
-            current += line + "\n"
-        }
-        if !current.isEmpty { out.append(current) }
-        return out
-    }
 }

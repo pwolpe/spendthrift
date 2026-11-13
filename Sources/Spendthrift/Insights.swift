@@ -1,5 +1,4 @@
 import SwiftUI
-import FoundationModels
 
 // MARK: - Insights (all math done in code; the AI only writes prose)
 
@@ -259,14 +258,14 @@ enum RecapWriter {
         let fallback = fallbackText(month: month, total: total, previous: previous, awards: awards)
         let key = "\(month.key)|\(Int(total))|\(awards.map(\.winner).joined())|\(insights.count)"
         if let cached = cache[key] { return cached }
-        guard SystemLanguageModel.default.isAvailable || CloudAI.isEnabled else { return fallback }
+        guard CloudAI.isEnabled else { return fallback }
 
         var facts = ["Month: \(month.title)", "Total spent: \(Money.format(total, cents: false))"]
         if let previous, previous > 0 { facts.append("Previous month: \(Money.format(previous, cents: false))") }
         for a in awards.prefix(5) { facts.append("\(a.title): \(a.winner) (\(a.value))") }
         if !insights.isEmpty { facts.append("Notable: " + insights.prefix(3).map(\.title).joined(separator: "; ")) }
 
-        // Same check for either model: every number in the text must be one we supplied.
+        // Every number in the text must be one we supplied.
         func numbersAreReal(_ text: String) -> Bool {
             let digits = CharacterSet(charactersIn: "0123456789,").inverted
             let allowed = Set(facts.joined(separator: " ").components(separatedBy: digits).filter { $0.count >= 2 })
@@ -278,12 +277,7 @@ enum RecapWriter {
             Deadpan and warm, a little wry, specific, never scolding and never gushing. No awards or theater language. No lists, no quotes, no exclamation marks.
             """
         let prompt = facts.joined(separator: "\n")
-        // The cloud model when there is one, Apple's on the Mac otherwise; the same brief and the same check for both.
-        var written = await CloudWriter.line(system: voice, facts: prompt, maxTokens: 3_000, temperature: 0.8)
-        if written == nil, SystemLanguageModel.default.isAvailable {
-            let session = LanguageModelSession(instructions: voice)
-            written = await Timeout.run(45) { try? await session.respond(to: prompt, options: GenerationOptions(temperature: 0.7)).content }
-        }
+        let written = await CloudWriter.line(system: voice, facts: prompt, maxTokens: 3_000, temperature: 0.8)
         guard let text = written?.trimmingCharacters(in: .whitespacesAndNewlines), numbersAreReal(text) else { return fallback }
         cache[key] = text
         return text

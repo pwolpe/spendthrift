@@ -27,7 +27,8 @@ struct WelcomeView: View {
 
             KeyEntry()
 
-            dropZone
+            // The app runs on the models, so the key comes first.
+            if CloudAI.hasKeyOrIsTest { dropZone }
 
             DownloadsBanner()
                 .frame(maxWidth: 560)
@@ -41,11 +42,9 @@ struct WelcomeView: View {
 
             // What a careful person wants to know before dropping a bank statement anywhere.
             VStack(spacing: 6) {
-                Label(CloudAI.isEnabled ? "Your files stay on this Mac." : "Everything stays on this Mac.", systemImage: "lock.fill")
+                Label("Your files stay on this Mac.", systemImage: "lock.fill")
                     .font(.callout.weight(.semibold))
-                Text(CloudAI.isEnabled
-                     ? "Smarter AI is on: to read, sort and answer questions, the text of your statements (names and account numbers blanked out) and your charges go to the AI model you chose. You can turn it off in Settings."
-                     : "Nothing is sent anywhere. For sharper sorting, trips, and pictures of your own spending, you can turn on Smarter AI in Settings later.")
+                Text("As little as possible leaves it: a payee's text and typical amount to sort it, a statement's text with your name, address and account numbers blanked when the app can't read it alone, and the questions you ask. Your name, address, account numbers and saved data file are never sent.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

@@ -1190,7 +1190,7 @@ enum SelfTest {
             edited.name = "Dog"
             store.saveCategory(edited)
             check("rename keeps its charges", store.transactions.filter { $0.category == Category("Dog") }.count == samePlace && !Category.allCases.contains(pets))
-            check("AI schema offers it", Category.spendingCases.map(\.rawValue).contains("Dog") && AISchemas.merchantGuesses(count: 1, purchasesOnly: true) != nil)
+            check("it is offered for sorting", Category.spendingCases.map(\.rawValue).contains("Dog"))
             if let dog = store.customCategories.first(where: { $0.name == "Dog" }) { store.deleteCategory(dog) }
             check("delete moves charges to Other", store.transactions.filter { $0.merchantKey == t.merchantKey && $0.category == .other }.count == samePlace
                   && Category.custom.count == customBefore - 1)
@@ -1205,8 +1205,11 @@ enum SelfTest {
 
         if let account = store.accounts.first {
             let spent = store.spent(in: account)
+            // (Of the sorted charges: an unsorted deposit is not spending either way up, so those are left out.)
+            let sorted = { store.transactions.filter { $0.accountID == account.id && !$0.isUnknown && $0.category.isSpending }.reduce(0) { $0 + $1.amount } }
+            let sortedBefore = sorted()
             store.flipAmounts(account.id)
-            check("flip swaps signs", abs(store.spent(in: account) + spent) < 0.01 || spent == 0)
+            check("flip swaps signs", abs(sorted() + sortedBefore) < 0.01)
             store.flipAmounts(account.id)
             check("flip twice restores", abs(store.spent(in: account) - spent) < 0.01)
             let n = store.transactionCount(for: account)

@@ -1,7 +1,5 @@
 import SwiftUI
 import AppKit
-import ImagePlayground
-import FoundationModels
 
 /// The banner across the top of the Overview: a cartoon of Tony, Paul or both living out a daydream
 /// about something really bought, one of them holding the receipt with the real place and total. There is never a wait. What shows on opening is already on disk:
@@ -18,8 +16,8 @@ final class DailyPicture {
 
     let headshot: NSImage? = DailyPicture.photo.flatMap(NSImage.init(data:))
 
-    /// Cartoon Tony: baked in at build time, or made on first launch.
-    private(set) var cartoon: NSImage? = Bundle.main.url(forResource: "tony-cartoon", withExtension: "png").flatMap(NSImage.init(contentsOf:))
+    /// Cartoon Tony, shipped with the app.
+    let cartoon: NSImage? = Bundle.main.url(forResource: "tony-cartoon", withExtension: "png").flatMap(NSImage.init(contentsOf:))
     /// The portrait used wherever Tony's face appears small: drawn from his photo in the same
     /// style as the app's default pictures, so the sidebar, the icon and the banner are one person.
     private let portrait: NSImage? = {
@@ -38,26 +36,6 @@ final class DailyPicture {
         let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
         avatarCache = (ObjectIdentifier(source), image)
         return image
-    }
-
-    private var cartoonFile: URL { folder.appendingPathComponent("cartoon-tony.png") }
-    private var triedCartoon = false
-
-    /// If the build couldn't bake in a cartoon, make one here and update the Dock icon.
-    func ensureCartoon() async {
-        guard !triedCartoon else { return }
-        triedCartoon = true
-        if cartoon == nil, let cached = NSImage(contentsOf: cartoonFile) {
-            cartoon = cached
-        } else if cartoon == nil, let photo = headshot, let made = await CartoonMaker.cartoon(from: photo) {
-            cartoon = made
-            try? IconRenderer.png(made)?.write(to: cartoonFile)
-        } else {
-            return // bundled cartoon already in the icon
-        }
-        if Bundle.main.url(forResource: "tony-cartoon", withExtension: "png") == nil, let cartoon {
-            NSApp.applicationIconImage = IconRenderer.icon(face: cartoon, isCartoon: true)
-        }
     }
 
     private let folder: URL = {

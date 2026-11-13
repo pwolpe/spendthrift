@@ -302,7 +302,7 @@ extension BudgetStore {
         }
         library.customCategories = list
         CustomCategories.set(list)
-        aiAttempted.removeAll()   // the AI may now have a better home for unsorted places
+        cloudAttempted.removeAll()   // the model may now have a better home for unsorted places
         withAnimation(.snappy) { changed() }
         return Category(c.name)
     }

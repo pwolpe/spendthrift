@@ -40,7 +40,7 @@ struct StoriesView: View {
                 if store.isFindingStories {
                     EmptyState(title: "Reading between the lines…", message: "I'm looking through your spending for trips and events. This takes a minute the first time.", art: "nothing")
                 } else if !CloudAI.isEnabled {
-                    EmptyState(title: "This one needs Smarter AI", message: "With a key entered in Settings, I can spot trips and events in your spending and tell you what each one cost.", art: "notrips")
+                    EmptyState(title: "This one needs your key", message: "With an OpenRouter key entered in Settings, I can spot trips and events in your spending and tell you what each one cost.", art: "notrips")
                 } else {
                     EmptyState(title: "No trips yet", message: "When your statements show a trip or a big event, it will appear here with what it cost.", art: "notrips")
                 }

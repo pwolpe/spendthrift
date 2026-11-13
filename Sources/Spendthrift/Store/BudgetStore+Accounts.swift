@@ -67,7 +67,8 @@ extension BudgetStore {
     /// Looks for new statements in Downloads, off the main thread (the first look may wait
     /// on macOS's "allow access to Downloads?" prompt, and reading files takes a moment).
     func refreshDownloads() {
-        guard ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] == nil else { return }
+        guard ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] == nil,
+              ProcessInfo.processInfo.environment["SPENDTHRIFT_HOME"] == nil else { return }
         let known = library.importedHashes.union(library.dismissedDownloads)
         let memory = paths.root.appendingPathComponent("downloads-seen.json")
         Task.detached(priority: .utility) {
@@ -95,7 +96,9 @@ extension BudgetStore {
     /// Watches the Downloads folder while the app is open, so a statement saved from the bank's
     /// website shows up in the app a few seconds later without anyone doing anything.
     func watchDownloads() {
+        // (Never into a scratch data folder: a test or a demo must not pull in real statements.)
         guard downloadsWatcher == nil, ProcessInfo.processInfo.environment["SPENDTHRIFT_SNAPSHOT"] == nil,
+              ProcessInfo.processInfo.environment["SPENDTHRIFT_HOME"] == nil,
               let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }
         let descriptor = open(folder.path, O_EVTONLY)
         guard descriptor >= 0 else { return }

@@ -22,9 +22,6 @@ struct SpendthriftApp: App {
             CommandGroup(replacing: .appInfo) {
                 Button("About Spendthrift") { BudgetStore.shared.showsStory = true }
             }
-            CommandGroup(after: .appInfo) {
-                Button("Check for Updates…") { Updater.shared.checkFromMenu() }
-            }
             CommandGroup(replacing: .help) {
                 Button("Show My Data in Finder") { NSWorkspace.shared.activateFileViewerSelecting([BudgetStore.shared.paths.libraryFile]) }
                 Button("Save a Backup to the Desktop") { BudgetStore.shared.backUpToDesktop() }

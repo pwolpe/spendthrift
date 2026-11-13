@@ -270,7 +270,7 @@ struct CloudTroubleBanner: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "wand.and.stars.inverse").font(.title3).foregroundStyle(Theme.caution)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Smarter AI has paused").font(.callout.weight(.semibold))
+                    Text("The AI has paused").font(.callout.weight(.semibold))
                     Text("\(reason) Everything already read is safe. Payees it couldn't sort are waiting in Double-Check, and the rest picks up where it left off.")
                         .font(.callout)
                         .foregroundStyle(.secondary)

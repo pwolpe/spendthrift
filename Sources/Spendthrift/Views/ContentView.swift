@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var isDropTargeted = false
     @State private var decidedAboutAsk = false
     @State private var width: CGFloat = 0
+    @Environment(\.openSettings) private var openSettings
     private var boot: Boot { .shared }
     /// Only ever read once `boot.ready` is true: naming it makes it.
     private var store: BudgetStore { .shared }
@@ -154,6 +155,12 @@ struct ContentView: View {
         .sheet(isPresented: Binding(get: { store.showsStory }, set: { store.showsStory = $0 })) {
             StoryView().tint(Theme.accent)
         }
+        .alert("First, an OpenRouter key", isPresented: Binding(get: { store.needsKey }, set: { store.needsKey = $0 })) {
+            Button("Open Settings") { store.needsKey = false; openSettings() }
+            Button("Not Now", role: .cancel) { store.needsKey = false }
+        } message: {
+            Text("Spendthrift reads, sorts and draws with AI models reached through your own OpenRouter key. Paste one in Settings, then add your statements.")
+        }
         .alert("A heads-up about your data", isPresented: Binding(get: { store.startupNotice != nil }, set: { if !$0 { store.startupNotice = nil } })) {
             Button("OK") { store.startupNotice = nil }
         } message: {
@@ -163,14 +170,9 @@ struct ContentView: View {
             ImportIssuesSheet(issues: store.importIssues)
                 .tint(Theme.accent)
         }
-        .sheet(isPresented: Binding(get: { Updater.shared.isPresented }, set: { Updater.shared.isPresented = $0 })) {
-            UpdateSheet().tint(Theme.accent)
-        }
         .task {
-            Updater.shared.start()
             store.watchDownloads()
             DebugHooks.startIfRequested()
-            await DailyPicture.shared.ensureCartoon()
             TonyArt.shared.prepare()
             store.recapIfNewMonth()
             await store.catchUp()
@@ -270,14 +272,6 @@ struct SidebarView: View {
                         Text(status).font(.callout).foregroundStyle(.secondary)
                     }
                     .transition(.opacity)
-                }
-                if let release = Updater.shared.available {
-                    Button { Updater.shared.isPresented = true } label: {
-                        Label("Version \(release.version) is ready", systemImage: "arrow.down.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
                 }
                 Button {
                     store.presentOpenPanel()

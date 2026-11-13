@@ -2,10 +2,7 @@ import PDFKit
 import SwiftUI
 import AppKit
 
-/// Normal launches open the app. The build script also runs
-/// `open -W "Spendthrift.app" --args --make-icon <out.png> --cartoon <cartoon.png>`
-/// to bake cartoon Tony into the icon. Image Playground only works in a foreground app,
-/// so this mode shows a small window while it works.
+/// Normal launches open the app. A few flags run a test aid and exit instead.
 @main
 enum Entry {
     static func main() {
@@ -131,38 +128,6 @@ enum Entry {
             }
             dispatchMain()
         }
-        guard let i = args.firstIndex(of: "--make-icon"), i + 1 < args.count else {
-            SpendthriftApp.main()
-            return
-        }
-        let iconOut = URL(fileURLWithPath: args[i + 1])
-        let cartoonOut = args.firstIndex(of: "--cartoon").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1]) : nil }
-
-        let app = NSApplication.shared
-        app.setActivationPolicy(.regular)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 110),
-                              styleMask: [.titled], backing: .buffered, defer: false)
-        window.title = "Spendthrift"
-        window.contentView = NSHostingView(rootView:
-            HStack(spacing: 14) {
-                ProgressView()
-                Text("Drawing the app icon…").font(.headline)
-            }.frame(width: 360, height: 110))
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        app.activate()
-
-        Task { @MainActor in
-            var cartoon = cartoonOut.flatMap { NSImage(contentsOf: $0) }
-            if cartoon == nil, let photo = DailyPicture.shared.headshot {
-                cartoon = await CartoonMaker.cartoon(from: photo)
-                if let cartoon, let cartoonOut { try? IconRenderer.png(cartoon)?.write(to: cartoonOut) }
-            }
-            let face = cartoon ?? DailyPicture.shared.headshot
-            let data = IconRenderer.png(IconRenderer.icon(face: face, isCartoon: cartoon != nil))
-            try? data?.write(to: iconOut)
-            exit(data == nil ? 1 : 0)
-        }
-        app.run()
+        SpendthriftApp.main()
     }
 }

@@ -329,7 +329,7 @@ struct SpendCard: View {
             Card {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline) {
-                        SectionHeader(title: "What Smarter AI cost", subtitle: "Each request to Smarter AI, as OpenRouter priced it, added up by job.")
+                        SectionHeader(title: "What the AI cost", subtitle: "Each request to a model, as OpenRouter priced it, added up by job.")
                         Spacer()
                         Picker("When", selection: $span) {
                             Text("Today").tag(1); Text("7 Days").tag(7); Text("30 Days").tag(30)
@@ -337,7 +337,7 @@ struct SpendCard: View {
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
                     }
                     if lines.isEmpty {
-                        Text("Nothing was asked of Smarter AI in this stretch.").font(.callout).foregroundStyle(.secondary)
+                        Text("Nothing was asked of a model in this stretch.").font(.callout).foregroundStyle(.secondary)
                     } else {
                         VStack(spacing: 7) {
                             ForEach(lines) { line in

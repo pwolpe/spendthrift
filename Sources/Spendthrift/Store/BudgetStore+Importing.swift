@@ -24,12 +24,10 @@ extension BudgetStore {
         Task { await importFilesAsync(urls) }
     }
 
-    /// Called when the app comes to the front: Apple Intelligence may have become available since.
+    /// Called when the app comes to the front: the model may be reachable again.
     func retrySorting() {
-        let unsorted = library.merchants.values.contains { $0.category == nil }
         let forCloud = CloudAI.isEnabled && library.merchants.values.contains { !$0.confirmed && [.ai, .bank, .generic].contains($0.source) }
-        guard !isSuggesting, (aiAvailable && unsorted) || forCloud else { return }
-        aiAttempted.removeAll()
+        guard !isSuggesting, forCloud else { return }
         cloudAttempted.removeAll()
         Task { await sortRemaining() }
     }
@@ -133,6 +131,8 @@ extension BudgetStore {
     /// - automatic: the app found these in Downloads by itself. Nothing may interrupt the person then:
     ///   no password prompt, no column picker, no error sheet. Anything that needs him waits in the banner.
     func importFilesAsync(_ dropped: [URL], automatic: Bool = false) async {
+        // The app runs on the models: no statement is taken until there is a key to reach them with.
+        guard CloudAI.hasKeyOrIsTest else { if !automatic { needsKey = true }; return }
         let (urls, fromFolder, orderFiles, unpacked) = Self.expand(dropped)
         defer { Self.removeUnpacked(unpacked, keepingThoseUsedBy: pendingImports) }
         if !orderFiles.isEmpty {

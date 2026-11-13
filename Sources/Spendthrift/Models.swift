@@ -428,7 +428,7 @@ struct MerchantRule: Hashable {
 }
 
 struct Suggestion: Hashable {
-    enum Source: Hashable { case knownMerchant, bank, appleIntelligence }
+    enum Source: Hashable { case knownMerchant, bank }
     var name: String
     var category: Category
     var source: Source

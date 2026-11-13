@@ -1,6 +1,5 @@
 import SwiftUI
 import Charts
-import FoundationModels
 
 // MARK: - Understanding the question (AI) → computing the answer (code)
 
@@ -17,21 +16,10 @@ struct SpendingQuery: Hashable {
 enum QueryParser {
     static func parse(_ question: String, months: [Month]) async -> SpendingQuery {
         let first = months.first ?? Month(date: .now), last = months.last ?? Month(date: .now)
-        // With a cloud key, the powerful model understands the whole question, dates included.
+        // The model understands the whole question, dates included.
         if let cloud = await CloudWriter.query(question, first: first, last: last) { return cloud }
         var query = keywordParse(question, first: first, last: last)
-        if SystemLanguageModel.default.isAvailable, let ai = await Timeout.run(25, { await aiParse(question, first: first, last: last) }) {
-            query.metric = ai.metric
-            query.place = ai.place ?? query.place
-            if let place = query.place {
-                // Re-check categories with the store name removed ("Whole Foods" isn't "food").
-                let rest = question.lowercased().replacingOccurrences(of: place.lowercased(), with: " ")
-                query.category = keywordParse(rest, first: first, last: last).category
-            }
-            // Only filter by category when the question names one (or no store was named).
-            if query.category == nil, query.place == nil { query.category = ai.category }
-        }
-        // Dates are worked out in code: the on-device model isn't reliable with calendars.
+        // Without the model: keywords for what is asked, and dates worked out in code.
         let range = timeRange(question.lowercased(), first: first, last: last)
         query.from = max(range.0, first)
         query.to = min(range.1, last)
@@ -76,35 +64,7 @@ enum QueryParser {
         ("paycheck", .income), ("home", .home), ("haircut", .personal),
     ]
 
-    private static func aiParse(_ question: String, first: Month, last: Month) async -> SpendingQuery? {
-        let today = Date.now.formatted(.dateTime.year().month(.wide).day())
-        let now = Month(date: .now)
-        let session = LanguageModelSession(instructions: """
-        You turn a question about personal spending into a query.
-        Metrics: total (how much), list (show or what did I buy), top_places, top_categories, count (how many times),
-        monthly_average, subscriptions (recurring charges).
-        Today is \(today). Data covers \(first.key) to \(last.key). If no time is mentioned, use \(first.key) to \(last.key).
-        "Last month" means \(now.adding(-1).key). "This month" means \(now.key). "This year" means \(now.year)-01 to \(last.key).
-        A month name alone means that month in the most recent year it occurred.
-        Coffee, restaurants and takeout are Dining. Gas, Uber and parking are Car & Transportation.
-        Use "any" for category when a specific store is named.
-        """)
-        guard let schema = AISchemas.spendingQuery,
-              let reply = try? await session.respond(to: question, schema: schema,
-                                                     options: GenerationOptions(temperature: 0, maximumResponseTokens: 120)) else { return nil }
-        let g = reply.content
-        func field(_ name: String) -> String { ((try? g.value(String.self, forProperty: name)) ?? "").trimmingCharacters(in: .whitespaces) }
-        guard let metric = SpendingQuery.Metric(rawValue: field("metric").lowercased()) else { return nil }
-        let category = Category.pickable.first { $0.rawValue.caseInsensitiveCompare(field("category")) == .orderedSame }
-        let placeText = field("place")
-        let place = placeText.lowercased() == "any" || placeText.isEmpty ? nil : placeText
-        var from = Month(key: field("from")) ?? first
-        var to = Month(key: field("to")) ?? last
-        if from > to { swap(&from, &to) }
-        return SpendingQuery(metric: metric, category: category, place: place, from: max(from, first), to: min(to, last))
-    }
-
-    /// Works without Apple Intelligence: categories, a few time phrases, simple intents.
+    /// Works without the model: categories, a few time phrases, simple intents.
     static func keywordParse(_ question: String, first: Month, last: Month) -> SpendingQuery {
         let q = question.lowercased()
         var query = SpendingQuery(from: first, to: last)

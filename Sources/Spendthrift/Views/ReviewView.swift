@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Everything is sorted automatically. This screen is the optional glance over the guesses
-/// Apple Intelligence made, biggest first: one click to agree, or pick something else.
+/// the model made, biggest first: one click to agree, or pick something else.
 struct ReviewView: View {
     @Environment(BudgetStore.self) private var store
     /// False when rendered for a test snapshot (ImageRenderer can't draw scroll views).
@@ -31,14 +31,6 @@ struct ReviewView: View {
                 }
             } else {
                 header
-                // Only worth saying when the on-device model is what the app is relying on.
-                if !CloudAI.isEnabled, let reason = CategorySuggester.unavailableReason, store.reviewItems.contains(where: { $0.info.category == nil }) {
-                    Label(reason, systemImage: "apple.intelligence")
-                        .font(.callout)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Theme.caution.opacity(0.12), in: .rect(cornerRadius: 12, style: .continuous))
-                }
                 LazyVStack(spacing: 10) {
                     ForEach(store.reviewItems) { item in
                         ReviewRow(item: item)
@@ -62,7 +54,7 @@ struct ReviewView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if store.isSuggesting {
-                    Label("Still sorting a few more…", systemImage: CloudAI.isEnabled ? "sparkles" : "apple.intelligence")
+                    Label("Still sorting a few more…", systemImage: "sparkles")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .symbolEffect(.pulse)
@@ -229,7 +221,7 @@ private struct ReviewRow: View {
             .background(Color.primary.opacity(0.04), in: .rect(cornerRadius: 9, style: .continuous))
             if failed {
                 Text(CloudAI.isEnabled ? "I couldn't work that out. I saved your note; choose a category from the menu above."
-                                       : "I saved your note. Without Smarter AI, choose the category from the menu above.")
+                                       : "I saved your note. The AI can't be reached, so choose the category from the menu above.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

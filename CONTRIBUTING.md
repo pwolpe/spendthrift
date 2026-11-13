@@ -8,8 +8,9 @@ keeps, and how to check your work.
 1. **Every number is computed in code.** A model may read what someone meant, or write a sentence
    around figures it is handed. It never adds, rounds or estimates. Text from a model that contains
    a dollar amount the app did not supply is thrown away (`ChatAnalyst.dollarAmounts`).
-2. **Works without a key.** Anything a model writes has a plain fallback built from the same figures,
-   so the page is complete offline.
+2. **Complete when the models are out of reach.** The app needs an OpenRouter key before it takes a
+   statement, but anything a model writes has a plain fallback built from the same figures, so a page
+   is never left with a hole in it. The self-test runs offline for the same reason.
 3. **One way back.** A link inside a page goes through `store.navigate`, `store.go(to:)`,
    `store.stepInto`, `store.showPlace` or `store.showCharges` (Store/BudgetStore+Navigation.swift).
    Only the sidebar and the menus set `store.selection` directly.

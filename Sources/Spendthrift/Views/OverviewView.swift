@@ -500,9 +500,7 @@ struct OverviewView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Everything is sorted. \(n) \(n == 1 ? "guess is" : "guesses are") worth a glance.")
                         .font(.headline)
-                    // Say who did the sorting: the cloud model when a key is in, Apple's on-device model otherwise.
-                    Text(CloudAI.isEnabled ? "The AI sorted every payee, and flagged \(n == 1 ? "the one" : "the ones") it wasn't sure about."
-                                           : "Apple Intelligence sorted \(n == 1 ? "a payee" : "some payees") it hadn't seen before.")
+                    Text("The AI sorted every payee, and flagged \(n == 1 ? "the one" : "the ones") it wasn't sure about.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

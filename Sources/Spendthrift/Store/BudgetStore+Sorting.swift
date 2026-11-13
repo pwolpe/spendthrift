@@ -6,10 +6,8 @@ import UniformTypeIdentifiers
 
 /// Giving every payee a name and a category: the models that sort, the lookups that help, and the logos.
 extension BudgetStore {
-    // MARK: - Sorting with Apple Intelligence
+    // MARK: - Tying card payments to statements
 
-    /// Places the instant rules couldn't sort go to the on-device model, a few at a time.
-    /// Results are applied automatically; Double-Check lets the person glance over them later.
     /// Ties every card payment that left a bank account to that card's statements.
     ///
     /// A payment is accounted for when the card's own statement shows it arriving (the same amount
@@ -155,40 +153,12 @@ extension BudgetStore {
             Task { await learnFactsIfNeeded() }
             announceNewFindings()
         }
-        // With a cloud key, the powerful model decides everything the built-in list doesn't know.
+        // The model decides everything the built-in list doesn't know.
         if CloudAI.isEnabled { await sortWithCloud(); await lookUpGuesses() }
-        guard aiAvailable else { return }
-        while true {
-            let used = Dictionary(grouping: library.entries, by: \.merchantKey)
-            let waiting = library.merchants
-                .filter { $0.value.category == nil && !aiAttempted.contains($0.key) && used[$0.key] != nil }
-                .map { key, info -> (SuggestionInput, Double) in
-                    let entries = used[key] ?? []
-                    let total = entries.reduce(0) { $0 + $1.amount }
-                    return (SuggestionInput(keyword: key, description: info.sample, averageAmount: total / Double(max(entries.count, 1))), abs(total))
-                }
-                .sorted { $0.1 > $1.1 }   // biggest first, so the totals settle quickly
-                .map(\.0)
-            guard !waiting.isEmpty else { break }
-            // The person's own choices teach the model their habits.
-            let examples = library.merchants.values
-                .filter { $0.confirmed && $0.category != nil }
-                .map { MerchantRule(name: $0.name, category: $0.category!) }
-            for batch in waiting.chunked(into: 8) {
-                aiAttempted.formUnion(batch.map(\.keyword))
-                let results = await CategorySuggester.suggest(batch, examples: examples)
-                for (key, suggestion) in results where library.merchants[key]?.category == nil {
-                    library.merchants[key]?.category = suggestion.category
-                    library.merchants[key]?.name = suggestion.name
-                    library.merchants[key]?.source = .ai
-                }
-                if !results.isEmpty { withAnimation(.snappy) { changed() } }
-            }
-        }
     }
 
     /// The cloud model reviews every place that isn't the person's own choice or a business the app knows
-    /// for certain: unsorted places, on-device guesses, the bank's broad categories and word matches.
+    /// for certain: unsorted places, the bank's broad categories and word matches.
     /// What it's sure of is simply filed; only what it calls a guess goes to Double-Check.
     /// A first, instant pass over a large batch of new payees. A decision model answers "which
     /// category?" for each in a few hundredths of a second; where it is at least nine parts in ten

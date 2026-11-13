@@ -150,7 +150,7 @@ enum CloudSorter {
         return text
     }
 
-    /// Nil when the cloud couldn't be used (the caller falls back to on-device sorting).
+    /// Nil when the cloud couldn't be used (the payees wait, unsorted, for the next try).
     static func sort(_ items: [CloudItem], examples: [MerchantRule]) async -> [String: CloudVerdict]? {
         guard !items.isEmpty else { return [:] }
         let payload: [[String: Any]] = items.enumerated().map { i, item in

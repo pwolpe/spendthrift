@@ -122,14 +122,14 @@ final class BudgetStore {
     var pendingImports: [PendingImport] = []
     /// Something the person must be told at launch (e.g. data restored from a backup).
     var startupNotice: String?
+    /// A statement was offered before an OpenRouter key was entered.
+    var needsKey = false
     /// Non-nil while the "New Category" sheet is up.
     var categoryEditor: CategoryEditorRequest?
     var toast: Toast?
     var isSuggesting = false
     var isImporting = false
     var downloadCandidates: [URL] = []
-    /// Checked each time: Apple Intelligence can be switched on (or finish downloading) while the app is open.
-    var aiAvailable: Bool { CategorySuggester.isAvailable }
     /// Files from the last import that couldn't be added.
     var importIssues: [ImportIssue] = []
     /// "Reading 5 of 18" while several statements are being read.
@@ -138,7 +138,6 @@ final class BudgetStore {
     @ObservationIgnored var saveTask: Task<Void, Never>?
     @ObservationIgnored private var saveFailureShown = false
     @ObservationIgnored private var toastTask: Task<Void, Never>?
-    @ObservationIgnored var aiAttempted: Set<String> = []
     @ObservationIgnored var cloudAttempted: Set<String> = []
     @ObservationIgnored var autoAttempted: Set<URL> = []
     @ObservationIgnored var downloadsWatcher: DispatchSourceFileSystemObject?

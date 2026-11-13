@@ -444,7 +444,7 @@ struct PremiereCard: View {
     }
 }
 
-/// On the welcome screen: the one optional step that turns the magic on.
+/// On the welcome screen: the one step that turns the magic on.
 struct KeyEntry: View {
     private var store: BudgetStore { .shared }
     @State private var status = CloudStatus.shared
@@ -477,8 +477,6 @@ struct KeyEntry: View {
                         Link("Get a key at openrouter.ai (one minute)", destination: url).font(.callout)
                     }
                     if testing { ProgressView().controlSize(.small) }
-                    Spacer()
-                    Text("Or skip this: the basics work without it.").font(.caption).foregroundStyle(.tertiary)
                 }
                 if let problem {
                     Label(problem, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(Theme.caution)
