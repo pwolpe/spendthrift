@@ -134,3 +134,5 @@ statement will be read.
 
 The two cartoon friends in the pictures are Tony and Paul, who made the app. Their photos in
 `Resources/` are the only personal thing in the repository.
+
+MIT licensed: see `LICENSE`.
