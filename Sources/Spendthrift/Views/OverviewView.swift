@@ -315,6 +315,19 @@ struct OverviewView: View {
                 .font(.callout.weight(.medium))
                 .foregroundStyle(diff <= 0 ? Theme.good : Theme.caution)
             }
+            // Refunds are taken off the figure above; say so, or a month with a big one just looks cheap.
+            let refunds = store.refunds(in: m)
+            if !refunds.isEmpty {
+                let back = -refunds.reduce(0) { $0 + $1.amount }
+                let from = Dictionary(grouping: refunds, by: \.merchant).map { (name: $0.key, back: -$0.value.reduce(0) { $0 + $1.amount }) }
+                    .sorted { ($0.back, $0.name) > ($1.back, $1.name) }
+                let names = from.prefix(2).map(\.name).joined(separator: ", ") + (from.count > 2 ? " and \(from.count - 2) more" : "")
+                LinkText(text: "\(Money.format(total + back, cents: false)) charged, less \(Money.format(back, cents: false)) refunded (\(names))",
+                         help: "See the refunds and credits that came back in \(m.name)") {
+                    store.showCharges(TransactionFilter(ids: Set(refunds.map(\.id)), title: "Refunds in \(m.title)"))
+                }
+                .font(.callout)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

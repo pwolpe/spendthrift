@@ -824,6 +824,8 @@ struct MonthBars: View {
     struct Bar: Identifiable {
         let month: Month
         let total: Double
+        /// Money that came back that month (refunds), drawn below the line.
+        var back: Double = 0
         var id: Month { month }
     }
     let bars: [Bar]
@@ -840,6 +842,12 @@ struct MonthBars: View {
                 .foregroundStyle(Theme.accent.gradient)
                 .cornerRadius(compact ? 3 : 4)
                 .opacity(hovered == nil || hovered == bar.month ? 1 : 0.55)
+            if bar.back > 0.005 {
+                BarMark(x: .value("Month", bar.month.firstDay, unit: .month), y: .value("Total", -bar.back))
+                    .foregroundStyle(Theme.good.gradient)
+                    .cornerRadius(compact ? 3 : 4)
+                    .opacity(hovered == nil || hovered == bar.month ? 1 : 0.55)
+            }
         }
         .chartXAxis {
             if compact {

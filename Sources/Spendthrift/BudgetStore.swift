@@ -428,6 +428,12 @@ final class BudgetStore {
         spending(in: month).reduce(0) { $0 + $1.amount }
     }
 
+    /// What came back in a month from places money is spent: refunds and credits, newest first. They
+    /// are already taken off `totalSpent`; this is so a page can say that they were, and show them.
+    func refunds(in month: Month) -> [Transaction] {
+        spending(in: month).filter { $0.amount < 0 }.sorted { $0.date > $1.date }
+    }
+
     func categoryTotals(in month: Month) -> [(category: Category, total: Double)] {
         Dictionary(grouping: spending(in: month), by: \.category)
             .map { ($0.key, $0.value.reduce(0) { $0 + $1.amount }) }

@@ -488,12 +488,15 @@ enum DebugHooks {
         await snap("04-overview-spending-year", outDir) { OverviewView(scrolls: false) }
         store.overviewDetail = nil
         store.overviewShowsYear = false
+        // SPENDTHRIFT_MONTH=2026-09 picks the month; otherwise the latest.
+        if let month = env["SPENDTHRIFT_MONTH"].flatMap({ Month(isoDay: $0 + "-01") }) { store.overviewMonth = month }
         await snap("04-overview-month", outDir) { OverviewView(scrolls: false) }
         for detail in [BudgetStore.OverviewDetail.spending, .income, .investing, .flow, .recurring, .budgets] {
             store.overviewDetail = detail
             await snap("04-overview-\(detail.rawValue)", outDir) { OverviewView(scrolls: false) }
         }
         store.overviewDetail = nil
+        store.overviewMonth = nil
         store.overviewShowsYear = true
         // SPENDTHRIFT_YEAR=2023 picks the year; any other value shows the latest.
         if let year = env["SPENDTHRIFT_YEAR"].flatMap(Int.init) { store.overviewPeriod = .year(year) }

@@ -205,12 +205,24 @@ struct PlaceView: View {
         let received = total < 0
         let first = all.last!.date, last = all.first!.date
         let thisYear = all.filter { Calendar.current.isDate($0.date, equalTo: last, toGranularity: .year) }.reduce(0) { $0 + $1.amount }
+        // Somewhere money is spent that has also given some back: the total is what was kept, and says
+        // so; a refund is not a visit, and does not pull down what a visit usually costs.
+        let bought = all.filter { $0.amount > 0 }
+        let charged = bought.reduce(0) { $0 + $1.amount }, back = charged - total
+        let refunded = !received && back > 0.005
+        let visits = refunded ? bought.count : all.count
+        let year = Calendar.current.component(.year, from: last).formatted(.number.grouping(.never))
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 14)], spacing: 14) {
-            tile(received ? "Received, all time" : "Spent, all time", Money.format(abs(total), cents: false),
-                 "\(first.formatted(.dateTime.month(.abbreviated).year())) – \(last.formatted(.dateTime.month(.abbreviated).year()))")
-            tile(all.count == 1 ? "Visit" : "Visits", "\(all.count)", all.count > 1 ? "last on \(last.formatted(.dateTime.month(.abbreviated).day().year()))" : last.formatted(.dateTime.month(.wide).day().year()))
-            tile("Typical", Money.format(abs(total) / Double(all.count)), "a visit")
-            tile("In \(Calendar.current.component(.year, from: last).formatted(.number.grouping(.never)))", Money.format(abs(thisYear), cents: false), "so far")
+            tile(received ? "Received, all time" : refunded ? "Spent, after refunds" : "Spent, all time", Money.format(abs(total), cents: false),
+                 refunded ? "\(Money.format(back, cents: false)) refunded of \(Money.format(charged, cents: false))"
+                          : "\(first.formatted(.dateTime.month(.abbreviated).year())) – \(last.formatted(.dateTime.month(.abbreviated).year()))")
+            tile(visits == 1 ? "Visit" : "Visits", "\(visits)", visits > 1 ? "last on \(last.formatted(.dateTime.month(.abbreviated).day().year()))" : last.formatted(.dateTime.month(.wide).day().year()))
+            tile("Typical", Money.format(abs(refunded ? charged : total) / Double(max(visits, 1))), "a visit")
+            if refunded && thisYear < 0 {
+                tile("Refunded in \(year)", Money.format(-thisYear, cents: false), "more than was spent")
+            } else {
+                tile("In \(year)", Money.format(abs(thisYear), cents: false), "so far")
+            }
         }
     }
 
@@ -226,12 +238,20 @@ struct PlaceView: View {
     }
 
     private func monthly(_ all: [Transaction]) -> some View {
+        // Money spent rises from the line and money given back hangs below it, each in the month it
+        // happened: a refund is seen, where a single net bar would hide it (or show it as spending).
+        let received = all.reduce(0) { $0 + $1.amount } < 0
         let bars = Dictionary(grouping: all, by: \.month)
-            .map { MonthBars.Bar(month: $0.key, total: abs($0.value.reduce(0) { $0 + $1.amount })) }
+            .map { month, charges in
+                let net = charges.reduce(0) { $0 + $1.amount }
+                let spent = charges.filter { $0.amount > 0 }.reduce(0) { $0 + $1.amount }
+                return received ? MonthBars.Bar(month: month, total: abs(net)) : MonthBars.Bar(month: month, total: spent, back: spent - net)
+            }
             .sorted { $0.month < $1.month }
+        let refunds = bars.contains { $0.back > 0.005 }
         return Card {
             VStack(alignment: .leading, spacing: 14) {
-                SectionHeader(title: "Month by month")
+                SectionHeader(title: "Month by month", subtitle: refunds ? "Refunds are shown below the line, in the month they came back." : nil)
                 MonthBars(bars: bars, help: "Click a month to see its charges at \(name)") { month in
                     store.showCharges(TransactionFilter(month: month, merchant: name))
                 }
@@ -269,11 +289,18 @@ struct PlaceView: View {
         }
     }
 
+    /// "All 6 charges", or "4 charges and 2 refunds" where money has also come back from somewhere it is spent.
+    private static func heading(_ all: [Transaction]) -> String {
+        let back = all.filter { $0.amount < 0 }.count, bought = all.count - back
+        guard back > 0, bought > 0, all.reduce(0, { $0 + $1.amount }) >= 0 else { return all.count == 1 ? "The charge" : "All \(all.count) charges" }
+        return "\(bought == 1 ? "1 charge" : "\(bought) charges") and \(back == 1 ? "1 refund" : "\(back) refunds")"
+    }
+
     private func list(_ all: [Transaction]) -> some View {
         Card {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    SectionHeader(title: all.count == 1 ? "The charge" : "All \(all.count) charges")
+                    SectionHeader(title: Self.heading(all))
                     Spacer()
                     Button("Open in Transactions") {
                         store.go(to: .transactions) { store.transactionFilter = TransactionFilter(merchant: name) }

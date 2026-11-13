@@ -916,6 +916,11 @@ enum SelfTest {
               && near(months.reduce(0) { $0 + $1.totalIncome }, year.totalIncome) && near(months.reduce(0) { $0 + $1.taxes }, year.taxes))
         check("the Spending card and the spending page agree", near(year.months.reduce(0) { $0 + store.totalSpent(in: $1) }, year.spending))
         check("the category ring adds up to spending", year.months.allSatisfy { m in near(store.categoryTotals(in: m).reduce(0) { $0 + $1.total }, max(store.totalSpent(in: m), store.categoryTotals(in: m).reduce(0) { $0 + $1.total })) })
+        check("refunds are part of a month's spending, and only what came back", year.months.allSatisfy { m in
+            let back = store.refunds(in: m)
+            return back.allSatisfy { $0.amount < 0 && $0.countsAsSpending }
+                && near(store.spending(in: m).filter { $0.amount > 0 }.reduce(0) { $0 + $1.amount } + back.reduce(0) { $0 + $1.amount }, store.totalSpent(in: m))
+        })
         let run = CashFlowData.run(of: year.months, in: store)
         check("the small bars add up to the big figures", near(run.reduce(0) { $0 + $1.income }, year.totalIncome) && near(run.reduce(0) { $0 + $1.invested }, year.built))
         // The Investing card's figure and its small bars are one definition: money put to work, loan interest apart.

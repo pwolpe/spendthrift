@@ -462,7 +462,10 @@ private struct PlaceHistory: View {
     var body: some View {
         let total = transactions.reduce(0) { $0 + $1.amount }
         let bars = Dictionary(grouping: transactions, by: \.month)
-            .map { MonthBars.Bar(month: $0.key, total: max($0.value.reduce(0) { $0 + $1.amount }, 0)) }
+            .map { month, charges in
+                let net = charges.reduce(0) { $0 + $1.amount }, spent = charges.filter { $0.amount > 0 }.reduce(0) { $0 + $1.amount }
+                return total < 0 ? MonthBars.Bar(month: month, total: 0) : MonthBars.Bar(month: month, total: spent, back: spent - net)
+            }
             .sorted { $0.month < $1.month }
         let name = transactions.first?.merchant ?? ""
         VStack(alignment: .leading, spacing: 10) {
