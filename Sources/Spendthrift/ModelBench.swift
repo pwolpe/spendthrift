@@ -223,7 +223,15 @@ enum ModelBench {
         var results: [String: Result] = [:]
     }
 
-    private static func say(_ text: String) { print("BENCH " + text) }
+    /// Where progress is written as the run goes, for the script to show. (A file, not the app's own
+    /// output: a model's reply echoed there can hold bytes that stop a text filter, and the app with it.)
+    nonisolated(unsafe) private static var progress: FileHandle?
+    private static let progressLock = NSLock()
+    private static func say(_ text: String) {
+        print("BENCH " + text)
+        progressLock.lock(); defer { progressLock.unlock() }
+        try? progress?.write(contentsOf: Data((text + "\n").utf8))
+    }
 
     /// Runs `work` for every model at once (so each meets the same network and the same hour), each
     /// under its own meter, as the writing model where the job is a writing job.
@@ -590,6 +598,9 @@ enum ModelBench {
     static func run(store: BudgetStore, out: URL, setup: Setup) async {
         let began = Date.now
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        let log = out.appendingPathComponent("progress.txt")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        progress = try? FileHandle(forWritingTo: log)
         guard CloudKey.exists else { say("There is no OpenRouter key on this Mac, so there is nothing to test with."); return }
 
         // Who is in the running.

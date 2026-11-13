@@ -38,11 +38,24 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/home"
 for f in library.json orders.json; do [[ -f "$LIBRARY/$f" ]] && cp "$LIBRARY/$f" "$WORK/home/"; done
 
+mkdir -p "$WORK/out"; : > "$WORK/out/progress.txt"
 SPENDTHRIFT_HOME="$WORK/home" SPENDTHRIFT_SNAPSHOT="$WORK/snaps" SPENDTHRIFT_NO_SHOW=1 \
   SPENDTHRIFT_MODEL_BENCH="$WORK/out" SPENDTHRIFT_BENCH_MODELS="${(j:,:)MODELS}" SPENDTHRIFT_BENCH_MAKERS="$MAKERS" \
   SPENDTHRIFT_BENCH_ONLY="$ONLY" SPENDTHRIFT_BENCH_BUDGET="$BUDGET" SPENDTHRIFT_BENCH_STATEMENTS="$LIBRARY/Statements" \
   SPENDTHRIFT_BENCH_FIXTURES="$ROOT/Tests/Bench" SPENDTHRIFT_BENCH_LEDGER="$LIBRARY/spend.json" \
-  "$APP" 2> "$WORK/errors.log" | tee "$WORK/run.log" | grep --line-buffered "^BENCH " | sed -l 's/^BENCH //'
+  "$APP" > "$WORK/run.log" 2> "$WORK/errors.log" &
+app=$!
+# Show progress as it is written. (The app's own output is kept apart: see `say` in ModelBench.swift.)
+shown=0
+while true; do
+  kill -0 $app 2> /dev/null; alive=$?
+  lines=("${(@f)$(< "$WORK/out/progress.txt")}")
+  [[ -z ${lines[1]:-} ]] && lines=()
+  while (( shown < ${#lines} )); do shown=$((shown + 1)); print -r -- "${lines[shown]}"; done
+  (( alive != 0 )) && break
+  sleep 1
+done
+wait $app 2> /dev/null
 
 if [[ ! -f "$WORK/out/report.txt" ]]; then
   echo "The benchmark stopped before it finished. Last lines:"; tail -5 "$WORK/run.log" "$WORK/errors.log"; exit 1
