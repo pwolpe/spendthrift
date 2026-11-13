@@ -30,8 +30,9 @@ keeps, and how to check your work.
 10. **A decision model's answer is acted on automatically only above a measured confidence, is
     always recorded, and can always be undone.** Below that it is offered or ignored. Models in
     `Cloud/Decisions.swift` only judge; the threshold is chosen by measurement, not by feel.
-11. **Models are named in one file.** `Cloud/ModelNames.swift` holds every model name; change it there
-    and the whole app follows. The test script fails if a model is spelled out anywhere else.
+11. **Models are named in one file, and changed on evidence.** `Cloud/ModelNames.swift` holds every
+    model name; change it there and the whole app follows. The test script fails if a model is spelled
+    out anywhere else. Before changing one, run `scripts/bench-models.sh`: it says which to keep.
 12. **Plain words.** "Payee", "charge", "trip or event". Speak to the reader as "you". No jargon,
     no exclamation marks.
 

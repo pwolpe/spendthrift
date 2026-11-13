@@ -115,11 +115,26 @@ scripts/test.sh     # builds, then the app checks itself, offline
 | `Ask.swift`, `AskChat.swift` | Questions answered from figures the app computes |
 | `Views/` | The screens; `Components.swift` holds the shared pieces |
 | `SelfTest.swift` | The checks: rules, sums that must agree, and doing what a person would do |
+| `ModelBench.swift` | Which models to use, measured (`scripts/bench-models.sh`) |
 
 **Models.** Which model does which job is decided in `Cloud/ModelNames.swift`, not by the person
 using the app: a small decision model that only judges, a writing model, a second statement reader
-from a different maker, and an image model. Measure before changing one
-(`SPENDTHRIFT_DECISION_BENCH`).
+from a different maker, and an image model. When a new model comes out, one run says whether to
+change:
+
+```sh
+scripts/bench-models.sh                      # each model against the newest that could replace it
+scripts/bench-models.sh maker/model          # also try this one
+```
+
+It puts every model through the jobs it does in the app (sorting payees, reading statements, finding
+trips, answering questions; filing, grouping and judging payees for the decision model) on cases
+whose answers are known without asking a model: categories you chose or the built-in list knows,
+statements that tie to their own printed totals, trips planted in the made-up households of
+`Tests/Bench`, figures added up in code. It works on a copy of your library and pays with your key
+(a few dollars; `--budget` caps it). The report ends with the lines to put in `ModelNames.swift`, or
+"nothing". A model that is worse at any job is out; a better one wins; one that is only as good has
+to be clearly cheaper or faster. `Sources/Spendthrift/ModelBench.swift` holds the rules.
 
 **Signing.** `build.sh` signs with a certificate named `Spendthrift Signing` if your keychain has one
 (Keychain Access → Certificate Assistant → Create a Certificate, type Code Signing), so macOS keeps

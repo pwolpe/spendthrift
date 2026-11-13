@@ -28,6 +28,7 @@ final class CloudSpend {
         guard let usage else { return }
         let number = { (key: String) -> Double in (usage[key] as? Double) ?? (usage[key] as? Int).map(Double.init) ?? 0 }
         let input = Int(number("prompt_tokens")), output = Int(number("completion_tokens")), cost = number("cost")
+        ModelBench.Meter.current?.add(cost: cost)
         Task { @MainActor in shared.add(job: job, model: model, input: input, output: output, cost: cost) }
     }
 

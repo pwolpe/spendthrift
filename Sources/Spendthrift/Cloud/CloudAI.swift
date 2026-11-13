@@ -26,8 +26,13 @@ enum CloudAI {
     /// Set around a read that must not use the model (re-reading a statement only to keep its original).
     @TaskLocal static var offline = false
 
+    /// Set around the model benchmark's own requests (ModelBench.swift). While a benchmark runs, nothing
+    /// else in the app may use a model: its costs and timings would be mixed in with what is being measured.
+    @TaskLocal static var benchmarking = false
+    private static let benchmarkOnly = ProcessInfo.processInfo.environment["SPENDTHRIFT_MODEL_BENCH"] != nil
+
     static var isEnabled: Bool {
-        !offline && ProcessInfo.processInfo.environment["SPENDTHRIFT_NO_CLOUD"] == nil && CloudKey.exists
+        !offline && ProcessInfo.processInfo.environment["SPENDTHRIFT_NO_CLOUD"] == nil && CloudKey.exists && (!benchmarkOnly || benchmarking)
     }
     static var canReadStatements: Bool { isEnabled && readsStatements }
     /// The app needs a key before it takes a statement. (The self-test runs offline, on purpose, without one.)

@@ -62,8 +62,69 @@ enum SelfTest {
         check("the older subscriptions list still finds a monthly charge", steps.count == 1 && steps[0].merchant == "Netflix" && abs(steps[0].monthlyAmount - 15.49) < 0.001)
     }
 
+    /// The rules that turn a model benchmark's scores into "keep" or "switch" (ModelBench.swift).
+    private static func benchRules() {
+        typealias B = ModelBench
+        let cases = (0..<100).map { "case \($0)" }
+        func scores(_ right: Int) -> [String: Double] { Dictionary(uniqueKeysWithValues: cases.enumerated().map { ($1, $0 < right ? 1.0 : 0.0) }) }
+        check("bench: two points apart on a hundred cases is a tie; twenty is not",
+              B.compare(scores(82), with: scores(80)).standing == .same && B.compare(scores(95), with: scores(75)).standing == .better
+              && B.compare(scores(60), with: scores(80)).standing == .worse)
+        check("bench: a case a model gave no answer to counts against it",
+              B.compare(Dictionary(uniqueKeysWithValues: cases.prefix(60).map { ($0, 1.0) }), with: scores(100)).standing == .worse)
+
+        // Two planted trips, one piece of bait, ordinary life.
+        let lisbon = (0..<4).map { _ in UUID() }, vermont = (0..<4).map { _ in UUID() }, commute = (0..<4).map { _ in UUID() }, home = (0..<6).map { _ in UUID() }
+        let maybe = UUID()
+        var answers: [UUID: String] = [maybe: "?"]
+        for id in lisbon { answers[id] = "Lisbon" }; for id in vermont { answers[id] = "Vermont" }
+        for id in commute { answers[id] = "!commute" }; for id in home { answers[id] = "" }
+        let perfect = B.tripScores(answers: answers, found: [lisbon + [maybe], vermont])
+        check("bench: finding every planted trip exactly scores full marks, and a charge that could go either way costs nothing",
+              perfect["Lisbon"] == 1 && perfect["Vermont"] == 1 && perfect["left alone: commute"] == 1 && perfect["nothing invented"] == 1)
+        let sloppy = B.tripScores(answers: answers, found: [Array(lisbon.prefix(2)), Array(lisbon.suffix(2)), commute, Array(home.prefix(3))])
+        check("bench: a trip split in two, a missed trip, bait taken and a trip made of ordinary life all cost marks",
+              abs((sloppy["Lisbon"] ?? 0) - 2.0 / 3.0) < 0.001 && sloppy["Vermont"] == 0 && sloppy["left alone: commute"] == 0 && sloppy["nothing invented"] == 0.75)
+
+        func entrant(_ model: String, _ standings: [B.Standing], gain: Double = 0, cost: Double = 1, time: Double = 1) -> B.Entrant {
+            B.Entrant(model: model, standings: Dictionary(uniqueKeysWithValues: standings.enumerated().map { ("job \($0)", $1) }), gain: gain, cost: cost, time: time)
+        }
+        check("bench: a model worse at any job is never chosen, however cheap",
+              B.choose(current: "now", entrants: [entrant("cheap", [.same, .worse], cost: 0.1, time: 0.1)]).model == "now")
+        check("bench: a better model wins over a cheaper one that is only as good",
+              B.choose(current: "now", entrants: [entrant("cheap", [.same, .same], cost: 0.3), entrant("good", [.better, .same], gain: 0.05, cost: 1.4)]).model == "good")
+        check("bench: a better model that costs more than twice as much is not worth it",
+              B.choose(current: "now", entrants: [entrant("dear", [.better, .same], gain: 0.05, cost: 2.6)]).model == "now")
+        check("bench: as good and a fifth cheaper is a switch; as good and a little cheaper, or cheaper but far slower, is not",
+              B.choose(current: "now", entrants: [entrant("a", [.same], cost: 0.75)]).model == "a"
+              && B.choose(current: "now", entrants: [entrant("a", [.same], cost: 0.9)]).model == "now"
+              && B.choose(current: "now", entrants: [entrant("a", [.same], cost: 0.5, time: 3)]).model == "now")
+        check("bench: as good, no dearer and much faster is a switch",
+              B.choose(current: "now", entrants: [entrant("quick", [.same], cost: 1.05, time: 0.5)]).model == "quick")
+        check("bench: a second reader from the writing model's maker is ruled out, and replaced when it is the current one",
+              B.choose(current: "b/now", entrants: [entrant("a/cheap", [.same], cost: 0.5)]) { !$0.hasPrefix("a/") }.model == "b/now"
+              && B.choose(current: "a/now", entrants: [entrant("b/other", [.same], cost: 1.3), entrant("c/worse", [.worse], cost: 0.2)]) { !$0.hasPrefix("a/") }.model == "b/other")
+
+        let day = 86_400.0, now = Date(timeIntervalSince1970: 400 * day)
+        func listed(_ id: String, _ age: Double, _ price: Double) -> B.Listed { B.Listed(id: id, created: (400 - age) * day, price: price) }
+        let picked = B.candidates(for: listed("a/current", 50, 2), among: [
+            listed("a/current", 50, 2), listed("a/older", 80, 2), listed("a/newer-small", 20, 0.2), listed("a/flagship", 10, 8),
+            listed("b/new", 5, 1.5), listed("b/new-pro", 5, 1.5), listed("b/new:batch", 5, 0.75), listed("b/second", 30, 2), listed("b/third", 60, 2),
+            listed("b/small", 40, 0.5), listed("b/ancient", 300, 1), listed("c/unlisted-maker", 5, 1),
+        ], makers: ["a", "b"], now: now)
+        check("bench: candidates are each maker's two newest at about the price and its newest cheaper one; nothing old, dear, a variant, or older than the current model from its own maker",
+              picked == ["a/newer-small", "b/new", "b/second", "b/small"])
+        check("bench: a figure is found only as a whole figure",
+              B.mentions("You spent $1,208.87 at one place.", "$1,208.87") && !B.mentions("You spent $11,208.87.", "$1,208.87")
+              && B.mentions("There were 12 charges.", "12") && B.mentions("In all, 12.", "12") && !B.mentions("It came to $112.00 over 120 days, or 12.5 a day.", "12")
+              && B.mentions("March was the biggest.", "march"))
+        check("bench: a decision acted on wrongly costs twice what one acted on rightly gains, and holding back costs nothing",
+              B.acted(sure: true, right: true) == 1 && B.acted(sure: true, right: false) == -2 && B.acted(sure: false, right: false) == 0)
+    }
+
     private static func logic() {
         recurringRules()
+        benchRules()
         changeAndBudgetRules()
         reviewRules()
         // Who a line belongs to.
