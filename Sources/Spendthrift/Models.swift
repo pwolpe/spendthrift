@@ -228,6 +228,9 @@ struct SourceFile: Codable, Identifiable, Hashable {
     var period: String {
         guard let a = firstDate.flatMap({ DateParsing.parse($0, format: "yyyy-MM-dd") }),
               let b = lastDate.flatMap({ DateParsing.parse($0, format: "yyyy-MM-dd") }) else { return name }
+        return Self.span(a, b)
+    }
+    static func span(_ a: Date, _ b: Date) -> String {
         let sameYear = Calendar.current.component(.year, from: a) == Calendar.current.component(.year, from: b)
         let start = a.formatted(sameYear ? .dateTime.month(.abbreviated).day() : .dateTime.month(.abbreviated).day().year())
         return "\(start) – \(b.formatted(.dateTime.month(.abbreviated).day().year()))"
@@ -517,6 +520,24 @@ struct ImportIssue: Identifiable, Hashable {
     let id = UUID()
     let file: String
     let reason: String
+}
+
+/// A statement waiting in Downloads, read far enough to say what it is before anything is added.
+struct DownloadPreview: Equatable {
+    /// The account it would join, or the name a new one would be given.
+    var account: String
+    var isNew: Bool
+    var lines: Int
+    var firstDate: String?
+    var lastDate: String?
+
+    /// "48 transactions, Oct 4 – Nov 3, 2026"
+    var summary: String {
+        let count = "\(lines) \(lines == 1 ? "transaction" : "transactions")"
+        guard let a = firstDate.flatMap({ DateParsing.parse($0, format: "yyyy-MM-dd") }),
+              let b = lastDate.flatMap({ DateParsing.parse($0, format: "yyyy-MM-dd") }) else { return count }
+        return "\(count), \(SourceFile.span(a, b))"
+    }
 }
 
 struct Toast: Identifiable, Equatable {

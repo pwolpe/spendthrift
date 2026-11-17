@@ -644,6 +644,9 @@ struct DownloadsBanner: View {
                                 .buttonStyle(.borderedProminent)
                         }
                     }
+                    Text("Nothing here is added until you say so. “Don't Add” leaves the file where it is and stops asking about it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     ForEach(store.downloadCandidates, id: \.self) { url in
                         DownloadRow(url: url, prominent: store.downloadCandidates.count == 1)
                         if url != store.downloadCandidates.last { Divider() }
@@ -671,6 +674,14 @@ private struct DownloadRow: View {
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(url.lastPathComponent).font(.body.weight(.medium)).lineLimit(1)
+                if let preview = store.downloadPreviews[url] {
+                    // Whose it is comes first: a statement for an account that isn't here may not be yours at all.
+                    Label(preview.isNew ? "Would start a new account, “\(preview.account)”" : "For \(preview.account)",
+                          systemImage: preview.isNew ? "plus.rectangle.on.folder" : "creditcard")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(preview.isNew ? AnyShapeStyle(Theme.caution) : AnyShapeStyle(.secondary))
+                    Text(preview.summary).font(.caption).foregroundStyle(.secondary)
+                }
                 if let modified {
                     Text("Downloaded \(modified.formatted(.relative(presentation: .named)))")
                         .font(.caption)
@@ -678,7 +689,7 @@ private struct DownloadRow: View {
                 }
             }
             Spacer()
-            Button("Not Now") { store.dismissDownload(url) }
+            Button("Don't Add") { store.dismissDownload(url) }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
             if prominent {

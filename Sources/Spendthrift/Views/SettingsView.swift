@@ -69,12 +69,12 @@ struct SettingsView: View {
             }
 
             Section("Statements") {
-                Toggle("Add new statements from Downloads automatically", isOn: $addsAutomatically)
+                Toggle("Add statements for accounts already here without asking", isOn: $addsAutomatically)
                     .onChange(of: addsAutomatically) {
                         BudgetStore.addsDownloadsAutomatically = addsAutomatically
                         store.refreshDownloads()
                     }
-                Text("When you save a statement from your bank's website, it's added a few seconds later. Every addition can be undone.")
+                Text("A statement you save from your bank's website waits on the Overview until you add it. With this on, one for an account you already have is added a few seconds later. A statement for an account that isn't here yet always asks first, and any statement can be removed later from the Statements page.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

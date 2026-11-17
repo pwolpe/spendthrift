@@ -1289,6 +1289,28 @@ enum SelfTest {
             let n = store.transactionCount(for: account)
             store.removeAccount(account.id)
             check("remove account drops its \(n) transactions", store.transactions.count == before - n)
+            if !files.isEmpty {
+                // Its statements are no longer here. Found by the app itself, they wait to be asked about;
+                // added by the person, they come back; and any one of them can be taken out again.
+                let held = store.transactions.count, heldAccounts = store.accounts.count
+                await store.importFilesAsync(files, automatic: true)
+                check("a statement the app found, for an account that isn't here, waits to be asked about",
+                      store.transactions.count == held && store.accounts.count == heldAccounts)
+                await store.importFilesAsync(files)
+                check("the same statement, added by hand, comes in", store.transactions.count > held && store.accounts.count == heldAccounts + 1)
+                let known = Set(store.accounts.map(\.id))
+                await store.importFilesAsync(files, automatic: true)
+                check("found again with its account here, nothing is doubled", Set(store.accounts.map(\.id)) == known)
+                if let source = store.sourceFiles.max(by: { $0.added < $1.added }) {
+                    let its = store.entries(in: source).count, total = store.transactions.count
+                    let copy = store.sourceURL(source)
+                    store.removeStatement(source.id)
+                    check("removing a statement takes out its \(its) lines and its kept copy, and Downloads won't offer it again",
+                          its > 0 && store.transactions.count == total - its && !store.sourceFiles.contains { $0.id == source.id }
+                          && !FileManager.default.fileExists(atPath: copy.path) && store.library.dismissedDownloads.contains(source.id)
+                          && !store.library.importedHashes.contains(source.id))
+                }
+            }
         }
         // Saved library reloads identically.
         // Written now, rather than after the usual short wait, so this checks the file and not the timing.

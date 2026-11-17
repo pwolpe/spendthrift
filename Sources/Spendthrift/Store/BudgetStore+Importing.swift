@@ -196,6 +196,9 @@ extension BudgetStore {
                 }
                 switch outcome {
                 case .ready(let statement):
+                    // Found without being asked for, and for an account that isn't here: it may be someone
+                    // else's statement. That is the person's call, so it waits in the banner.
+                    if automatic, existingAccount(for: statement.signature, name: statement.suggestedName) == nil { throw NeedsAsking() }
                     let (accountID, isNew) = account(for: statement.signature, name: statement.suggestedName)
                     let ids = add(statement.rows, to: accountID, source: hash)
                     skippedLines += statement.skipped
@@ -228,6 +231,8 @@ extension BudgetStore {
                 }
             } catch is AlreadyHere {
                 already += 1
+            } catch is NeedsAsking {
+                // Nothing to report: the file is still in Downloads, and the banner asks about it.
             } catch {
                 // Inside a dropped folder, files that aren't statements (a tax form, a receipt) are just skipped.
                 if !(fromFolder.contains(url) && url.pathExtension.lowercased() == "pdf") {
@@ -355,7 +360,31 @@ extension BudgetStore {
         refreshDownloads()
     }
 
-    /// Finds the account a file belongs to, or makes one. Never asks.
+    /// Takes one statement back out, however long ago it was added: the lines read from it, the kept
+    /// copy, and its account when nothing else is in it. The file the person downloaded is not touched.
+    func removeStatement(_ id: String) {
+        guard let source = (library.sources ?? []).first(where: { $0.id == id }) else { return }
+        let before = library.entries.count
+        library.entries.removeAll { $0.sourceID == id }
+        let removed = before - library.entries.count
+        library.importedHashes.remove(id)
+        forgetSources { $0.id == id }
+        // Taken out on purpose: Downloads doesn't offer it again. (Adding the file by hand still works.)
+        library.dismissedDownloads.insert(id)
+        var what = "that statement"
+        if let account = library.accounts.first(where: { $0.id == source.accountID }),
+           !library.entries.contains(where: { $0.accountID == account.id }), !(library.sources ?? []).contains(where: { $0.accountID == account.id }) {
+            library.accounts.removeAll { $0.id == account.id }
+            what = account.name
+        }
+        if lastImport?.hashes.contains(id) == true { lastImport = nil }
+        if statementFocus?.sourceID == id { statementFocus = nil }
+        pruneUnusedPlaces()
+        withAnimation(.snappy) { changed() }
+        showToast("Removed \(what)\(removed > 0 ? " and \(removed == 1 ? "its charge" : "its \(removed) charges")" : "").", symbol: "trash.fill")
+        refreshDownloads()
+    }
+
     /// When a card is replaced, the bank gives it new last digits and its statements look like a new
     /// account. Two cards from the same bank where one stops just as the other starts are one card:
     /// their histories are joined under the newest number, and the old numbers keep leading here.
@@ -435,16 +464,28 @@ extension BudgetStore {
         if joined { changed() }
     }
 
+    /// Finds the account a file belongs to, or makes one. Never asks.
     func account(for signature: String, name: String) -> (UUID, isNew: Bool) {
-        if let exact = accounts.first(where: { $0.signature == signature }) { return (exact.id, false) }
-        if let former = accounts.first(where: { $0.formerSignatures?.contains(signature) == true }) { return (former.id, false) }
+        if let existing = existingAccount(for: signature, name: name) { return (existing, false) }
+        let account = Account(name: uniqueAccountName(name), signature: signature)
+        library.accounts.append(account)
+        return (account.id, true)
+    }
+
+    /// A statement found by the app itself, for an account that isn't here yet: held until the person says to add it.
+    struct NeedsAsking: Error {}
+
+    /// The account already here that a file belongs to, if there is one. Changes nothing.
+    func existingAccount(for signature: String, name: String) -> UUID? {
+        if let exact = accounts.first(where: { $0.signature == signature }) { return exact.id }
+        if let former = accounts.first(where: { $0.formerSignatures?.contains(signature) == true }) { return former.id }
         // Same file shape, and one side doesn't know its card digits: treat as the same account.
         let base = { (s: String) in s.components(separatedBy: "|#")[0] }
         let digits = { (s: String) in s.components(separatedBy: "|#").dropFirst().first }
         let related = accounts.filter { base($0.signature) == base(signature) && (digits($0.signature) == nil || digits(signature) == nil) }
         if !signature.hasPrefix("pdf:"), !signature.hasPrefix("ofx:"),
            let match = related.max(by: { ($0.lastImport ?? .distantPast) < ($1.lastImport ?? .distantPast) }) {
-            return (match.id, false)
+            return match.id
         }
         // The same card or account arriving in a different format (a CSV one month, a PDF the next):
         // same bank and same last four digits means same account.
@@ -452,11 +493,9 @@ extension BudgetStore {
            let same = accounts.first(where: {
                Self.issuer(in: $0.name) == issuer && (Self.digits(ofSignature: $0.signature) ?? Self.digits(inName: $0.name)) == four
            }) {
-            return (same.id, false)
+            return same.id
         }
-        let account = Account(name: uniqueAccountName(name), signature: signature)
-        library.accounts.append(account)
-        return (account.id, true)
+        return nil
     }
 
     static func digits(ofSignature s: String) -> String? {

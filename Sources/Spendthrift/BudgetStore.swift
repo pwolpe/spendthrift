@@ -130,6 +130,8 @@ final class BudgetStore {
     var isSuggesting = false
     var isImporting = false
     var downloadCandidates: [URL] = []
+    /// What each of those files turned out to be, once it has been read.
+    var downloadPreviews: [URL: DownloadPreview] = [:]
     /// Files from the last import that couldn't be added.
     var importIssues: [ImportIssue] = []
     /// "Reading 5 of 18" while several statements are being read.

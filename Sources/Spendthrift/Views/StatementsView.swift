@@ -45,6 +45,8 @@ struct StatementsView: View {
         .navigationSubtitle(all.isEmpty ? "" : (all.count == 1 ? "1 original" : "\(all.count) originals"))
         .onAppear { follow() }
         .onChange(of: store.statementFocus) { follow() }
+        // The last statement of the account on screen was removed: back to the accounts.
+        .onChange(of: all.count) { if let account, files(of: account).isEmpty { self.account = nil } }
         .onChange(of: account) { PageMemory.shared.statementsAccount = account }
         .onChange(of: selected) { PageMemory.shared.statementsSelected = selected }
         .onChange(of: search) { PageMemory.shared.statementsSearch = search }
@@ -376,6 +378,7 @@ struct OriginalViewer: View {
     @State private var content: Content?
     @State private var finding = Finding.none
     @State private var pulse = 0
+    @State private var confirmRemove = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -442,9 +445,20 @@ struct OriginalViewer: View {
             Menu {
                 Button("Open in \(source.isPDF || source.isPicture ? "Preview" : "Its Own App")") { openCopy() }
                 Button("Show the Kept Copy in Finder") { NSWorkspace.shared.activateFileViewerSelecting([store.sourceURL(source)]) }
+                Divider()
+                Button("Remove This Statement…", role: .destructive) { confirmRemove = true }
             } label: { Image(systemName: "ellipsis.circle") }
             .menuStyle(.borderlessButton).fixedSize()
-            .help("More ways to open this statement").accessibilityLabel("More")
+            .help("Open this statement another way, or remove it").accessibilityLabel("More")
+            .confirmationDialog("Remove “\(source.name)”?", isPresented: $confirmRemove) {
+                Button("Remove Statement", role: .destructive) {
+                    if inSheet { store.originalPeek = nil }
+                    store.removeStatement(source.id)
+                }
+            } message: {
+                let count = store.entries(in: source).count
+                Text("\(count == 1 ? "The 1 charge" : "The \(count) charges") read from it will be removed from Spendthrift, along with the kept copy. The file you downloaded isn't touched, and adding it again brings everything back.")
+            }
             if inSheet {
                 Button("Open in Statements") { store.browse(source, charge: entry?.id) }
                 Button("Done") { store.originalPeek = nil }.keyboardShortcut(.defaultAction)

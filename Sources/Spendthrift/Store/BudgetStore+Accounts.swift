@@ -32,8 +32,11 @@ extension BudgetStore {
         guard let account = accounts.first(where: { $0.id == id }) else { return }
         library.entries.removeAll { $0.accountID == id }
         library.accounts.removeAll { $0.id == id }
-        // Its statements go too, and may be added again later as if never seen.
-        library.importedHashes.subtract((library.sources ?? []).filter { $0.accountID == id }.map(\.id))
+        // Its statements go too. They may be added again by hand as if never seen, but Downloads
+        // doesn't offer them again: the account was taken out on purpose.
+        let gone = (library.sources ?? []).filter { $0.accountID == id }.map(\.id)
+        library.importedHashes.subtract(gone)
+        library.dismissedDownloads.formUnion(gone)
         forgetSources { $0.accountID == id }
         pruneUnusedPlaces()
         withAnimation(.snappy) { changed() }
@@ -77,19 +80,40 @@ extension BudgetStore {
         }
     }
 
-    /// New statements are simply added (it can be undone). Only ones that need attention, such as a locked
-    /// PDF, wait in the "New in your Downloads" banner.
+    /// New statements wait in the "New in your Downloads" banner until the person adds them. If he has
+    /// asked for it, one that belongs to an account already here is added without asking (it can be
+    /// undone); one for an account that isn't here always waits, and so does one that needs attention.
     private func foundInDownloads(_ found: [URL]) {
-        guard Self.addsDownloadsAutomatically else { downloadCandidates = Array(found.prefix(5)); return }
+        guard Self.addsDownloadsAutomatically else { downloadCandidates = Array(found.prefix(5)); describeDownloads(); return }
         let fresh = found.filter { !autoAttempted.contains($0) }
         downloadCandidates = Array(found.filter { autoAttempted.contains($0) }.prefix(5))
+        describeDownloads()
         guard !fresh.isEmpty, !isImporting else { return }
         autoAttempted.formUnion(fresh)
         Task { await importFilesAsync(fresh, automatic: true) }
     }
 
+    /// Works out what each waiting file is (whose account, how many lines, which days), so the question
+    /// can be answered without opening it. Read on this Mac only: a file that needs a model stays unnamed.
+    private func describeDownloads() {
+        downloadPreviews = downloadPreviews.filter { downloadCandidates.contains($0.key) }
+        for url in downloadCandidates where downloadPreviews[url] == nil {
+            Task {
+                let outcome = await Task.detached(priority: .utility) { () -> StatementReader.Outcome? in
+                    guard let data = try? Data(contentsOf: url) else { return nil }
+                    return try? await CloudAI.$offline.withValue(true) { try await StatementReader.read(url, data: data) }
+                }.value
+                guard case .ready(let statement)? = outcome, downloadCandidates.contains(url) else { return }
+                let existing = existingAccount(for: statement.signature, name: statement.suggestedName)
+                downloadPreviews[url] = DownloadPreview(
+                    account: existing.flatMap { id in accounts.first { $0.id == id }?.name } ?? statement.suggestedName, isNew: existing == nil,
+                    lines: statement.rows.count, firstDate: statement.rows.map(\.date).min(), lastDate: statement.rows.map(\.date).max())
+            }
+        }
+    }
+
     static var addsDownloadsAutomatically: Bool {
-        get { UserDefaults.standard.object(forKey: "addsDownloadsAutomatically") as? Bool ?? true }
+        get { UserDefaults.standard.object(forKey: "addsDownloadsAutomatically") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "addsDownloadsAutomatically") }
     }
 
