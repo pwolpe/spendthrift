@@ -8,7 +8,7 @@ enum KeywordExtractor {
         "APLPAY ", "APL*", "POS ", "POS PURCHASE ", "DEBIT CARD PURCHASE ", "DEBIT PURCHASE ",
         "PURCHASE AUTHORIZED ON ", "PURCHASE ", "CHECKCARD ", "CHECK CARD ", "DBT CRD ", "RECURRING ",
         "ZELLE PAYMENT TO ", "ZELLE PAYMENT FROM ", "ZELLE DEBIT PAYMENT TO: ", "ZELLE CREDIT PAYMENT FROM: ", "ACH DEBIT ", "ACH CREDIT ", "PAYMENT SENT ", "CKO*", "DD *", "IC* ", "LS ", "BT*", "PY *", "GDP*", "SQSP*", "FS *", "TM *",
-        "SUMUP *", "SUMUP*", "SUMUP  *", "ZETTLE_*", "ZETTLE *", "IZ *", "IZ*", "CLOVER*", "CLV*", "STRIPE*", "STRIPE *", "SHOPIFY*", "WPY*", "EB *", "FSP*", "BLT*", "TOCK*", "RESY*", "OLO*", "CHOWNOW*", "MINDBODY*", "VAGARO*", "BKG*", "WWW.", "DNH*",
+        "SUMUP *", "SUMUP*", "SUMUP  *", "ZETTLE_*", "ZETTLE *", "IZ *", "IZ*", "CLOVER*", "CLV*", "STRIPE*", "STRIPE *", "SHOPIFY*", "WPY*", "EB *", "FSP*", "BLT*", "TOCK AT*", "TOCK AT", "TOCK*", "LEVELUP*", "RESY*", "OLO*", "CHOWNOW*", "MINDBODY*", "VAGARO*", "BKG*", "WWW.", "DNH*",
     ]
 
     static func keyword(for description: String) -> String { keyword(for: description, maxTokens: 3) }

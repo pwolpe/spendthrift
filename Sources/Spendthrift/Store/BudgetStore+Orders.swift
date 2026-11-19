@@ -315,6 +315,7 @@ extension BudgetStore {
             report.append("removed \(captions.count) check-picture captions (\(Money.format(captions.reduce(0) { $0 + abs($1.amount) })))")
         }
         var moved = 0
+        let seen = wordsSeen()
         for i in library.entries.indices {
             var entry = library.entries[i]
             if let footer = entry.description.range(of: " 24 hour automated banking", options: .caseInsensitive) {
@@ -324,7 +325,7 @@ extension BudgetStore {
             let upper = entry.description.uppercased()
             guard upper.range(of: #"^(?:RECURRING )?CARD PURCHASE"#, options: .regularExpression) != nil || upper.hasPrefix("MOBILE DEPOSIT") else { continue }
             if library.merchants[entry.merchantKey]?.source == .user || entry.merchantKey.hasPrefix("own:") { continue }
-            let key = MerchantResolver.key(for: entry.description, amount: entry.amount, existingKeys: library.merchants.keys)
+            let key = MerchantResolver.key(for: entry.description, amount: entry.amount, existingKeys: library.merchants.keys, seen: seen)
             guard key != entry.merchantKey else { continue }
             if library.merchants[key] == nil {
                 library.merchants[key] = MerchantResolver.instant(description: entry.description, amount: entry.amount, bankCategory: entry.bankCategory)

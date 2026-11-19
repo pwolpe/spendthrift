@@ -160,9 +160,9 @@ extension BudgetStore {
 
     /// One way a payee is written turns out to be someone else (a hotel gathered under a streaming
     /// service of the same name). Every charge written that way moves to its own payee, and so does
-    /// any that arrives later.
+    /// any that arrives later. Charges on accounts kept apart count too: they are still read and named.
     func separate(spelling: String, from payee: String, as name: String, category: Category?) {
-        let ids = Set(transactions.filter { $0.merchant == payee && MerchantResolver.spelling($0.description) == spelling }.map(\.id))
+        let ids = Set((transactions + setApart).filter { $0.merchant == payee && MerchantResolver.spelling($0.description) == spelling }.map(\.id))
         guard let moved = moveToOwnPayee(ids, name: name, category: category) else { return }
         library.spellings = (library.spellings ?? [:]).merging([spelling.uppercased(): moved.key]) { _, new in new }
         changed()

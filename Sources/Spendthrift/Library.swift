@@ -260,7 +260,6 @@ struct LossyDictionary<T: Decodable>: Decodable {
 /// Order of trust: well-known businesses, then the bank's own category, then generic words.
 /// Anything left over goes to the model (see `BudgetStore.sortRemaining`).
 enum MerchantResolver {
-    /// - existingKeys: places already known, so "DICKSON'S FARMSTAND M" joins "DICKSON'S FARMSTAND".
     /// A statement line with what changes from one charge to the next (long runs of digits, reference
     /// marks) taken out: the way a payee is written, as opposed to one charge of it.
     static func spelling(_ description: String) -> String {
@@ -268,15 +267,46 @@ enum MerchantResolver {
             .split(separator: " ").joined(separator: " ")
     }
 
-    static func key(for description: String, amount: Double, existingKeys: some Collection<String>, spellings: [String: String] = [:]) -> String {
+    /// - seen: the words already on the lines of a payee, by its key. A line only joins a payee on
+    ///   evidence that payee's own lines give (see `joins`); with nothing to go on it stays apart, and
+    ///   the model that sorts payees looks at it for itself.
+    static func key(for description: String, amount: Double, existingKeys: some Collection<String>, spellings: [String: String] = [:],
+                    seen: (String) -> Set<String> = { _ in [] }) -> String {
         if let own = spellings[spelling(description).uppercased()] { return own }
         if let known = KnownMerchants.match(description, amount: amount, generic: false) { return "known:" + known.name }
         // A wire is whoever it was sent to, not the words every wire begins with.
         if let recipient = KeywordExtractor.wireRecipient(description) { return "WIRE " + recipient }
         let keyword = KeywordExtractor.keyword(for: description)
-        let shorter = existingKeys.filter { $0.count >= 6 && $0 != keyword && !$0.hasPrefix("known:") && keyword.hasPrefix($0) }
-        return shorter.min { $0.count < $1.count } ?? keyword
+        // The closest payee this line can be shown to belong to: the one that accounts for most of it.
+        let closest = existingKeys.filter { keyword.hasPrefix($0) && joins(keyword, to: $0, seen: seen($0)) }
+        return closest.max { ($0.count, $1) < ($1.count, $0) } ?? keyword
     }
+
+    /// Whether a line belongs with a payee whose key its own keyword begins with.
+    ///
+    /// Beginning with the same letters is not enough: "UNITEDHEALTHCARE PREMIUM" begins with "UNITED",
+    /// and "CHELSEA WINE COUNTRY" with the "CHELSEA" of a gym. Being wrong here files one business's
+    /// money under another's name without anyone being asked, so a line joins only when
+    /// - the bank cut the payee's name short and this line merely finishes the word
+    ///   ("BLUE BOTTLE COF" and "BLUE BOTTLE COFFEE"). One word cut short is too little to go on; and
+    /// - every further word is one already seen on that payee's lines ("LA BERGAMOTE NEW" when its
+    ///   lines read "LA BERGAMOTE 0000 NEW YORK NY"): a place or a form of the name, not somebody new.
+    static func joins(_ keyword: String, to key: String, seen: Set<String>) -> Bool {
+        guard key.count >= 6, key != keyword, keyword.hasPrefix(key), !key.hasPrefix("known:") else { return false }
+        var rest = keyword.dropFirst(key.count)
+        if let last = key.last, let next = rest.first, inWord(last), inWord(next) {
+            guard key.contains(" ") else { return false }
+            rest = rest.drop(while: inWord)
+        }
+        return words(String(rest)).isSubset(of: seen)
+    }
+
+    /// The words of a statement line, upper case: runs of letters and digits, an apostrophe kept inside its word.
+    static func words(_ text: String) -> Set<String> {
+        Set(text.uppercased().split(whereSeparator: { !inWord($0) }).map(String.init))
+    }
+
+    private static func inWord(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "'" }
 
     /// A category we can give immediately, without AI. Nil means "ask the AI".
     static func instant(description: String, amount: Double, bankCategory: String?) -> MerchantInfo {

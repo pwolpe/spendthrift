@@ -218,13 +218,24 @@ enum DebugHooks {
         // SPENDTHRIFT_SEPARATE="Paramount+|hotel|Paramount Hotel|Travel": every way the payee is written that
         // contains the word becomes the named payee, as the "Not this payee?" link on a payee's page does.
         if let spec = env["SPENDTHRIFT_SEPARATE"]?.split(separator: "|").map(String.init), spec.count == 4 {
-            let spellings = Set(store.transactions.filter { $0.merchant == spec[0] }.map { MerchantResolver.spelling($0.description) })
+            let everything = store.transactions + store.setApart
+            let spellings = Set(everything.filter { $0.merchant == spec[0] }.map { MerchantResolver.spelling($0.description) })
                 .filter { $0.localizedCaseInsensitiveContains(spec[1]) }
             for spelling in spellings.sorted() {
                 store.separate(spelling: spelling, from: spec[0], as: spec[2], category: Category.pickable.first { $0.rawValue == spec[3] })
                 print("SEPARATE \(spelling) -> \(spec[2])")
             }
-            print("SEPARATE now: \(spec[0]) \(store.transactions.filter { $0.merchant == spec[0] }.count), \(spec[2]) \(store.transactions.filter { $0.merchant == spec[2] }.count)")
+            let after = store.transactions + store.setApart
+            print("SEPARATE now: \(spec[0]) \(after.filter { $0.merchant == spec[0] }.count), \(spec[2]) \(after.filter { $0.merchant == spec[2] }.count)")
+            try? await Task.sleep(for: .seconds(2))
+            NSApp.terminate(nil); return
+        }
+        // SPENDTHRIFT_COMBINE="United|United Airlines": two names for one business; the first becomes part of the
+        // second, as "Combine with…" on a payee's page does.
+        if let spec = env["SPENDTHRIFT_COMBINE"]?.split(separator: "|").map(String.init), spec.count == 2 {
+            store.combinePlaces(spec[0], into: spec[1])
+            let all = store.transactions + store.setApart
+            print("COMBINE now: \(spec[0]) \(all.filter { $0.merchant == spec[0] }.count), \(spec[1]) \(all.filter { $0.merchant == spec[1] }.count)")
             try? await Task.sleep(for: .seconds(2))
             NSApp.terminate(nil); return
         }

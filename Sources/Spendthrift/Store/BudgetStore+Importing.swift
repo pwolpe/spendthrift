@@ -510,6 +510,21 @@ extension BudgetStore {
         return String(name[r].suffix(4))
     }
 
+    /// The words on the lines each payee already has, worked out only for the payees asked about:
+    /// what `MerchantResolver.joins` goes on. A payee with no lines yet has the one it was made from.
+    func wordsSeen() -> (String) -> Set<String> {
+        let lines = Dictionary(grouping: library.entries, by: \.merchantKey)
+        let merchants = library.merchants
+        var known: [String: Set<String>] = [:]
+        return { key in
+            if let words = known[key] { return words }
+            var words = MerchantResolver.words(merchants[key]?.sample ?? "")
+            for entry in lines[key] ?? [] { words.formUnion(MerchantResolver.words(entry.description)) }
+            known[key] = words
+            return words
+        }
+    }
+
     /// Adds lines the account doesn't already have, and sorts each one on the spot.
     /// Identical lines that legitimately repeat (two $5 coffees in a day) are kept:
     /// only as many copies are skipped as the account already holds.
@@ -545,6 +560,7 @@ extension BudgetStore {
         }
         var keyCache: [String: String] = [:]
         var ids: Set<UUID> = []
+        let seen = wordsSeen()
         for row in rows {
             let amount = library.accounts[a].invertAmounts == true ? -row.amount : row.amount
             let key: String
@@ -553,7 +569,7 @@ extension BudgetStore {
             if let cached = keyCache[cacheKey] { key = cached }
             else {
                 key = MerchantResolver.key(for: row.description, amount: amount, existingKeys: library.merchants.keys,
-                                           spellings: (library.spellings ?? [:]).filter { library.merchants[$0.value] != nil })
+                                           spellings: (library.spellings ?? [:]).filter { library.merchants[$0.value] != nil }, seen: seen)
                 keyCache[cacheKey] = key
             }
             var entry = LedgerEntry(accountID: accountID, date: row.date, description: row.description, amount: amount,

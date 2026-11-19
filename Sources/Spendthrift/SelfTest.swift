@@ -328,10 +328,30 @@ enum SelfTest {
               && KnownMerchants.match("ACME DISTRIBUTION", amount: -900, generic: false)?.category == .investmentIncome
               && KnownMerchants.match("ACME DISTRIBUTION", amount: 900, generic: false) == nil
               && KnownMerchants.match("CHASE CREDIT CRD AUTOPAY 1234", amount: 500, generic: false)?.name == "Chase Card Payment")
-        check("known: the bank's own category, and places joining places",
+        check("known: the bank's own category",
               BankCategory.map("Food & Drink") == .dining && BankCategory.map("Gas/Automotive") == .transportation
-              && BankCategory.map("Bills & Utilities") == .bills && BankCategory.map("Zzz") == nil
-              && MerchantResolver.key(for: "DICKSON'S FARMSTAND M", amount: 10, existingKeys: ["DICKSON'S FARMSTAND"]) == "DICKSON'S FARMSTAND")
+              && BankCategory.map("Bills & Utilities") == .bills && BankCategory.map("Zzz") == nil)
+        // A line joins a payee its text begins with only on what that payee's own lines show.
+        let bakery = MerchantResolver.words("LA BERGAMOTE 0000 NEW YORK NY"), gym = MerchantResolver.words("CHELSEA A23 AARMY.COM NY")
+        func joined(_ line: String, _ keys: [String], _ seen: Set<String> = []) -> String {
+            MerchantResolver.key(for: line, amount: 10, existingKeys: keys, seen: { _ in seen })
+        }
+        check("a name the bank cut short is finished by the longer line; one word cut short is too little to go on",
+              joined("SQ *BLUE BOTTLE COFFEE NEW YORK NY", ["BLUE BOTTLE COF"]) == "BLUE BOTTLE COF"
+              && joined("Unitedhealthcare Premium PPD ID: 1836282001", ["UNITED"]) == "UNITEDHEALTHCARE PREMIUM PPD"
+              && joined("HUDSONNEWS ST1104 NEWARK NJ", ["HUDSON"]) == "HUDSONNEWS")
+        check("further words join a payee only when its own lines already carry them",
+              joined("LA BERGAMOTE NEW YORK NY", ["LA BERGAMOTE"], bakery) == "LA BERGAMOTE"
+              && joined("LA BERGAMOTE NEW YORK NY", ["LA BERGAMOTE"]) == "LA BERGAMOTE NEW"
+              && joined("CHELSEA WINE COUNTRY NEW YORK NY", ["CHELSEA"], gym) == "CHELSEA WINE COUNTRY"
+              && joined("UNION SQUARE WINES NEW YORK NY", ["UNION SQUARE"], MerchantResolver.words("TST* UNION SQUARE CAFE NEW YORK NY")) == "UNION SQUARE WINES"
+              && joined("SAXELBY CHEESEMONGERS-CHE NEW YORK NY", ["SAXELBY CHEESEMONGERS-CH"], bakery) == "SAXELBY CHEESEMONGERS-CH")
+        check("of two payees a line could join, the one that accounts for more of it",
+              joined("WESTSIDE MARKET NEW YORK NY", ["WESTSIDE", "WESTSIDE MARKET"], bakery) == "WESTSIDE MARKET")
+        check("a booking service's lead-in is not the payee",
+              KeywordExtractor.keyword(for: "TOCK ATASKA ASKANYC.COM NY") == "ASKA ASKANYC.COM NY"
+              && KeywordExtractor.keyword(for: "TOCK AT*ATOMIX CHICAGO IL") == "ATOMIX CHICAGO IL"
+              && KeywordExtractor.keyword(for: "LEVELUP*CHOPTCREATIVES 855-466-5585 MA") == "CHOPTCREATIVES")
         check("known: T-Mobile is not Mobil", KnownMerchants.match("T-MOBILE*BILL 800-937-8997", generic: false)?.name == "T-Mobile"
               && KnownMerchants.match("MOBIL 12345 NEWARK NJ", generic: false)?.name == "Mobil")
         check("known: a brand must be a word of its own",
@@ -1198,6 +1218,17 @@ enum SelfTest {
                   && store.transactions.filter { $0.merchant == payee }.count == before - moving.count
                   && moved.first.map { MerchantResolver.key(for: $0.description, amount: $0.amount, existingKeys: [String](), spellings: [spelling.uppercased(): $0.merchantKey]) == $0.merchantKey } == true)
         } else { print("SELFTEST SKIP separate one spelling (no payee here is written two ways)") }
+        // The same on an account kept apart: its charges are in nobody's totals, but a payee there can still be told from another.
+        if let account = store.accounts.first(where: { a in a.apart == nil && store.transactions.contains { $0.accountID == a.id } }) {
+            store.keepApart(account.id, as: "Selftest")
+            if let line = store.setApart.first(where: { $0.accountID == account.id }) {
+                let spelling = MerchantResolver.spelling(line.description)
+                let moving = store.setApart.filter { $0.merchant == line.merchant && MerchantResolver.spelling($0.description) == spelling }.count
+                store.separate(spelling: spelling, from: line.merchant, as: "Somebody Kept Apart", category: .bills)
+                check("separate one spelling on an account kept apart", moving > 0 && store.setApart.filter { $0.merchant == "Somebody Kept Apart" }.count == moving)
+            }
+            store.keepApart(account.id, as: nil)
+        }
         // Back always returns to where a link was followed from, however deep; the sidebar is a fresh start.
         if let payee = store.transactions.first?.merchant, let month = store.months.first {
             store.selection = .overview
